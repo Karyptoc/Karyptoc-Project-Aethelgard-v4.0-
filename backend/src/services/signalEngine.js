@@ -303,9 +303,64 @@ async function generateSignalsForAllPairs() {
   return signals;
 }
 
+
+/**
+ * Generate signal from OHLCV data pushed directly by bridge
+ */
+async function generateSignalFromOHLCV(symbol, ohlcvData) {
+  try {
+    const multiTFData = {};
+    for (const [tf, bars] of Object.entries(ohlcvData)) {
+      if (bars && bars.length > 50) {
+        const indicators = calculateIndicators(bars);
+        multiTFData[tf] = {
+          bars_count: bars.length,
+          latest_close: bars[bars.length - 1].close,
+          latest_open: bars[bars.length - 1].open,
+          indicators
+        };
+      }
+    }
+    if (Object.keys(multiTFData).length === 0) {
+      await log("warning", "signalEngine", `Empty OHLCV data for ${symbol}`);
+      return null;
+    }
+    const analysis = await analyzeWithClaude(symbol, multiTFData);
+    if (!analysis || analysis.direction === "HOLD") {
+      await log("info", "signalEngine", `${symbol}: HOLD or no analysis`);
+      return null;
+    }
+    const h1 = multiTFData["H1"] || multiTFData["M15"];
+    const atr = h1?.indicators?.atr14;
+    const currentPrice = h1?.indicators?.currentPrice;
+    let stopLoss, takeProfit;
+    if (atr && currentPrice) {
+      const sl = calculateStopLoss({ direction: analysis.direction, entryPrice: currentPrice, atr, symbol, multiplier: 1.5 });
+      stopLoss = sl.stopLoss;
+      takeProfit = calculateTakeProfit({ direction: analysis.direction, entryPrice: currentPrice, stopLoss, rrRatio: Math.max(analysis.risk_assessment?.reward_risk_ratio || 2.0, 1.8) });
+    }
+    const signal = {
+      symbol, direction: analysis.direction, entry_price: currentPrice,
+      stop_loss: stopLoss, take_profit: takeProfit, confidence: analysis.confidence,
+      regime: analysis.regime, regime_detail: analysis.regime_detail,
+      sentiment_score: analysis.sentiment_score, timeframe: analysis.timeframe_primary || "H1",
+      rationale: analysis.rationale, status: "pending",
+      expires_at: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
+    };
+    const { data, error } = await supabaseAdmin.from("signals").insert(signal).select().single();
+    if (error) throw error;
+    await log("info", "signalEngine", `Signal: ${analysis.direction} ${symbol} @ ${currentPrice} | Conf: ${analysis.confidence}`);
+    return data;
+  } catch (e) {
+    await log("error", "signalEngine", `generateSignalFromOHLCV failed for ${symbol}: ${e.message}`);
+    return null;
+  }
+}
+
 module.exports = {
   generateSignalForPair,
   generateSignalsForAllPairs,
+  generateSignalFromOHLCV,
   getAndClearCommands,
   acknowledgeCommand
 };

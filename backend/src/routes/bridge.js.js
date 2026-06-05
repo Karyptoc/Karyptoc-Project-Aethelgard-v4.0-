@@ -20,25 +20,21 @@ function verifyBridgeSecret(req, res, next) {
 
 router.use(verifyBridgeSecret);
 
-// GET /api/bridge/accounts - bridge pulls account list to connect
+// GET /api/bridge/accounts
 router.get("/accounts", async (req, res) => {
   try {
     const { data: accounts, error } = await supabaseAdmin
       .from("mt5_accounts")
       .select("id, login, server, account_type, risk_percent, max_daily_loss, max_trades, allowed_pairs")
       .eq("is_active", true);
-
     if (error) throw error;
-
-    // Note: passwords stored encrypted — for now return from env-based config
-    // In production, use encrypted vault. For Phase 1, bridge has passwords in its own .env
     res.json({ accounts: accounts || [] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// POST /api/bridge/status - bridge reports connection status
+// POST /api/bridge/status
 router.post("/status", async (req, res) => {
   const { account_id, connected } = req.body;
   try {
@@ -46,18 +42,16 @@ router.post("/status", async (req, res) => {
       .from("mt5_accounts")
       .update({ is_connected: connected, last_sync: new Date().toISOString() })
       .eq("id", account_id);
-
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// POST /api/bridge/sync - bridge pushes live account data
+// POST /api/bridge/sync
 router.post("/sync", async (req, res) => {
   const { account_id, account_info, positions, timestamp } = req.body;
   try {
-    // Update account metrics
     await supabaseAdmin
       .from("mt5_accounts")
       .update({
@@ -73,10 +67,8 @@ router.post("/sync", async (req, res) => {
       })
       .eq("id", account_id);
 
-    // Sync open positions
     if (positions && positions.length > 0) {
       for (const pos of positions) {
-        // Upsert by ticket
         const { data: existing } = await supabaseAdmin
           .from("trades")
           .select("id")
@@ -107,7 +99,6 @@ router.post("/sync", async (req, res) => {
         }
       }
 
-      // Mark trades as closed if not in positions anymore
       const activeTickets = positions.map(p => p.ticket);
       const { data: openTrades } = await supabaseAdmin
         .from("trades")
@@ -134,12 +125,24 @@ router.post("/sync", async (req, res) => {
   }
 });
 
-// GET /api/bridge/commands - bridge polls for pending commands
+// POST /api/bridge/ohlcv - bridge pushes OHLCV data, backend generates signal immediately
+router.post("/ohlcv", async (req, res) => {
+  const { symbol, data } = req.body;
+  try {
+    await log("info", "bridge", `Received OHLCV data for ${symbol}, generating signal...`);
+    const signal = await signalEngine.generateSignalFromOHLCV(symbol, data);
+    res.json({ ok: true, signal: signal ? signal.id : null });
+  } catch (e) {
+    await log("error", "bridge", `OHLCV signal error: ${e.message}`);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/bridge/commands
 router.get("/commands", async (req, res) => {
   try {
     const commands = signalEngine.getAndClearCommands();
 
-    // Also check for pending signals to execute
     const { data: pendingSignals } = await supabaseAdmin
       .from("signals")
       .select("*")
@@ -151,7 +154,6 @@ router.get("/commands", async (req, res) => {
       for (const signal of pendingSignals) {
         if (signal.direction === "HOLD") continue;
 
-        // Get all active connected accounts
         const { data: accounts } = await supabaseAdmin
           .from("mt5_accounts")
           .select("*")
@@ -165,12 +167,14 @@ router.get("/commands", async (req, res) => {
           const cbCheck = await checkCircuitBreaker(account.id);
           if (!cbCheck.allowed) continue;
 
+          const stopPips = signal.stop_loss
+            ? Math.abs(signal.entry_price - signal.stop_loss) / 0.0001
+            : 20;
+
           const sizing = calculatePositionSize({
-            balance: account.balance,
+            balance: account.balance || 500,
             riskPercent: account.risk_percent || 1.0,
-            stopLossPips: signal.stop_loss
-              ? Math.abs(signal.entry_price - signal.stop_loss) / 0.0001
-              : 20,
+            stopLossPips: stopPips,
             symbol: signal.symbol
           });
 
@@ -189,7 +193,6 @@ router.get("/commands", async (req, res) => {
           });
         }
 
-        // Mark signal as executed
         await supabaseAdmin
           .from("signals")
           .update({ status: "executed" })
@@ -203,18 +206,16 @@ router.get("/commands", async (req, res) => {
   }
 });
 
-// POST /api/bridge/commands/:id/ack - bridge acknowledges command execution
+// POST /api/bridge/commands/:id/ack
 router.post("/commands/:id/ack", async (req, res) => {
   const { id } = req.params;
   const result = req.body;
 
   signalEngine.acknowledgeCommand(id, result);
 
-  // If it was a trade execution, log it
   if (id.startsWith("sig_") && result.success) {
     const parts = id.split("_");
     const accountId = parts[parts.length - 1];
-
     await supabaseAdmin.from("trades").insert({
       account_id: accountId,
       ticket: result.ticket,

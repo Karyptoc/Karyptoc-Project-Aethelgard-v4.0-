@@ -1,7 +1,6 @@
 """
-AETHELGARD - MT5 Python Bridge
-Runs on your Windows machine. Connects MT5 accounts to the platform.
-Install: pip install MetaTrader5 requests python-dotenv schedule
+AETHELGARD - MT5 Python Bridge v2
+Pushes OHLCV data directly to backend for signal generation.
 """
 
 import MetaTrader5 as mt5
@@ -11,31 +10,36 @@ import time
 import schedule
 import logging
 import os
+import sys
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Configuration ──────────────────────────────────────────────────────────────
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:4000")
 BRIDGE_SECRET = os.getenv("BRIDGE_SECRET", "change_this_secret")
 SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "30"))
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+MT5_LOGIN = os.getenv("MT5_LOGIN")
+MT5_PASSWORD = os.getenv("MT5_PASSWORD")
+MT5_SERVER = os.getenv("MT5_SERVER")
 
 logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL),
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler("aethelgard_bridge.log"),
-        logging.StreamHandler()
+        logging.FileHandler("aethelgard_bridge.log", encoding="utf-8"),
+        logging.StreamHandler(open(sys.stdout.fileno(), mode='w', encoding='utf-8', closefd=False))
     ]
 )
 log = logging.getLogger("AethelgardBridge")
 
-# ── Account Registry ───────────────────────────────────────────────────────────
-# Populated dynamically from backend
 active_accounts = {}
-
+PAIRS = ["XAUUSD", "EURUSD", "GBPUSD", "USDJPY"]
+TIMEFRAMES = {
+    "M15": mt5.TIMEFRAME_M15,
+    "H1": mt5.TIMEFRAME_H1,
+    "H4": mt5.TIMEFRAME_H4,
+}
 
 def api_headers():
     return {
@@ -43,30 +47,10 @@ def api_headers():
         "x-bridge-secret": BRIDGE_SECRET
     }
 
-
-def fetch_accounts_from_backend():
-    """Pull account list from backend API"""
-    try:
-        r = requests.get(
-            f"{BACKEND_URL}/api/bridge/accounts",
-            headers=api_headers(),
-            timeout=10
-        )
-        if r.status_code == 200:
-            return r.json().get("accounts", [])
-        else:
-            log.warning(f"Failed to fetch accounts: {r.status_code}")
-            return []
-    except Exception as e:
-        log.error(f"Cannot reach backend: {e}")
-        return []
-
-
-def connect_account(account: dict) -> bool:
-    """Initialize MT5 connection for a single account"""
+def connect_account(account):
     login = int(account["login"])
-    password = account["password"]
-    server = account["server"]
+    password = account.get("password") or MT5_PASSWORD
+    server = account.get("server") or MT5_SERVER
     account_id = account["id"]
 
     if not mt5.initialize():
@@ -75,36 +59,43 @@ def connect_account(account: dict) -> bool:
 
     authorized = mt5.login(login, password=password, server=server)
     if not authorized:
-        log.error(f"MT5 login failed for {login}@{server}: {mt5.last_error()}")
+        log.error(f"MT5 login failed for {login}: {mt5.last_error()}")
         report_connection_status(account_id, False)
         return False
 
-    log.info(f"✅ Connected: {login}@{server}")
-    active_accounts[account_id] = {
-        "login": login,
-        "server": server,
-        "account_id": account_id
-    }
+    log.info(f"Connected: {login}@{server}")
+    active_accounts[account_id] = {"login": login, "server": server, "account_id": account_id}
     report_connection_status(account_id, True)
     return True
 
+def connect_from_env():
+    """Connect directly from .env credentials"""
+    if not MT5_LOGIN or not MT5_PASSWORD or not MT5_SERVER:
+        log.warning("No MT5 credentials in .env file")
+        return False
 
-def report_connection_status(account_id: str, connected: bool):
-    """Report connection status back to backend"""
+    if not mt5.initialize():
+        log.error(f"MT5 initialize() failed: {mt5.last_error()}")
+        return False
+
+    authorized = mt5.login(int(MT5_LOGIN), password=MT5_PASSWORD, server=MT5_SERVER)
+    if not authorized:
+        log.error(f"MT5 login failed: {mt5.last_error()}")
+        return False
+
+    log.info(f"Connected: {MT5_LOGIN}@{MT5_SERVER}")
+    account_id = f"env_{MT5_LOGIN}"
+    active_accounts[account_id] = {"login": int(MT5_LOGIN), "server": MT5_SERVER, "account_id": account_id}
+    return True
+
+def report_connection_status(account_id, connected):
     try:
-        requests.post(
-            f"{BACKEND_URL}/api/bridge/status",
-            headers=api_headers(),
-            json={"account_id": account_id, "connected": connected},
-            timeout=5
-        )
+        requests.post(f"{BACKEND_URL}/api/bridge/status", headers=api_headers(),
+            json={"account_id": account_id, "connected": connected}, timeout=5)
     except Exception as e:
         log.warning(f"Could not report status: {e}")
 
-
-def get_account_info(login: int) -> dict | None:
-    """Get live account metrics from MT5"""
-    mt5.login(login)  # ensure correct account active
+def get_account_info():
     info = mt5.account_info()
     if info is None:
         return None
@@ -118,10 +109,7 @@ def get_account_info(login: int) -> dict | None:
         "leverage": info.leverage
     }
 
-
-def get_open_positions(login: int) -> list:
-    """Get all open positions for an account"""
-    mt5.login(login)
+def get_open_positions():
     positions = mt5.positions_get()
     if positions is None:
         return []
@@ -142,33 +130,10 @@ def get_open_positions(login: int) -> list:
         })
     return result
 
-
-def get_price(symbol: str) -> dict | None:
-    """Get current bid/ask for a symbol"""
-    tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        return None
-    return {
-        "symbol": symbol,
-        "bid": tick.bid,
-        "ask": tick.ask,
-        "spread": round((tick.ask - tick.bid) * 10000, 1),
-        "time": datetime.fromtimestamp(tick.time, tz=timezone.utc).isoformat()
-    }
-
-
-def get_ohlcv(symbol: str, timeframe_str: str = "H1", count: int = 100) -> list:
-    """Get OHLCV bars for signal generation"""
-    tf_map = {
-        "M1": mt5.TIMEFRAME_M1,
-        "M5": mt5.TIMEFRAME_M5,
-        "M15": mt5.TIMEFRAME_M15,
-        "M30": mt5.TIMEFRAME_M30,
-        "H1": mt5.TIMEFRAME_H1,
-        "H4": mt5.TIMEFRAME_H4,
-        "D1": mt5.TIMEFRAME_D1,
-    }
-    tf = tf_map.get(timeframe_str, mt5.TIMEFRAME_H1)
+def get_ohlcv(symbol, timeframe_key, count=100):
+    tf = TIMEFRAMES.get(timeframe_key, mt5.TIMEFRAME_H1)
+    if not mt5.symbol_select(symbol, True):
+        return []
     rates = mt5.copy_rates_from_pos(symbol, tf, 0, count)
     if rates is None:
         return []
@@ -176,29 +141,22 @@ def get_ohlcv(symbol: str, timeframe_str: str = "H1", count: int = 100) -> list:
     for r in rates:
         result.append({
             "time": datetime.fromtimestamp(r["time"], tz=timezone.utc).isoformat(),
-            "open": r["open"],
-            "high": r["high"],
-            "low": r["low"],
-            "close": r["close"],
+            "open": float(r["open"]),
+            "high": float(r["high"]),
+            "low": float(r["low"]),
+            "close": float(r["close"]),
             "volume": int(r["tick_volume"])
         })
     return result
 
-
-def execute_trade(account_id: str, order: dict) -> dict:
-    """Execute a trade order on MT5"""
-    account = active_accounts.get(account_id)
-    if not account:
-        return {"success": False, "error": "Account not connected"}
-
+def execute_trade(account_id, order):
     symbol = order["symbol"]
     direction = order["direction"]
     volume = float(order["volume"])
-    sl = float(order.get("stop_loss", 0))
-    tp = float(order.get("take_profit", 0))
+    sl = float(order.get("stop_loss") or 0)
+    tp = float(order.get("take_profit") or 0)
     comment = order.get("comment", "Aethelgard")
 
-    # Ensure symbol is selected
     if not mt5.symbol_select(symbol, True):
         return {"success": False, "error": f"Symbol {symbol} not available"}
 
@@ -211,200 +169,133 @@ def execute_trade(account_id: str, order: dict) -> dict:
 
     request = {
         "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": symbol,
-        "volume": volume,
-        "type": order_type,
-        "price": price,
-        "sl": sl,
-        "tp": tp,
-        "deviation": 20,
-        "magic": 20260101,
-        "comment": comment,
+        "symbol": symbol, "volume": volume, "type": order_type,
+        "price": price, "sl": sl, "tp": tp, "deviation": 20,
+        "magic": 20260101, "comment": comment,
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
     }
 
     result = mt5.order_send(request)
-
     if result.retcode != mt5.TRADE_RETCODE_DONE:
         log.error(f"Trade failed [{symbol} {direction}]: {result.comment}")
-        return {
-            "success": False,
-            "error": result.comment,
-            "retcode": result.retcode
-        }
+        return {"success": False, "error": result.comment, "retcode": result.retcode}
 
-    log.info(f"✅ Trade executed: {direction} {volume} {symbol} @ {result.price} | Ticket: {result.order}")
-    return {
-        "success": True,
-        "ticket": result.order,
-        "price": result.price,
-        "volume": result.volume
-    }
+    log.info(f"Trade executed: {direction} {volume} {symbol} @ {result.price} | Ticket: {result.order}")
+    return {"success": True, "ticket": result.order, "price": result.price, "volume": result.volume}
 
-
-def close_trade(account_id: str, ticket: int, symbol: str, direction: str, volume: float) -> dict:
-    """Close an open position"""
-    account = active_accounts.get(account_id)
-    if not account:
-        return {"success": False, "error": "Account not connected"}
-
-    tick = mt5.symbol_info_tick(symbol)
-    if tick is None:
-        return {"success": False, "error": "Cannot get price"}
-
-    close_type = mt5.ORDER_TYPE_SELL if direction == "BUY" else mt5.ORDER_TYPE_BUY
-    price = tick.bid if direction == "BUY" else tick.ask
-
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": symbol,
-        "volume": volume,
-        "type": close_type,
-        "position": ticket,
-        "price": price,
-        "deviation": 20,
-        "magic": 20260101,
-        "comment": "Aethelgard Close",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
-    }
-
-    result = mt5.order_send(request)
-    if result.retcode != mt5.TRADE_RETCODE_DONE:
-        return {"success": False, "error": result.comment}
-
-    return {"success": True, "ticket": result.order, "price": result.price}
-
-
-# ── Sync Jobs ─────────────────────────────────────────────────────────────────
-
-def sync_all_accounts():
-    """Push account snapshots and open positions to backend"""
-    accounts = fetch_accounts_from_backend()
-    if not accounts:
+def sync_account(account_id):
+    info = get_account_info()
+    positions = get_open_positions()
+    if not info:
         return
 
-    for account in accounts:
-        account_id = account["id"]
-        login = int(account["login"])
-
-        # Connect if not already
-        if account_id not in active_accounts:
-            connect_account(account)
-
-        if account_id not in active_accounts:
-            continue
-
-        info = get_account_info(login)
-        positions = get_open_positions(login)
-
-        if info:
-            try:
-                requests.post(
-                    f"{BACKEND_URL}/api/bridge/sync",
-                    headers=api_headers(),
-                    json={
-                        "account_id": account_id,
-                        "account_info": info,
-                        "positions": positions,
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    },
-                    timeout=10
-                )
-                log.debug(f"Synced account {account_id}: balance={info['balance']}")
-            except Exception as e:
-                log.warning(f"Sync failed for {account_id}: {e}")
-
-
-def poll_backend_commands():
-    """Check backend for pending trade commands"""
     try:
-        r = requests.get(
-            f"{BACKEND_URL}/api/bridge/commands",
-            headers=api_headers(),
-            timeout=10
-        )
+        requests.post(f"{BACKEND_URL}/api/bridge/sync", headers=api_headers(),
+            json={"account_id": account_id, "account_info": info, "positions": positions,
+                  "timestamp": datetime.now(timezone.utc).isoformat()}, timeout=10)
+        log.info(f"Synced {account_id}: balance=${info['balance']} equity=${info['equity']} profit=${info['profit']}")
+    except Exception as e:
+        log.warning(f"Sync failed: {e}")
+
+def push_ohlcv_for_signals():
+    """Push OHLCV data to backend for each pair — backend generates signals immediately"""
+    for symbol in PAIRS:
+        try:
+            ohlcv_data = {}
+            for tf_name in TIMEFRAMES:
+                bars = get_ohlcv(symbol, tf_name, 100)
+                if bars:
+                    ohlcv_data[tf_name] = bars
+
+            if not ohlcv_data:
+                log.warning(f"No OHLCV data for {symbol}")
+                continue
+
+            r = requests.post(f"{BACKEND_URL}/api/bridge/ohlcv", headers=api_headers(),
+                json={"symbol": symbol, "data": ohlcv_data}, timeout=60)
+
+            if r.status_code == 200:
+                result = r.json()
+                if result.get("signal"):
+                    log.info(f"Signal generated for {symbol}: {result['signal']}")
+                else:
+                    log.info(f"No signal for {symbol} (HOLD or low confidence)")
+            else:
+                log.warning(f"OHLCV push failed for {symbol}: {r.status_code} {r.text[:100]}")
+
+            time.sleep(3)  # Small delay between pairs
+
+        except Exception as e:
+            log.error(f"OHLCV push error for {symbol}: {e}")
+
+def poll_commands():
+    """Poll for trade execution commands"""
+    try:
+        r = requests.get(f"{BACKEND_URL}/api/bridge/commands", headers=api_headers(), timeout=10)
         if r.status_code != 200:
             return
-
         commands = r.json().get("commands", [])
         for cmd in commands:
             cmd_type = cmd.get("type")
             cmd_id = cmd.get("id")
-
             if cmd_type == "EXECUTE_TRADE":
-                result = execute_trade(cmd["account_id"], cmd["order"])
-                acknowledge_command(cmd_id, result)
-
-            elif cmd_type == "CLOSE_TRADE":
-                result = close_trade(
-                    cmd["account_id"],
-                    cmd["ticket"],
-                    cmd["symbol"],
-                    cmd["direction"],
-                    cmd["volume"]
-                )
-                acknowledge_command(cmd_id, result)
-
-            elif cmd_type == "GET_OHLCV":
-                bars = get_ohlcv(cmd["symbol"], cmd.get("timeframe", "H1"), cmd.get("count", 100))
-                acknowledge_command(cmd_id, {"success": True, "bars": bars})
-
-            elif cmd_type == "GET_PRICE":
-                price = get_price(cmd["symbol"])
-                acknowledge_command(cmd_id, {"success": True, "price": price})
-
+                account_id = cmd.get("account_id")
+                result = execute_trade(account_id, cmd["order"])
+                result["order"] = cmd["order"]
+                ack_command(cmd_id, result)
     except Exception as e:
         log.error(f"Command poll error: {e}")
 
-
-def acknowledge_command(cmd_id: str, result: dict):
-    """Report command execution result back to backend"""
+def ack_command(cmd_id, result):
     try:
-        requests.post(
-            f"{BACKEND_URL}/api/bridge/commands/{cmd_id}/ack",
-            headers=api_headers(),
-            json=result,
-            timeout=5
-        )
+        requests.post(f"{BACKEND_URL}/api/bridge/commands/{cmd_id}/ack",
+            headers=api_headers(), json=result, timeout=5)
     except Exception as e:
         log.warning(f"Could not ack command {cmd_id}: {e}")
 
-
-# ── Main Loop ─────────────────────────────────────────────────────────────────
-
 def main():
-    log.info("🚀 Aethelgard MT5 Bridge starting...")
+    log.info("Aethelgard MT5 Bridge v2 starting...")
 
     if not mt5.initialize():
-        log.critical(f"MT5 failed to initialize: {mt5.last_error()}")
-        log.critical("Make sure MetaTrader 5 is running on this machine.")
+        log.error(f"MT5 failed to initialize: {mt5.last_error()}")
+        log.error("Make sure MetaTrader 5 is running on this machine.")
         return
 
     log.info(f"MT5 Version: {mt5.version()}")
     log.info(f"Backend: {BACKEND_URL}")
-    log.info(f"Sync interval: {SYNC_INTERVAL_SECONDS}s")
+
+    # Connect using .env credentials directly
+    if not connect_from_env():
+        log.error("Failed to connect MT5 account. Check MT5_LOGIN, MT5_PASSWORD, MT5_SERVER in .env")
+        mt5.shutdown()
+        return
+
+    account_id = f"env_{MT5_LOGIN}"
 
     # Initial sync
-    sync_all_accounts()
+    sync_account(account_id)
 
     # Schedule jobs
-    schedule.every(SYNC_INTERVAL_SECONDS).seconds.do(sync_all_accounts)
-    schedule.every(5).seconds.do(poll_backend_commands)
+    schedule.every(SYNC_INTERVAL_SECONDS).seconds.do(sync_account, account_id)
+    schedule.every(15).minutes.do(push_ohlcv_for_signals)
+    schedule.every(10).seconds.do(poll_commands)
 
-    log.info("✅ Bridge running. Press Ctrl+C to stop.")
+    # Push OHLCV immediately on start
+    log.info("Pushing initial OHLCV data for signal generation...")
+    push_ohlcv_for_signals()
+
+    log.info("Bridge running. Press Ctrl+C to stop.")
 
     try:
         while True:
             schedule.run_pending()
             time.sleep(1)
     except KeyboardInterrupt:
-        log.info("Bridge stopped by user.")
+        log.info("Bridge stopped.")
     finally:
         mt5.shutdown()
         log.info("MT5 connection closed.")
-
 
 if __name__ == "__main__":
     main()

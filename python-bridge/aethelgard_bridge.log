@@ -1,0 +1,24 @@
+2026-06-05 10:11:27,832 [INFO] MT5 Version: (500, 5833, '25 Apr 2026')
+2026-06-05 10:11:27,832 [INFO] Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-05 10:11:27,832 [INFO] Sync interval: 30s
+2026-06-05 10:23:41,160 [INFO] MT5 connection closed.
+2026-06-05 10:29:15,179 [INFO] MT5 Version: (500, 5833, '25 Apr 2026')
+2026-06-05 10:29:15,179 [INFO] Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-05 10:29:15,179 [INFO] Sync interval: 30s
+2026-06-05 10:37:53,313 [INFO] 🚀 Aethelgard MT5 Bridge starting...
+2026-06-05 10:37:53,329 [INFO] MT5 Version: (500, 5833, '25 Apr 2026')
+2026-06-05 10:37:53,329 [INFO] Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-05 10:37:53,329 [INFO] Sync interval: 30s
+2026-06-05 10:37:55,261 [INFO] ✅ Connected: 334414473@XMGlobal-MT5 9
+2026-06-05 10:37:58,453 [INFO] ✅ Connected: 334414473@XMGlobal-MT5 9
+2026-06-05 10:38:01,773 [INFO] ✅ Bridge running. Press Ctrl+C to stop.
+2026-06-05 10:58:49,906 [INFO] Bridge stopped by user.
+2026-06-05 10:58:49,922 [INFO] MT5 connection closed.
+2026-06-05 10:58:59,230 [INFO] 🚀 Aethelgard MT5 Bridge starting...
+2026-06-05 10:58:59,265 [INFO] MT5 Version: (500, 5833, '25 Apr 2026')
+2026-06-05 10:58:59,265 [INFO] Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-05 10:58:59,265 [INFO] Sync interval: 30s
+2026-06-05 10:59:01,078 [INFO] ✅ Connected: 334414473@XMGlobal-MT5 9
+2026-06-05 10:59:04,501 [INFO] ✅ Bridge running. Press Ctrl+C to stop.
+2026-06-05 11:14:54,509 [INFO] Bridge stopped by user.
+2026-06-05 11:14:54,525 [INFO] MT5 connection closed.
