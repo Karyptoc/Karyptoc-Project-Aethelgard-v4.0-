@@ -11,6 +11,7 @@ const NAV = [
   { to: "/signals", icon: "⚡", label: "Signals" },
   { to: "/trades", icon: "◆", label: "Journal" },
   { to: "/analytics", icon: "📊", label: "Analytics" },
+  { to: "/billing", icon: "💳", label: "Billing" },
   { to: "/settings", icon: "⚙", label: "Settings" },
 ];
 
@@ -18,16 +19,22 @@ export default function Layout() {
   const { logout } = useAuth();
   const { dark, toggle } = useTheme();
   const [status, setStatus] = useState({ bridge: "checking", accounts: 0 });
+  const [pendingInvoices, setPendingInvoices] = useState(0);
 
   useEffect(() => {
     const check = async () => {
       try {
-        const r = await api.get("/api/dashboard/overview");
-        const { connected_accounts, total_accounts } = r.data.summary;
+        const [overviewR, invoicesR] = await Promise.all([
+          api.get("/api/dashboard/overview"),
+          api.get("/api/payments").catch(() => ({ data: { invoices: [] } }))
+        ]);
+        const { connected_accounts, total_accounts } = overviewR.data.summary;
         setStatus({
           bridge: connected_accounts > 0 ? "online" : total_accounts > 0 ? "warn" : "offline",
           accounts: connected_accounts
         });
+        const pending = (invoicesR.data.invoices || []).filter(i => i.status === "pending").length;
+        setPendingInvoices(pending);
       } catch { setStatus(s => ({ ...s, bridge: "offline" })); }
     };
     check();
@@ -50,7 +57,7 @@ export default function Layout() {
             <div className="brand-icon">Æ</div>
             <div>
               <div className="brand-name">AETHELGARD</div>
-              <div className="brand-ver">QUANT ENGINE v3.0</div>
+              <div className="brand-ver">QUANT ENGINE v4.0</div>
             </div>
           </div>
         </div>
@@ -62,6 +69,13 @@ export default function Layout() {
               className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}>
               <span className="nav-icon">{item.icon}</span>
               {item.label}
+              {item.to === "/billing" && pendingInvoices > 0 && (
+                <span style={{
+                  marginLeft: "auto", background: "var(--warn)",
+                  color: "white", borderRadius: 10, padding: "1px 7px",
+                  fontSize: 10, fontWeight: 700
+                }}>{pendingInvoices}</span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -80,9 +94,7 @@ export default function Layout() {
         </div>
       </aside>
 
-      <main className="main-content">
-        <Outlet />
-      </main>
+      <main className="main-content"><Outlet /></main>
     </div>
   );
 }
