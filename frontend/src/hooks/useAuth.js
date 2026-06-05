@@ -5,13 +5,17 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const session = JSON.parse(localStorage.getItem("aethelgard_session") || "null");
     if (session?.access_token) {
       api.get("/api/auth/me")
-        .then(r => setUser(r.data.profile || r.data.user))
+        .then(r => {
+          setUser(r.data.user);
+          setProfile(r.data.profile);
+        })
         .catch(() => localStorage.removeItem("aethelgard_session"))
         .finally(() => setLoading(false));
     } else {
@@ -23,17 +27,31 @@ export function AuthProvider({ children }) {
     const { data } = await api.post("/api/auth/login", { email, password });
     localStorage.setItem("aethelgard_session", JSON.stringify(data.session));
     setUser(data.user);
+
+    // Get profile to check role
+    const meR = await api.get("/api/auth/me");
+    setProfile(meR.data.profile);
+
+    // Redirect based on role
+    const role = meR.data.profile?.role;
+    if (role === "client") {
+      window.location.href = "/client";
+    } else {
+      window.location.href = "/";
+    }
+
     return data;
   };
 
   const logout = () => {
     localStorage.removeItem("aethelgard_session");
     setUser(null);
+    setProfile(null);
     window.location.href = "/login";
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
