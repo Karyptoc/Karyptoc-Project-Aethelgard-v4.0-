@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: aethelgard-backend
+    env: node
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        value: https://syyyiezattmsswardedr.supabase.co
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: BRIDGE_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
