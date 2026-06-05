@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Outlet, NavLink, useLocation } from "react-router-dom";
+import { Outlet, NavLink } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { useTheme } from "../hooks/useTheme";
 import api from "../lib/api";
 
 const NAV = [
@@ -14,75 +15,66 @@ const NAV = [
 
 export default function Layout() {
   const { logout } = useAuth();
-  const location = useLocation();
+  const { dark, toggle } = useTheme();
   const [bridgeStatus, setBridgeStatus] = useState("checking");
   const [connectedAccounts, setConnectedAccounts] = useState(0);
 
   useEffect(() => {
-    const checkStatus = async () => {
+    const check = async () => {
       try {
         const r = await api.get("/api/dashboard/overview");
         const { connected_accounts, total_accounts } = r.data.summary;
         setConnectedAccounts(connected_accounts);
         setBridgeStatus(connected_accounts > 0 ? "online" : total_accounts > 0 ? "warn" : "offline");
-      } catch {
-        setBridgeStatus("offline");
-      }
+      } catch { setBridgeStatus("offline"); }
     };
-    checkStatus();
-    const interval = setInterval(checkStatus, 30000);
-    return () => clearInterval(interval);
+    check();
+    const iv = setInterval(check, 30000);
+    return () => clearInterval(iv);
   }, []);
-
-  const statusLabel = {
-    online: "BRIDGE ONLINE",
-    offline: "BRIDGE OFFLINE",
-    warn: "NO CONNECTIONS",
-    checking: "CHECKING..."
-  }[bridgeStatus];
 
   return (
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div className="sidebar-logo">
-            <div className="sidebar-logo-icon">Æ</div>
+          <div className="sidebar-brand">
+            <div className="brand-icon">Æ</div>
             <div>
-              <div className="sidebar-logo-text">AETHELGARD</div>
-              <div className="sidebar-logo-ver">QUANT ENGINE v1.0</div>
+              <div className="brand-name">AETHELGARD</div>
+              <div className="brand-ver">QUANT ENGINE v2.0</div>
             </div>
           </div>
         </div>
 
         <nav className="sidebar-nav">
-          <div className="nav-section">
-            <div className="nav-label">Navigation</div>
-            {NAV.map(item => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.exact}
-                className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
-              >
-                <span className="nav-item-icon">{item.icon}</span>
-                {item.label}
-              </NavLink>
-            ))}
-          </div>
+          <div className="nav-group-label">Navigation</div>
+          {NAV.map(item => (
+            <NavLink
+              key={item.to} to={item.to} end={item.exact}
+              className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              {item.label}
+            </NavLink>
+          ))}
         </nav>
 
         <div className="sidebar-footer">
-          <div className="sidebar-status">
+          <div className="status-pill">
             <div className={`status-dot ${bridgeStatus}`} />
-            <span className="status-text">{statusLabel}</span>
+            <span className="status-text">
+              {bridgeStatus === "online" ? `${connectedAccounts} ACCOUNT${connectedAccounts > 1 ? "S" : ""} LIVE`
+                : bridgeStatus === "warn" ? "NO CONNECTIONS"
+                : bridgeStatus === "checking" ? "CHECKING..."
+                : "BRIDGE OFFLINE"}
+            </span>
           </div>
-          {connectedAccounts > 0 && (
-            <div className="sidebar-status" style={{ marginBottom: 8 }}>
-              <div className="status-dot online" />
-              <span className="status-text">{connectedAccounts} ACCOUNT{connectedAccounts > 1 ? "S" : ""} LIVE</span>
-            </div>
-          )}
-          <button className="logout-btn" onClick={logout}>DISCONNECT</button>
+          <div className="sidebar-actions">
+            <button className="btn-theme" onClick={toggle} title="Toggle theme">
+              {dark ? "☀️" : "🌙"}
+            </button>
+            <button className="btn-logout" onClick={logout}>DISCONNECT</button>
+          </div>
         </div>
       </aside>
 

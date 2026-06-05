@@ -22,3 +22,253 @@
 2026-06-05 10:59:04,501 [INFO] ✅ Bridge running. Press Ctrl+C to stop.
 2026-06-05 11:14:54,509 [INFO] Bridge stopped by user.
 2026-06-05 11:14:54,525 [INFO] MT5 connection closed.
+2026-06-05 11:15:26,291 [INFO] Aethelgard MT5 Bridge v2 starting...
+2026-06-05 11:15:26,323 [INFO] MT5 Version: (500, 5833, '25 Apr 2026')
+2026-06-05 11:15:26,323 [INFO] Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-05 11:15:26,392 [INFO] Connected: 334414473@XMGlobal-MT5 9
+2026-06-05 11:15:28,039 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:15:28,045 [INFO] Pushing initial OHLCV data for signal generation...
+2026-06-05 11:15:28,045 [WARNING] No OHLCV data for XAUUSD
+2026-06-05 11:15:29,618 [WARNING] OHLCV push failed for EURUSD: 404 <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Error</title>
+</head>
+<body>
+<
+2026-06-05 11:15:34,261 [WARNING] OHLCV push failed for GBPUSD: 404 <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Error</title>
+</head>
+<body>
+<
+2026-06-05 11:15:38,979 [WARNING] OHLCV push failed for USDJPY: 404 <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Error</title>
+</head>
+<body>
+<
+2026-06-05 11:15:41,984 [INFO] Bridge running. Press Ctrl+C to stop.
+2026-06-05 11:16:00,429 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:16:33,107 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:17:04,922 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:17:37,187 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:18:09,561 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:18:41,068 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:19:12,964 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:19:45,416 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:20:18,422 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:20:50,132 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:21:22,191 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:21:57,598 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:22:31,128 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:23:02,971 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:23:34,946 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:24:07,090 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:24:40,985 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:25:13,353 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:25:45,490 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:26:17,347 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:26:50,289 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:27:21,849 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:27:53,940 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:28:25,704 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:28:57,721 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:29:29,660 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:30:01,624 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:30:28,596 [WARNING] No OHLCV data for XAUUSD
+2026-06-05 11:30:30,911 [INFO] No signal for EURUSD (HOLD or low confidence)
+2026-06-05 11:30:36,073 [INFO] No signal for GBPUSD (HOLD or low confidence)
+2026-06-05 11:30:41,362 [INFO] No signal for USDJPY (HOLD or low confidence)
+2026-06-05 11:30:48,617 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:31:21,736 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:31:54,207 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:32:26,600 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:33:00,754 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:33:33,363 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:34:05,836 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:34:38,260 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:35:11,029 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:35:43,418 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:36:15,758 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:36:48,187 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:37:21,106 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:37:52,926 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:38:25,224 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:38:46,374 [INFO] Aethelgard MT5 Bridge v2 starting...
+2026-06-05 11:38:46,764 [INFO] MT5 Version: (500, 5833, '25 Apr 2026')
+2026-06-05 11:38:46,764 [INFO] Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-05 11:38:46,811 [INFO] Connected: 334414473@XMGlobal-MT5 9
+2026-06-05 11:38:48,387 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:38:48,387 [INFO] Pushing initial OHLCV data for signal generation...
+2026-06-05 11:38:48,482 [WARNING] No OHLCV data for XAUUSD
+2026-06-05 11:38:57,647 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.52 profit=$0.0
+2026-06-05 11:39:00,918 [INFO] Signal generated for EURUSD: 8d19b2c1-f2b5-4fd9-b40e-da404f2efbd7
+2026-06-05 11:39:07,682 [INFO] Trade executed: BUY 0.01 EURUSD @ 1.15364 | Ticket: 765013532
+2026-06-05 11:39:17,344 [INFO] No signal for GBPUSD (HOLD or low confidence)
+2026-06-05 11:39:30,410 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.33 profit=$-0.19
+2026-06-05 11:39:33,423 [INFO] No signal for USDJPY (HOLD or low confidence)
+2026-06-05 11:39:36,424 [INFO] Bridge running. Press Ctrl+C to stop.
+2026-06-05 11:39:39,547 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.32 profit=$-0.2
+2026-06-05 11:40:02,589 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.34 profit=$-0.18
+2026-06-05 11:40:12,640 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.38 profit=$-0.14
+2026-06-05 11:40:35,139 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.38 profit=$-0.14
+2026-06-05 11:40:44,854 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.31 profit=$-0.21
+2026-06-05 11:41:08,294 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.33 profit=$-0.19
+2026-06-05 11:41:17,161 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.29 profit=$-0.23
+2026-06-05 11:41:40,045 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.28 profit=$-0.24
+2026-06-05 11:41:49,019 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.31 profit=$-0.21
+2026-06-05 11:41:52,638 [INFO] Bridge stopped.
+2026-06-05 11:41:52,639 [INFO] MT5 connection closed.
+2026-06-05 11:42:12,560 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.34 profit=$-0.18
+2026-06-05 11:42:13,243 [INFO] Aethelgard MT5 Bridge v2 starting...
+2026-06-05 11:42:13,257 [INFO] MT5 Version: (500, 5833, '25 Apr 2026')
+2026-06-05 11:42:13,257 [INFO] Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-05 11:42:13,273 [INFO] Connected: 334414473@XMGlobal-MT5 9
+2026-06-05 11:42:14,975 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.34 profit=$-0.18
+2026-06-05 11:42:14,975 [INFO] Pushing initial OHLCV data for signal generation...
+2026-06-05 11:42:26,454 [INFO] Signal generated for GOLD: 6247d4b5-e47e-4619-a94c-dffffefc8728
+2026-06-05 11:42:41,700 [INFO] Signal generated for EURUSD: 6fecaf4d-e0d0-44d8-8ee9-6fc921263ed6
+2026-06-05 11:42:44,809 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.42 profit=$-0.1
+2026-06-05 11:42:54,291 [INFO] Trade executed: BUY 0.01 EURUSD @ 1.15377 | Ticket: 765021557
+2026-06-05 11:42:58,068 [INFO] No signal for GBPUSD (HOLD or low confidence)
+2026-06-05 11:43:14,164 [INFO] No signal for USDJPY (HOLD or low confidence)
+2026-06-05 11:43:17,167 [INFO] Bridge running. Press Ctrl+C to stop.
+2026-06-05 11:43:17,394 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.09 profit=$-0.43
+2026-06-05 11:43:21,650 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.07 profit=$-0.45
+2026-06-05 11:43:50,034 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.99 profit=$-0.53
+2026-06-05 11:43:53,739 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.91 profit=$-0.61
+2026-06-05 11:44:22,393 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.89 profit=$-0.63
+2026-06-05 11:44:26,196 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.89 profit=$-0.63
+2026-06-05 11:44:55,638 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.03 profit=$-0.49
+2026-06-05 11:44:58,421 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.11 profit=$-0.41
+2026-06-05 11:45:28,921 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.07 profit=$-0.45
+2026-06-05 11:45:33,172 [INFO] Synced env_334414473: balance=$2272.52 equity=$2272.15 profit=$-0.37
+2026-06-05 11:45:45,166 [WARNING] No OHLCV data for XAUUSD
+2026-06-05 11:45:59,298 [INFO] Signal generated for EURUSD: 34bd8727-f2c8-4caf-bcd0-d8b953fb7776
+2026-06-05 11:46:05,243 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.95 profit=$-0.57
+2026-06-05 11:46:07,687 [INFO] Trade executed: BUY 0.01 EURUSD @ 1.15362 | Ticket: 765026504
+2026-06-05 11:46:16,671 [INFO] No signal for GBPUSD (HOLD or low confidence)
+2026-06-05 11:46:32,070 [INFO] No signal for USDJPY (HOLD or low confidence)
+2026-06-05 11:46:38,158 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.87 profit=$-0.65
+2026-06-05 11:46:39,672 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.84 profit=$-0.68
+2026-06-05 11:47:10,900 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.84 profit=$-0.68
+2026-06-05 11:47:12,803 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.87 profit=$-0.65
+2026-06-05 11:47:44,309 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.39 profit=$-1.13
+2026-06-05 11:47:45,253 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.39 profit=$-1.13
+2026-06-05 11:48:17,906 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.33 profit=$-1.19
+2026-06-05 11:48:18,809 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.33 profit=$-1.19
+2026-06-05 11:48:50,278 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.27 profit=$-1.25
+2026-06-05 11:48:53,096 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.27 profit=$-1.25
+2026-06-05 11:49:24,173 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.3 profit=$-1.22
+2026-06-05 11:49:25,441 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.3 profit=$-1.22
+2026-06-05 11:49:57,156 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.27 profit=$-1.25
+2026-06-05 11:49:59,411 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.27 profit=$-1.25
+2026-06-05 11:50:33,765 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.3 profit=$-1.22
+2026-06-05 11:50:37,947 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.3 profit=$-1.22
+2026-06-05 11:51:15,697 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.15 profit=$-1.37
+2026-06-05 11:51:26,005 [WARNING] Sync failed: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Read timed out. (read timeout=10)
+2026-06-05 11:51:53,142 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.33 profit=$-1.19
+2026-06-05 11:52:02,079 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.42 profit=$-1.1
+2026-06-05 11:52:32,279 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.3 profit=$-1.22
+2026-06-05 11:52:35,411 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.3 profit=$-1.22
+2026-06-05 11:53:04,977 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.6 profit=$-0.92
+2026-06-05 11:53:10,031 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.6 profit=$-0.92
+2026-06-05 11:53:38,390 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.3 profit=$-1.22
+2026-06-05 11:53:43,120 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.3 profit=$-1.22
+2026-06-05 11:54:11,280 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.45 profit=$-1.07
+2026-06-05 11:54:15,703 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.45 profit=$-1.07
+2026-06-05 11:54:43,720 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.42 profit=$-1.1
+2026-06-05 11:54:48,199 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.42 profit=$-1.1
+2026-06-05 11:55:16,284 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.57 profit=$-0.95
+2026-06-05 11:55:20,638 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.45 profit=$-1.07
+2026-06-05 11:55:48,901 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.12 profit=$-1.4
+2026-06-05 11:55:54,163 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.12 profit=$-1.4
+2026-06-05 11:56:21,589 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.24 profit=$-1.28
+2026-06-05 11:56:28,653 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.18 profit=$-1.34
+2026-06-05 11:56:54,040 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.12 profit=$-1.4
+2026-06-05 11:57:01,896 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.06 profit=$-1.46
+2026-06-05 11:57:27,560 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.85 profit=$-1.67
+2026-06-05 11:57:28,958 [INFO] Signal generated for GOLD: d9a45a1d-5a0a-403e-80eb-4c7d749bfd52
+2026-06-05 11:57:44,398 [INFO] Signal generated for EURUSD: b2701d92-bac2-4895-b8d6-cef88eb0a85b
+2026-06-05 11:57:48,715 [INFO] Trade executed: BUY 0.01 EURUSD @ 1.15337 | Ticket: 765042067
+2026-06-05 11:58:00,803 [INFO] Synced env_334414473: balance=$2272.52 equity=$2271.0 profit=$-1.52
+2026-06-05 11:58:02,180 [INFO] No signal for GBPUSD (HOLD or low confidence)
+2026-06-05 11:58:19,971 [INFO] No signal for USDJPY (HOLD or low confidence)
+2026-06-05 11:58:27,937 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.72 profit=$-1.8
+2026-06-05 11:58:33,805 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.72 profit=$-1.8
+2026-06-05 11:59:00,965 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.36 profit=$-2.16
+2026-06-05 11:59:07,021 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.48 profit=$-2.04
+2026-06-05 11:59:34,158 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.72 profit=$-1.8
+2026-06-05 11:59:40,384 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.8 profit=$-1.72
+2026-06-05 12:00:07,280 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.4 profit=$-2.12
+2026-06-05 12:00:16,075 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.32 profit=$-2.2
+2026-06-05 12:00:40,397 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.96 profit=$-2.56
+2026-06-05 12:00:50,094 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.84 profit=$-2.68
+2026-06-05 12:01:15,090 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.12 profit=$-2.4
+2026-06-05 12:01:24,748 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.32 profit=$-2.2
+2026-06-05 12:01:35,215 [WARNING] No OHLCV data for XAUUSD
+2026-06-05 12:01:47,185 [INFO] Signal generated for EURUSD: 420cc837-bc8e-4faa-9ed0-5f3380e802b1
+2026-06-05 12:01:47,623 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.56 profit=$-1.96
+2026-06-05 12:02:03,389 [INFO] Signal generated for GBPUSD: 01ae2c1b-9a0b-463f-bf33-8109257fe1f0
+2026-06-05 12:02:20,367 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.32 profit=$-2.2
+2026-06-05 12:02:20,481 [INFO] No signal for USDJPY (HOLD or low confidence)
+2026-06-05 12:02:28,442 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.92 profit=$-2.6
+2026-06-05 12:02:53,587 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.76 profit=$-2.76
+2026-06-05 12:03:01,403 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.92 profit=$-2.6
+2026-06-05 12:03:28,294 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.96 profit=$-2.56
+2026-06-05 12:03:34,167 [INFO] Synced env_334414473: balance=$2272.52 equity=$2270.04 profit=$-2.48
+2026-06-05 12:04:01,370 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.48 profit=$-3.04
+2026-06-05 12:04:07,181 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.44 profit=$-3.08
+2026-06-05 12:04:34,211 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.52 profit=$-3.0
+2026-06-05 12:04:41,110 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.52 profit=$-3.0
+2026-06-05 12:05:07,222 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.28 profit=$-3.24
+2026-06-05 12:05:15,936 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.28 profit=$-3.24
+2026-06-05 12:05:40,333 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.52 profit=$-3.0
+2026-06-05 12:05:50,629 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.56 profit=$-2.96
+2026-06-05 12:06:14,053 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.44 profit=$-3.08
+2026-06-05 12:06:25,711 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.84 profit=$-3.68
+2026-06-05 12:06:46,538 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.92 profit=$-3.6
+2026-06-05 12:06:58,359 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.92 profit=$-3.6
+2026-06-05 12:07:19,282 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.8 profit=$-3.72
+2026-06-05 12:07:31,736 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.72 profit=$-3.8
+2026-06-05 12:07:52,680 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.12 profit=$-3.4
+2026-06-05 12:08:05,351 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.64 profit=$-3.88
+2026-06-05 12:08:26,253 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.68 profit=$-3.84
+2026-06-05 12:08:41,106 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.76 profit=$-3.76
+2026-06-05 12:08:59,868 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.4 profit=$-4.12
+2026-06-05 12:09:15,838 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.36 profit=$-4.16
+2026-06-05 12:09:32,656 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.64 profit=$-3.88
+2026-06-05 12:09:50,558 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.44 profit=$-4.08
+2026-06-05 12:10:05,467 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.56 profit=$-3.96
+2026-06-05 12:10:25,850 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.76 profit=$-3.76
+2026-06-05 12:10:38,714 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.88 profit=$-3.64
+2026-06-05 12:10:58,644 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.0 profit=$-3.52
+2026-06-05 12:11:12,240 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.12 profit=$-3.4
+2026-06-05 12:11:31,959 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.96 profit=$-3.56
+2026-06-05 12:11:46,430 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.16 profit=$-3.36
+2026-06-05 12:12:06,621 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.36 profit=$-3.16
+2026-06-05 12:12:20,151 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.04 profit=$-3.48
+2026-06-05 12:12:43,107 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.88 profit=$-3.64
+2026-06-05 12:13:00,495 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.0 profit=$-3.52
+2026-06-05 12:13:20,353 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.04 profit=$-3.48
+2026-06-05 12:13:37,255 [INFO] Signal generated for GOLD: 19857be8-ee3b-4935-87cc-488679a66184
+2026-06-05 12:13:55,603 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.6 profit=$-2.92
+2026-06-05 12:13:55,606 [INFO] No signal for EURUSD (HOLD or low confidence)
+2026-06-05 12:14:17,035 [INFO] Signal generated for GBPUSD: 257d5d70-4f04-4ddc-af42-16d7f295e344
+2026-06-05 12:14:29,523 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.28 profit=$-3.24
+2026-06-05 12:14:35,318 [INFO] No signal for USDJPY (HOLD or low confidence)
+2026-06-05 12:14:56,336 [WARNING] Sync failed: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Read timed out. (read timeout=10)
+2026-06-05 12:14:56,359 [ERROR] Command poll error: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Read timed out. (read timeout=10)
+2026-06-05 12:15:04,688 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.44 profit=$-3.08
+2026-06-05 12:15:30,216 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.92 profit=$-3.6
+2026-06-05 12:15:38,045 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.72 profit=$-3.8
+2026-06-05 12:16:06,255 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.48 profit=$-4.04
+2026-06-05 12:16:12,549 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.36 profit=$-4.16
+2026-06-05 12:16:37,175 [INFO] Bridge stopped.
+2026-06-05 12:16:37,178 [INFO] MT5 connection closed.
