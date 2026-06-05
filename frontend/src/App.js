@@ -8,6 +8,7 @@ import Accounts from "./pages/Accounts";
 import Clients from "./pages/Clients";
 import Signals from "./pages/Signals";
 import Trades from "./pages/Trades";
+import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
 import Layout from "./components/Layout";
 import "./index.css";
@@ -33,15 +34,14 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
+              <ProtectedRoute><Layout /></ProtectedRoute>
             }>
               <Route index element={<Dashboard />} />
               <Route path="accounts" element={<Accounts />} />
               <Route path="clients" element={<Clients />} />
               <Route path="signals" element={<Signals />} />
               <Route path="trades" element={<Trades />} />
+              <Route path="analytics" element={<Analytics />} />
               <Route path="settings" element={<Settings />} />
             </Route>
           </Routes>

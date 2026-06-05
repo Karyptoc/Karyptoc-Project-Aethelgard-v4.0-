@@ -272,3 +272,33 @@
 2026-06-05 12:16:12,549 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.36 profit=$-4.16
 2026-06-05 12:16:37,175 [INFO] Bridge stopped.
 2026-06-05 12:16:37,178 [INFO] MT5 connection closed.
+2026-06-05 12:16:40,888 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.08 profit=$-5.44
+2026-06-05 12:17:16,083 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.68 profit=$-4.84
+2026-06-05 12:17:50,391 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.12 profit=$-5.4
+2026-06-05 12:18:24,032 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.32 profit=$-5.2
+2026-06-05 12:18:58,197 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.12 profit=$-5.4
+2026-06-05 12:19:31,919 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.44 profit=$-5.08
+2026-06-05 12:20:06,226 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.56 profit=$-4.96
+2026-06-05 12:20:41,515 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.16 profit=$-5.36
+2026-06-05 12:21:15,439 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.16 profit=$-5.36
+2026-06-05 12:21:49,833 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.32 profit=$-5.2
+2026-06-05 12:22:33,743 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.56 profit=$-4.96
+2026-06-05 12:23:07,547 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.8 profit=$-4.72
+2026-06-05 12:23:41,271 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.72 profit=$-4.8
+2026-06-05 12:24:15,755 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.36 profit=$-5.16
+2026-06-05 12:24:50,346 [INFO] Synced env_334414473: balance=$2272.52 equity=$2267.8 profit=$-4.72
+2026-06-05 12:25:24,110 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.12 profit=$-4.4
+2026-06-05 12:25:58,302 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.12 profit=$-4.4
+2026-06-05 12:26:32,864 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.32 profit=$-3.2
+2026-06-05 12:27:12,707 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.24 profit=$-3.28
+2026-06-05 12:27:50,202 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.12 profit=$-3.4
+2026-06-05 12:28:24,820 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.12 profit=$-3.4
+2026-06-05 12:28:58,664 [INFO] Synced env_334414473: balance=$2272.52 equity=$2269.12 profit=$-3.4
+2026-06-05 12:29:33,347 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.48 profit=$-4.04
+2026-06-05 12:29:52,366 [INFO] Signal generated for GOLD: 240d5dd7-1b8e-4ff4-8d5b-85344aff5d2e
+2026-06-05 12:30:10,328 [INFO] Signal generated for EURUSD: 4ff8cfb3-9756-46b2-ad1d-a2e8c23545f1
+2026-06-05 12:30:28,621 [INFO] No signal for GBPUSD (HOLD or low confidence)
+2026-06-05 12:30:46,566 [INFO] No signal for USDJPY (HOLD or low confidence)
+2026-06-05 12:30:57,475 [INFO] Synced env_334414473: balance=$2272.52 equity=$2268.04 profit=$-4.48
+2026-06-05 12:31:02,788 [INFO] Bridge stopped.
+2026-06-05 12:31:02,793 [INFO] MT5 connection closed.
