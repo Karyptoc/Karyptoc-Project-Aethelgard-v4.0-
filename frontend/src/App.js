@@ -1,3 +1,4 @@
+// App.js
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
@@ -10,6 +11,7 @@ import Signals from "./pages/Signals";
 import Trades from "./pages/Trades";
 import Analytics from "./pages/Analytics";
 import Billing from "./pages/Billing";
+import SystemControl from "./pages/SystemControl";
 import ClientPortal from "./pages/ClientPortal";
 import Settings from "./pages/Settings";
 import Layout from "./components/Layout";
@@ -36,8 +38,6 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
-
-            {/* Admin Dashboard */}
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Dashboard />} />
               <Route path="accounts" element={<Accounts />} />
@@ -46,14 +46,13 @@ export default function App() {
               <Route path="trades" element={<Trades />} />
               <Route path="analytics" element={<Analytics />} />
               <Route path="billing" element={<Billing />} />
+              <Route path="system" element={<SystemControl />} />
               <Route path="settings" element={<Settings />} />
             </Route>
-
-            {/* Client Portal */}
             <Route path="/client" element={<ProtectedRoute><ClientLayout /></ProtectedRoute>}>
               <Route index element={<ClientPortal />} />
-              <Route path="payment-success" element={<PaymentSuccess />} />
-              <Route path="payment-failed" element={<PaymentFailed />} />
+              <Route path="payment-success" element={<PaySuccess />} />
+              <Route path="payment-failed" element={<PayFail />} />
             </Route>
           </Routes>
         </BrowserRouter>
@@ -62,7 +61,7 @@ export default function App() {
   );
 }
 
-function PaymentSuccess() {
+function PaySuccess() {
   return (
     <div className="page-body" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
       <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
@@ -73,7 +72,7 @@ function PaymentSuccess() {
   );
 }
 
-function PaymentFailed() {
+function PayFail() {
   return (
     <div className="page-body" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
       <div style={{ fontSize: 64, marginBottom: 16 }}>❌</div>

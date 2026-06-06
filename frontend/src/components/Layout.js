@@ -12,6 +12,7 @@ const NAV = [
   { to: "/trades", icon: "◆", label: "Journal" },
   { to: "/analytics", icon: "📊", label: "Analytics" },
   { to: "/billing", icon: "💳", label: "Billing" },
+  { to: "/system", icon: "🖥", label: "System" },
   { to: "/settings", icon: "⚙", label: "Settings" },
 ];
 
@@ -20,13 +21,15 @@ export default function Layout() {
   const { dark, toggle } = useTheme();
   const [status, setStatus] = useState({ bridge: "checking", accounts: 0 });
   const [pendingInvoices, setPendingInvoices] = useState(0);
+  const [tradingEnabled, setTradingEnabled] = useState(false);
 
   useEffect(() => {
     const check = async () => {
       try {
-        const [overviewR, invoicesR] = await Promise.all([
+        const [overviewR, invoicesR, settingsR] = await Promise.all([
           api.get("/api/dashboard/overview"),
-          api.get("/api/payments").catch(() => ({ data: { invoices: [] } }))
+          api.get("/api/payments").catch(() => ({ data: { invoices: [] } })),
+          api.get("/api/system/settings").catch(() => ({ data: { settings: {} } }))
         ]);
         const { connected_accounts, total_accounts } = overviewR.data.summary;
         setStatus({
@@ -35,6 +38,8 @@ export default function Layout() {
         });
         const pending = (invoicesR.data.invoices || []).filter(i => i.status === "pending").length;
         setPendingInvoices(pending);
+        const s = settingsR.data.settings || {};
+        setTradingEnabled(s["trading_enabled"] === true || s["trading_enabled"] === "true");
       } catch { setStatus(s => ({ ...s, bridge: "offline" })); }
     };
     check();
@@ -57,7 +62,7 @@ export default function Layout() {
             <div className="brand-icon">Æ</div>
             <div>
               <div className="brand-name">AETHELGARD</div>
-              <div className="brand-ver">QUANT ENGINE v4.0</div>
+              <div className="brand-ver">QUANT ENGINE v5.0</div>
             </div>
           </div>
         </div>
@@ -70,11 +75,9 @@ export default function Layout() {
               <span className="nav-icon">{item.icon}</span>
               {item.label}
               {item.to === "/billing" && pendingInvoices > 0 && (
-                <span style={{
-                  marginLeft: "auto", background: "var(--warn)",
-                  color: "white", borderRadius: 10, padding: "1px 7px",
-                  fontSize: 10, fontWeight: 700
-                }}>{pendingInvoices}</span>
+                <span style={{ marginLeft: "auto", background: "var(--warn)", color: "white", borderRadius: 10, padding: "1px 7px", fontSize: 10, fontWeight: 700 }}>
+                  {pendingInvoices}
+                </span>
               )}
             </NavLink>
           ))}
@@ -85,7 +88,11 @@ export default function Layout() {
             <div className={`status-dot ${status.bridge}`} />
             <span className="status-text">{statusLabel}</span>
           </div>
-          <div className="sidebar-actions">
+          <div className="status-pill" style={{ marginTop: 4 }}>
+            <div className="status-dot" style={{ background: tradingEnabled ? "var(--bull)" : "var(--warn)" }} />
+            <span className="status-text">{tradingEnabled ? "AUTO-TRADING ON" : "AUTO-TRADING OFF"}</span>
+          </div>
+          <div className="sidebar-actions" style={{ marginTop: 4 }}>
             <button className="btn-theme" onClick={toggle} title="Toggle theme">
               {dark ? "☀️" : "🌙"}
             </button>
