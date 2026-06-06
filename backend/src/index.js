@@ -7,7 +7,6 @@ const cron = require("node-cron");
 const { supabaseAdmin, log } = require("./services/supabase");
 const signalEngine = require("./services/signalEngine");
 
-// Routes
 const authRoutes = require("./routes/auth");
 const accountRoutes = require("./routes/accounts");
 const clientRoutes = require("./routes/clients");
@@ -21,6 +20,9 @@ const clientPortalRoutes = require("./routes/clientPortal");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// Trust Render's proxy
+app.set("trust proxy", 1);
+
 app.use(cors({
   origin: [
     process.env.FRONTEND_URL || "http://localhost:3000",
@@ -32,10 +34,14 @@ app.use(cors({
 
 app.use(express.json({ limit: "10mb" }));
 
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 500 });
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 app.use("/api/", limiter);
 
-// Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/accounts", accountRoutes);
 app.use("/api/clients", clientRoutes);
@@ -50,7 +56,7 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", version: "2.0.0", timestamp: new Date().toISOString() });
 });
 
-// Cron: signal generation every 15 min
+// Signal generation every 15 min
 cron.schedule("*/15 * * * *", async () => {
   try {
     const { data: settings } = await supabaseAdmin
@@ -64,7 +70,7 @@ cron.schedule("*/15 * * * *", async () => {
   }
 });
 
-// Cron: hourly snapshots
+// Hourly snapshots
 cron.schedule("0 * * * *", async () => {
   try {
     const { data: accounts } = await supabaseAdmin
