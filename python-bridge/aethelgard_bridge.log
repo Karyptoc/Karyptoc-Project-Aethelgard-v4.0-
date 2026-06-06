@@ -769,3 +769,58 @@
 2026-06-05 15:26:37,913 [INFO] Synced 334414473: $2272.52 | equity $2264.49 | P&L $-8.03
 2026-06-05 15:27:18,623 [ERROR] Command poll error: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
 2026-06-05 15:27:31,678 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/accounts (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-06 04:33:41,074 [INFO] Aethelgard MT5 Bridge v4 starting...
+2026-06-06 04:33:41,083 [INFO] Pairs: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, SPX500Cash, GER40Cash, BTCUSD, DXY
+2026-06-06 04:33:56,809 [INFO] MT5: (500, 5833, '25 Apr 2026') | Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-06 04:34:01,044 [INFO] Connected: 334414473@XMGlobal-MT5 9
+2026-06-06 04:34:04,074 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:34:04,080 [INFO] Pushing OHLCV for all pairs...
+2026-06-06 04:34:04,085 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 04:34:04,085 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 04:34:04,093 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 04:34:24,782 [INFO] Signal: GOLD -> a916b51e-6738-4f99-b34e-942647409d35
+2026-06-06 04:34:52,656 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 04:35:22,465 [INFO] No signal for GBPUSD (HOLD)
+2026-06-06 04:35:51,959 [INFO] No signal for USDJPY (HOLD)
+2026-06-06 04:36:34,126 [INFO] Signal: US30Cash -> dcd80dd7-7c62-455a-9b27-b97ee27c3b37
+2026-06-06 04:37:06,646 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 04:37:35,165 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 04:37:38,178 [INFO] Bridge v4 running. Press Ctrl+C to stop.
+2026-06-06 04:38:11,740 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:38:46,736 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:39:20,553 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:39:56,184 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:39:57,176 [INFO] Aethelgard MT5 Bridge v4 starting...
+2026-06-06 04:39:57,176 [INFO] Pairs: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, SPX500Cash, GER40Cash, BTCUSD, DXY
+2026-06-06 04:39:57,227 [INFO] MT5: (500, 5833, '25 Apr 2026') | Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-06 04:39:59,884 [INFO] Connected: 334414473@XMGlobal-MT5 9
+2026-06-06 04:40:02,618 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:40:02,619 [INFO] Pushing OHLCV for all pairs...
+2026-06-06 04:40:02,621 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 04:40:02,621 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 04:40:02,623 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 04:40:32,025 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:41:06,297 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:41:40,874 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:42:14,840 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:42:49,385 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:43:23,239 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:43:58,893 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:44:35,332 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:45:13,408 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:45:47,934 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:46:22,057 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:46:55,449 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:47:30,931 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:48:07,226 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:48:40,798 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:49:15,120 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:49:50,196 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:50:26,664 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:51:01,108 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:51:35,258 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:52:09,362 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:52:38,538 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 04:52:38,538 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 04:52:38,543 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 04:53:00,877 [INFO] Signal: GOLD -> 4916c487-0b3c-4bdc-afde-34cd6d402c7a
