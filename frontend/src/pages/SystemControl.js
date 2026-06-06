@@ -1,104 +1,125 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
 import api from "../lib/api";
 
-function StatusIndicator({ online, label }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <div style={{
-        width: 10, height: 10, borderRadius: "50%",
-        background: online ? "var(--bull)" : "var(--bear)",
-        boxShadow: online ? "0 0 8px var(--bull)" : "none",
-        animation: online ? "pulse-dot 2s infinite" : "none"
-      }} />
-      <span style={{ fontSize: 13, fontWeight: 600, color: online ? "var(--bull)" : "var(--bear)" }}>
-        {label}
-      </span>
-    </div>
-  );
-}
+const supabase = createClient(
+  process.env.REACT_APP_SUPABASE_URL,
+  process.env.REACT_APP_SUPABASE_ANON_KEY
+);
 
-function ControlToggle({ label, desc, value, onChange, danger }) {
+function StatusDot({ online }) {
   return (
     <div style={{
-      display: "flex", justifyContent: "space-between", alignItems: "center",
-      padding: "16px 0", borderBottom: "1px solid var(--border)"
-    }}>
-      <div>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>{label}</div>
-        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>{desc}</div>
-      </div>
-      <button
-        onClick={onChange}
-        style={{
-          width: 52, height: 28, borderRadius: 14, border: "none", cursor: "pointer",
-          background: value ? (danger ? "var(--bear)" : "var(--bull)") : "var(--border)",
-          position: "relative", transition: "background 0.2s", flexShrink: 0
-        }}>
-        <div style={{
-          width: 22, height: 22, borderRadius: "50%", background: "white",
-          position: "absolute", top: 3,
-          left: value ? 26 : 4,
-          transition: "left 0.2s",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
-        }} />
-      </button>
-    </div>
+      width: 10, height: 10, borderRadius: "50%", flexShrink: 0,
+      background: online ? "var(--bull)" : "var(--bear)",
+      boxShadow: online ? "0 0 8px var(--bull)" : "none"
+    }} />
   );
 }
 
 export default function SystemControl() {
   const [status, setStatus] = useState(null);
-  const [settings, setSettings] = useState({});
+  const [settings, setSettings] = useState({
+    trading_enabled: false,
+    signal_interval_minutes: 15
+  });
   const [reports, setReports] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [toast, setToast] = useState("");
   const [selectedReport, setSelectedReport] = useState(null);
-  const [genForm, setGenForm] = useState({ client_id: "", month: new Date().getMonth() || 12, year: new Date().getFullYear() });
+  const [genForm, setGenForm] = useState({
+    client_id: "",
+    month: new Date().getMonth() === 0 ? 12 : new Date().getMonth(),
+    year: new Date().getFullYear()
+  });
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 4000); };
 
-  const load = useCallback(async () => {
-    try {
-      const [statusR, settingsR, reportsR, clientsR] = await Promise.all([
-        api.get("/api/system/status"),
-        api.get("/api/system/settings"),
-        api.get("/api/system/reports"),
-        api.get("/api/clients")
-      ]);
-      setStatus(statusR.data.status);
-      setSettings(settingsR.data.settings);
-      setReports(reportsR.data.reports || []);
-      setClients(clientsR.data.clients || []);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+  // Load settings directly from Supabase for reliability
+  const loadSettings = useCallback(async () => {
+    const { data } = await supabase
+      .from("platform_settings")
+      .select("key, value");
+    if (data) {
+      const s = {};
+      data.forEach(row => { s[row.key] = row.value; });
+      setSettings({
+        trading_enabled: s["trading_enabled"] === true || s["trading_enabled"] === "true",
+        signal_interval_minutes: parseInt(s["signal_interval_minutes"]) || 15,
+        ...s
+      });
+    }
   }, []);
 
-  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, [load]);
+  const loadClients = useCallback(async () => {
+    const { data } = await supabase.from("clients").select("*").eq("status", "active");
+    if (data) setClients(data);
+  }, []);
 
-  const toggleSetting = async (key, current) => {
-    const newVal = !current;
-    setSettings(s => ({ ...s, [key]: newVal }));
-    await api.post("/api/system/trading/toggle", { enabled: newVal });
-    showToast(`Auto-trading ${newVal ? "enabled" : "disabled"}`);
+  const loadStatus = useCallback(async () => {
+    try {
+      const r = await api.get("/api/system/status");
+      setStatus(r.data.status);
+    } catch (e) { console.error(e); }
+  }, []);
+
+  const loadReports = useCallback(async () => {
+    try {
+      const r = await api.get("/api/system/reports");
+      setReports(r.data.reports || []);
+    } catch (e) {}
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([loadSettings(), loadClients(), loadStatus(), loadReports()]);
+    setLoading(false);
+  }, [loadSettings, loadClients, loadStatus, loadReports]);
+
+  useEffect(() => {
+    load();
+    const iv = setInterval(() => {
+      loadStatus();
+      loadSettings(); // Re-read settings every 30s
+    }, 30000);
+    return () => clearInterval(iv);
+  }, [load, loadStatus, loadSettings]);
+
+  // Save setting to Supabase directly
+  const saveSetting = async (key, value) => {
+    await supabase
+      .from("platform_settings")
+      .upsert({ key, value }, { onConflict: "key" });
+    setSettings(s => ({ ...s, [key]: value }));
+  };
+
+  const toggleTrading = async () => {
+    const newVal = !settings.trading_enabled;
+    await saveSetting("trading_enabled", newVal);
+    showToast(`Auto-trading ${newVal ? "✅ enabled" : "⏸ paused"}`);
+  };
+
+  const setInterval_ = async (minutes) => {
+    await saveSetting("signal_interval_minutes", minutes);
+    showToast(`Signal interval set to ${minutes} minutes`);
   };
 
   const emergencyStop = async () => {
     if (!window.confirm("⛔ EMERGENCY STOP — halt all trading immediately?")) return;
-    await api.post("/api/system/emergency-stop");
-    setSettings(s => ({ ...s, trading_enabled: false }));
-    showToast("⛔ Emergency stop activated — all trading halted");
-    await load();
+    await saveSetting("trading_enabled", false);
+    showToast("⛔ Emergency stop — all trading halted");
   };
 
   const generateReport = async (e) => {
     e.preventDefault();
+    if (!genForm.client_id) { showToast("Please select a client"); return; }
     setGenerating(true);
     try {
       const r = await api.post("/api/system/reports/generate", genForm);
-      showToast(`✅ Report generated for ${r.data.stats?.period}`);
-      await load();
+      showToast(`✅ Report generated: ${r.data.stats?.period}`);
+      await loadReports();
     } catch (e) {
       showToast("❌ " + (e.response?.data?.error || e.message));
     } finally { setGenerating(false); }
@@ -110,7 +131,8 @@ export default function SystemControl() {
     showToast("✅ Generating reports for all clients...");
   };
 
-  const tradingEnabled = settings["trading_enabled"] === true || settings["trading_enabled"] === "true";
+  const tradingEnabled = settings.trading_enabled === true || settings.trading_enabled === "true";
+  const signalInterval = parseInt(settings.signal_interval_minutes) || 15;
 
   return (
     <>
@@ -134,116 +156,127 @@ export default function SystemControl() {
       )}
 
       <div className="page-body">
-        {/* System Status */}
         <div className="grid-2" style={{ marginBottom: 16, gap: 16 }}>
+          {/* Live Status */}
           <div className="card">
             <div className="card-header"><span className="card-title">Live Status</span></div>
             {status ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <StatusIndicator online={status.bridge_healthy} label={status.bridge_healthy ? "Bridge Online" : "Bridge Offline"} />
-                <StatusIndicator online={tradingEnabled} label={tradingEnabled ? "Auto-Trading Active" : "Auto-Trading Paused"} />
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 8 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <StatusDot online={status.bridge_healthy} />
+                  <span style={{ fontWeight: 600, color: status.bridge_healthy ? "var(--bull)" : "var(--bear)" }}>
+                    {status.bridge_healthy ? "Bridge Online" : "Bridge Offline"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <StatusDot online={tradingEnabled} />
+                  <span style={{ fontWeight: 600, color: tradingEnabled ? "var(--bull)" : "var(--warn)" }}>
+                    {tradingEnabled ? "Auto-Trading Active" : "Auto-Trading Paused"}
+                  </span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 4 }}>
                   {[
-                    ["Connected Accounts", `${status.connected_accounts}/${status.total_accounts}`],
+                    ["Accounts", `${status.connected_accounts}/${status.total_accounts}`],
                     ["Open Trades", status.open_trades],
-                    ["System Uptime", `${status.uptime_minutes}min`],
+                    ["Uptime", `${status.uptime_minutes}min`],
                     ["Last Signal", status.last_signal_minutes_ago != null ? `${status.last_signal_minutes_ago}min ago` : "None"],
                   ].map(([label, value]) => (
                     <div key={label} style={{ background: "var(--bg-elevated)", borderRadius: "var(--radius)", padding: "10px 12px" }}>
-                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: 2, color: "var(--text-muted)", marginBottom: 4 }}>
-                        {label.toUpperCase()}
-                      </div>
-                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 700, color: "var(--text-primary)" }}>
-                        {value}
-                      </div>
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: 2, color: "var(--text-muted)", marginBottom: 4 }}>{label.toUpperCase()}</div>
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 700 }}>{value}</div>
                     </div>
                   ))}
                 </div>
               </div>
             ) : (
-              <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>Loading...</div>
+              <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                {loading ? "Loading..." : "Status unavailable"}
+              </div>
             )}
           </div>
 
           {/* Engine Controls */}
           <div className="card">
             <div className="card-header"><span className="card-title">Engine Controls</span></div>
-            <ControlToggle
-              label="Auto-Trading"
-              desc="Execute signals automatically on all connected accounts"
-              value={tradingEnabled}
-              onChange={() => toggleSetting("trading_enabled", tradingEnabled)}
-            />
-            <ControlToggle
-              label="Signal Generation"
-              desc="Generate AI signals every 15 minutes via Claude"
-              value={settings["trading_enabled"] !== false}
-              onChange={() => toggleSetting("trading_enabled", settings["trading_enabled"] !== false)}
-            />
+
+            {/* Auto-Trading Toggle */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 0", borderBottom: "1px solid var(--border)" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>Auto-Trading</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Execute signals automatically on connected accounts</div>
+              </div>
+              <button onClick={toggleTrading} style={{
+                width: 52, height: 28, borderRadius: 14, border: "none", cursor: "pointer",
+                background: tradingEnabled ? "var(--bull)" : "var(--border)",
+                position: "relative", transition: "background 0.2s", flexShrink: 0
+              }}>
+                <div style={{
+                  width: 22, height: 22, borderRadius: "50%", background: "white",
+                  position: "absolute", top: 3, left: tradingEnabled ? 26 : 4,
+                  transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
+                }} />
+              </button>
+            </div>
+
+            {/* Signal Interval */}
             <div style={{ padding: "14px 0" }}>
-              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Signal Interval</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Signal Interval</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[5, 10, 15, 30, 60].map(v => (
                   <button key={v}
-                    className={`btn btn-sm ${(settings["signal_interval_minutes"] || 15) == v ? "btn-primary" : "btn-ghost"}`}
-                    onClick={async () => {
-                      setSettings(s => ({ ...s, signal_interval_minutes: v }));
-                      await api.put("/api/system/settings", { key: "signal_interval_minutes", value: v });
-                      showToast(`Signal interval set to ${v} minutes`);
-                    }}>
+                    className={`btn btn-sm ${signalInterval === v ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => setInterval_(v)}>
                     {v}m
                   </button>
                 ))}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6, fontFamily: "var(--font-mono)" }}>
+                Current: every {signalInterval} minutes
               </div>
             </div>
           </div>
         </div>
 
-        {/* Bridge Setup Guide */}
-        <div className="card" style={{ marginBottom: 16, borderColor: "var(--accent-dim)" }}>
+        {/* Bridge Setup */}
+        <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header">
             <span className="card-title">Bridge Setup (Windows)</span>
-            <span className="badge accent">Run Once</span>
+            <span className="badge accent">Run on your PC</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <div>
               <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Manual Start</div>
               <div style={{ background: "var(--bg-elevated)", borderRadius: "var(--radius)", padding: 12, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--accent)", lineHeight: 2 }}>
-                cd python-bridge<br />
-                python bridge.py
+                cd python-bridge<br />python bridge.py
               </div>
             </div>
             <div>
               <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Auto-Start (Recommended)</div>
               <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.8 }}>
                 Double-click <strong>start_bridge.bat</strong> in python-bridge folder.<br />
-                Or add it to Windows Task Scheduler to run on startup automatically.
+                Restarts automatically if it crashes.
               </div>
             </div>
           </div>
-          <div style={{ marginTop: 14, padding: "10px 14px", background: "var(--warn-dim)", borderRadius: "var(--radius)", fontSize: 12, color: "var(--warn)" }}>
-            💡 <strong>UptimeRobot Setup:</strong> Go to uptimerobot.com → Add Monitor → HTTP(s) → URL: https://aethelgard-backend-uff7.onrender.com/ping → Interval: 5 min. This prevents Render from sleeping.
+          <div style={{ marginTop: 12, padding: "10px 14px", background: "var(--warn-dim)", borderRadius: "var(--radius)", fontSize: 12, color: "var(--warn)" }}>
+            💡 <strong>UptimeRobot:</strong> uptimerobot.com → Add Monitor → HTTP(s) → <code>https://aethelgard-backend-uff7.onrender.com/ping</code> → 5 min interval
           </div>
         </div>
 
         {/* Monthly Reports */}
-        <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card">
           <div className="card-header">
             <span className="card-title">Monthly Reports</span>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn btn-ghost btn-sm" onClick={generateAllReports}>
-                📊 Generate All
-              </button>
-            </div>
+            <button className="btn btn-ghost btn-sm" onClick={generateAllReports}>📊 Generate All</button>
           </div>
 
-          {/* Generate single report form */}
           <div style={{ background: "var(--bg-elevated)", borderRadius: "var(--radius)", padding: 16, marginBottom: 16 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Generate Report for Client</div>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Generate Report</div>
             <form onSubmit={generateReport} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
               <div>
                 <label className="form-label">Client</label>
-                <select className="form-select" style={{ width: 180 }} value={genForm.client_id}
+                <select className="form-select" style={{ width: 180 }}
+                  value={genForm.client_id}
                   onChange={e => setGenForm({ ...genForm, client_id: e.target.value })} required>
                   <option value="">Select client...</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
@@ -251,10 +284,11 @@ export default function SystemControl() {
               </div>
               <div>
                 <label className="form-label">Month</label>
-                <select className="form-select" style={{ width: 120 }} value={genForm.month}
+                <select className="form-select" style={{ width: 130 }}
+                  value={genForm.month}
                   onChange={e => setGenForm({ ...genForm, month: parseInt(e.target.value) })}>
                   {Array.from({ length: 12 }, (_, i) => (
-                    <option key={i + 1} value={i + 1}>
+                    <option key={i+1} value={i+1}>
                       {new Date(2026, i).toLocaleString("en", { month: "long" })}
                     </option>
                   ))}
@@ -263,7 +297,8 @@ export default function SystemControl() {
               <div>
                 <label className="form-label">Year</label>
                 <input className="form-input" type="number" style={{ width: 90 }}
-                  value={genForm.year} onChange={e => setGenForm({ ...genForm, year: parseInt(e.target.value) })} />
+                  value={genForm.year}
+                  onChange={e => setGenForm({ ...genForm, year: parseInt(e.target.value) })} />
               </div>
               <button type="submit" className="btn btn-primary btn-sm" disabled={generating}>
                 {generating ? "Generating..." : "📊 Generate"}
@@ -271,9 +306,8 @@ export default function SystemControl() {
             </form>
           </div>
 
-          {/* Reports list */}
           {reports.length === 0 ? (
-            <div className="empty-state" style={{ padding: 24 }}>
+            <div className="empty-state" style={{ padding: 32 }}>
               <div className="empty-icon">📊</div>
               <div className="empty-text">No reports generated yet</div>
             </div>
@@ -288,21 +322,13 @@ export default function SystemControl() {
                     <tr key={r.id}>
                       <td style={{ fontWeight: 600 }}>{r.clients?.full_name}</td>
                       <td className="mono" style={{ fontSize: 11 }}>{r.period_label}</td>
-                      <td>
-                        <span className={parseFloat(r.stats?.total_pnl) >= 0 ? "pnl-pos" : "pnl-neg"}>
-                          {parseFloat(r.stats?.total_pnl) >= 0 ? "+" : ""}${r.stats?.total_pnl}
-                        </span>
-                      </td>
+                      <td><span className={parseFloat(r.stats?.total_pnl) >= 0 ? "pnl-pos" : "pnl-neg"}>
+                        {parseFloat(r.stats?.total_pnl) >= 0 ? "+" : ""}${r.stats?.total_pnl}
+                      </span></td>
                       <td className="mono">{r.stats?.win_rate}%</td>
-                      <td className="mono" style={{ color: "var(--bull)", fontWeight: 700 }}>
-                        ${r.stats?.split_amount}
-                      </td>
+                      <td style={{ fontWeight: 700, color: "var(--bull)" }}>${r.stats?.split_amount}</td>
                       <td><span className={`badge ${r.status === "sent" ? "bull" : "accent"}`}>{r.status?.toUpperCase()}</span></td>
-                      <td>
-                        <button className="btn btn-ghost btn-xs" onClick={() => setSelectedReport(r)}>
-                          👁 View
-                        </button>
-                      </td>
+                      <td><button className="btn btn-ghost btn-xs" onClick={() => setSelectedReport(r)}>👁 View</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -310,38 +336,18 @@ export default function SystemControl() {
             </div>
           )}
         </div>
-
-        {/* System Logs */}
-        {status?.recent_logs?.length > 0 && (
-          <div className="card">
-            <div className="card-header"><span className="card-title">Recent System Events</span></div>
-            <div style={{ maxHeight: 200, overflowY: "auto" }}>
-              {status.recent_logs.map(l => (
-                <div key={l.id} className="log-entry">
-                  <span className={`log-level ${l.level}`}>{l.level}</span>
-                  <span className="log-source">[{l.source}]</span>
-                  <span className="log-msg">{l.message}</span>
-                  <span className="log-time">{new Date(l.created_at).toLocaleTimeString()}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Report Preview Modal */}
       {selectedReport && (
         <div className="modal-overlay" onClick={() => setSelectedReport(null)}>
           <div className="modal" style={{ width: 700, maxHeight: "85vh" }} onClick={e => e.stopPropagation()}>
-            <div className="modal-title" style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>Report: {selectedReport.period_label} — {selectedReport.clients?.full_name}</span>
+            <div className="modal-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>{selectedReport.period_label} — {selectedReport.clients?.full_name}</span>
               <button className="btn btn-ghost btn-xs" onClick={() => setSelectedReport(null)}>✕</button>
             </div>
-            <iframe
-              srcDoc={selectedReport.html_content}
+            <iframe srcDoc={selectedReport.html_content}
               style={{ width: "100%", height: 500, border: "1px solid var(--border)", borderRadius: "var(--radius)" }}
-              title="Report Preview"
-            />
+              title="Report Preview" />
           </div>
         </div>
       )}
