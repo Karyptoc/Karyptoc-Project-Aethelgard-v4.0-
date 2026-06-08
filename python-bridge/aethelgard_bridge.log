@@ -824,3 +824,898 @@
 2026-06-06 04:52:38,538 [WARNING] Skipping SPX500Cash — not available on this broker
 2026-06-06 04:52:38,543 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
 2026-06-06 04:53:00,877 [INFO] Signal: GOLD -> 4916c487-0b3c-4bdc-afde-34cd6d402c7a
+2026-06-06 04:53:35,987 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 04:54:01,586 [INFO] No signal for GBPUSD (HOLD)
+2026-06-06 04:54:27,205 [INFO] No signal for USDJPY (HOLD)
+2026-06-06 04:54:51,086 [INFO] Signal: US30Cash -> 1e1689d3-5221-45c4-b73c-c0a0b6057401
+2026-06-06 04:55:17,585 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 04:55:43,194 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 04:55:52,467 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:56:28,328 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:57:03,653 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:57:39,390 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:58:12,762 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:58:46,270 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:59:20,201 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 04:59:53,560 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:00:28,357 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:01:01,945 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:01:34,980 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:02:10,709 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:02:45,195 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:03:19,422 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:03:55,068 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:04:29,624 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:05:02,723 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:05:35,881 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:06:09,872 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:06:43,916 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:07:18,132 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:07:51,449 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:08:25,679 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:08:59,405 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:09:35,384 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:10:09,068 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:10:42,943 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:10:48,622 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 05:10:48,627 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 05:10:48,638 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 05:11:08,870 [INFO] Signal: GOLD -> 89f12542-540a-408d-ab9a-a728f43127fd
+2026-06-06 05:11:35,595 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 05:12:01,174 [INFO] No signal for GBPUSD (HOLD)
+2026-06-06 05:12:24,381 [INFO] No signal for USDJPY (HOLD)
+2026-06-06 05:12:46,851 [INFO] Signal: US30Cash -> 1fdae805-cc4f-44b2-8fae-c922e3194df8
+2026-06-06 05:13:10,320 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 05:13:35,601 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 05:13:44,925 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:14:18,622 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:14:52,512 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:15:28,357 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:16:02,469 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 05:16:37,578 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 06:38:26,238 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 06:38:47,235 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Read timed out. (read timeout=10)
+2026-06-06 06:38:47,584 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 06:38:47,745 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 06:38:48,154 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 06:39:15,071 [INFO] Signal: GOLD -> 170f3071-a072-4364-9d13-9126e3dd79c7
+2026-06-06 06:39:42,661 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 06:40:05,705 [INFO] No signal for GBPUSD (HOLD)
+2026-06-06 06:40:29,681 [INFO] No signal for USDJPY (HOLD)
+2026-06-06 06:40:51,641 [INFO] Signal: US30Cash -> 7f3bb7bb-35a3-45b1-b73a-388d04796778
+2026-06-06 06:41:15,754 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 06:41:39,613 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 06:41:48,923 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 06:42:22,348 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 06:42:57,606 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 06:43:30,710 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 09:44:03,499 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 09:44:03,769 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 09:44:03,772 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 09:44:04,252 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 10:41:57,257 [ERROR] OHLCV error GOLD: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1006)')))
+2026-06-06 10:42:08,128 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 10:42:14,574 [INFO] No signal for GBPUSD (HOLD)
+2026-06-06 10:42:20,885 [INFO] No signal for USDJPY (HOLD)
+2026-06-06 10:42:27,179 [INFO] No signal for US30Cash (HOLD)
+2026-06-06 10:42:33,240 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 10:42:39,425 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 10:42:53,344 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:43:28,512 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:44:03,524 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:44:36,735 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:45:11,246 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:45:46,574 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:46:19,749 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:46:53,438 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:47:27,504 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:48:01,338 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:48:35,255 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:49:08,617 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:49:41,923 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:50:18,847 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:50:52,854 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:51:26,644 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:52:00,033 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:52:33,882 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:53:07,697 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:53:41,973 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:54:15,728 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:54:49,401 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:55:22,037 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:55:55,535 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:56:28,194 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:57:01,787 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:57:35,852 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:57:42,859 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 10:57:42,859 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 10:57:42,873 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 10:57:44,433 [INFO] No signal for GOLD (HOLD)
+2026-06-06 10:57:48,894 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 10:57:53,471 [INFO] No signal for GBPUSD (HOLD)
+2026-06-06 10:57:57,868 [INFO] No signal for USDJPY (HOLD)
+2026-06-06 10:58:02,291 [INFO] No signal for US30Cash (HOLD)
+2026-06-06 10:58:06,623 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 10:58:11,276 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 10:58:18,353 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:58:51,905 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:59:25,195 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 10:59:58,984 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:00:32,770 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:01:05,331 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:01:38,950 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:02:12,992 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:02:46,172 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:03:18,922 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:03:52,023 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:04:25,404 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:04:58,127 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:05:31,806 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:06:04,852 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:06:37,005 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:07:10,802 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:07:43,639 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:08:16,041 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:08:48,651 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:09:22,739 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:09:56,480 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:10:29,056 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:11:02,713 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:11:35,305 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:12:09,700 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:12:42,526 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:13:16,118 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:13:17,887 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 11:13:17,887 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 11:13:17,900 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 11:13:19,439 [INFO] No signal for GOLD (HOLD)
+2026-06-06 11:13:23,761 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 11:13:28,065 [INFO] No signal for GBPUSD (HOLD)
+2026-06-06 11:13:32,446 [INFO] No signal for USDJPY (HOLD)
+2026-06-06 11:13:36,767 [INFO] No signal for US30Cash (HOLD)
+2026-06-06 11:13:41,180 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 11:13:45,841 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 11:13:52,801 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:14:26,446 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:14:59,271 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:15:32,207 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:16:04,884 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:16:37,181 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:17:09,698 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:17:43,260 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:18:16,446 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:18:49,206 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:19:23,156 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:19:55,823 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:20:29,387 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:21:02,543 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:21:35,388 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:22:08,304 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:22:42,245 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:23:16,401 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:23:49,182 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:24:22,329 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:24:56,110 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:25:30,543 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:26:03,275 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:26:37,032 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:27:09,750 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:27:43,999 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:28:17,213 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:28:51,777 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:28:55,335 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 11:28:55,335 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 11:28:55,351 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 11:29:16,970 [INFO] Signal: GOLD -> e5e72e53-d8e1-4ee1-ac7c-95389e36c828
+2026-06-06 11:29:43,589 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 11:30:08,398 [INFO] Signal: GBPUSD -> b601f5d8-4c4a-4e52-b98c-142bdccb2e07
+2026-06-06 11:30:30,185 [INFO] Signal: USDJPY -> abf94ecb-9bb5-43df-be92-40ebd13a28ce
+2026-06-06 11:30:53,788 [INFO] Signal: US30Cash -> 9a534a21-3e53-4346-85f5-de0052691194
+2026-06-06 11:31:17,402 [INFO] Signal: GER40Cash -> d6c7e32a-2ee8-4176-be51-4fc4de16f718
+2026-06-06 11:31:40,896 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 11:31:53,028 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:32:27,455 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:33:03,060 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:33:37,601 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:34:11,550 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:34:45,753 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:35:19,575 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:35:55,764 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:36:29,721 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:37:04,115 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:37:38,275 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:38:12,517 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:38:25,936 [INFO] Aethelgard MT5 Bridge v5 starting...
+2026-06-06 11:38:25,938 [INFO] New: Trailing stops | Break-even | Partial closes | Spread filter
+2026-06-06 11:38:26,036 [INFO] MT5: (500, 5833, '25 Apr 2026') | Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-06 11:38:29,007 [INFO] Connected: 334414473@XMGlobal-MT5 9
+2026-06-06 11:38:31,873 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:38:31,873 [INFO] Pushing initial OHLCV...
+2026-06-06 11:38:31,877 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 11:38:31,878 [INFO] Skipping GOLD signal — spread too wide: 117.0 pips
+2026-06-06 11:38:46,362 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:38:50,494 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 11:38:53,508 [INFO] Skipping GBPUSD signal — spread too wide: 10.2 pips
+2026-06-06 11:38:53,509 [INFO] Skipping USDJPY signal — spread too wide: 3.7 pips
+2026-06-06 11:38:55,745 [INFO] No signal for US30Cash (HOLD)
+2026-06-06 11:39:00,934 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 11:39:20,135 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 11:39:22,239 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:39:23,145 [INFO] Bridge v5 running. Press Ctrl+C to stop.
+2026-06-06 11:39:56,452 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:39:57,350 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:40:30,518 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:40:31,552 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:41:05,931 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:41:06,389 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:41:52,054 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:41:52,459 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:42:25,856 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:42:26,310 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:42:59,965 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:43:00,329 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:43:36,594 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:43:36,639 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:44:10,462 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:44:12,896 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:44:46,058 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:44:46,373 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:45:19,313 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:45:20,108 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:45:53,628 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:45:53,696 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:46:27,543 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:46:27,566 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:46:44,574 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 11:46:44,579 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 11:46:44,595 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 11:46:46,833 [INFO] No signal for GOLD (HOLD)
+2026-06-06 11:47:00,984 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:47:08,821 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 11:47:14,218 [INFO] No signal for GBPUSD (HOLD)
+2026-06-06 11:47:20,129 [INFO] No signal for USDJPY (HOLD)
+2026-06-06 11:47:25,535 [INFO] No signal for US30Cash (HOLD)
+2026-06-06 11:47:32,033 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 11:47:37,371 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:47:51,821 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 11:48:02,657 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:48:13,214 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:48:36,969 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:48:47,818 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:49:10,873 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:49:21,815 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:49:46,283 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:49:56,183 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:50:20,182 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:50:33,588 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:50:54,172 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:51:08,528 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-06 11:51:08,604 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/accounts (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-06 11:51:10,012 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NewConnectionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-06-06 11:51:10,015 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/accounts (Caused by NewConnectionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-06-06 11:51:10,058 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NewConnectionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-06-06 11:51:19,313 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NewConnectionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-06-06 11:51:20,211 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NewConnectionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-06-06 11:51:24,360 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NewConnectionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-06-06 11:51:44,986 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:51:58,146 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:52:19,548 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:52:33,272 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:52:54,415 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:53:08,013 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:53:29,603 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:53:44,382 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:54:05,182 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:54:18,957 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:54:24,031 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 11:54:24,034 [INFO] Skipping GOLD signal — spread too wide: 117.0 pips
+2026-06-06 11:54:44,386 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 11:54:47,402 [INFO] Skipping GBPUSD signal — spread too wide: 10.2 pips
+2026-06-06 11:54:47,403 [INFO] Skipping USDJPY signal — spread too wide: 3.7 pips
+2026-06-06 11:54:53,827 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:54:54,450 [INFO] No signal for US30Cash (HOLD)
+2026-06-06 11:55:01,155 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 11:55:21,955 [INFO] Signal: BTCUSD → f02779ec-70fb-4ce0-a1f4-00cf1025c1d9
+2026-06-06 11:55:30,215 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:55:31,942 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:56:04,067 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:56:05,852 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:56:40,338 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:56:43,222 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:57:16,059 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:57:17,362 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:57:50,413 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:57:51,973 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:58:26,794 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:58:26,794 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:59:00,780 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:59:01,699 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:59:35,300 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 11:59:35,749 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:00:10,224 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:00:10,463 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:00:44,681 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:00:45,128 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:01:19,501 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:01:19,632 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:01:53,470 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:01:54,252 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:02:27,961 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:02:28,111 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:02:57,307 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 12:02:57,309 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 12:02:57,311 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 12:03:00,985 [INFO] No signal for GOLD (HOLD)
+2026-06-06 12:03:04,389 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:03:24,400 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 12:03:32,421 [INFO] No signal for GBPUSD (HOLD)
+2026-06-06 12:03:39,929 [INFO] No signal for USDJPY (HOLD)
+2026-06-06 12:03:42,178 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:03:46,341 [INFO] No signal for US30Cash (HOLD)
+2026-06-06 12:03:52,675 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 12:03:58,790 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 12:04:09,068 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:04:18,775 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:04:43,549 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:04:52,930 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:05:18,543 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:05:27,386 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:05:53,248 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:06:01,572 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:06:27,070 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:06:35,797 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:07:00,761 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:07:12,179 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:07:36,038 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:07:46,459 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:08:11,089 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:08:24,572 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:08:48,116 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:09:03,389 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:09:22,327 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:09:38,453 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:09:59,321 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:10:13,695 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:10:27,197 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 12:10:27,198 [INFO] Skipping GOLD signal — spread too wide: 117.0 pips
+2026-06-06 12:10:33,585 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:10:46,514 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 12:10:49,525 [INFO] Skipping GBPUSD signal — spread too wide: 10.2 pips
+2026-06-06 12:10:49,526 [INFO] Skipping USDJPY signal — spread too wide: 3.7 pips
+2026-06-06 12:10:53,640 [INFO] No signal for US30Cash (HOLD)
+2026-06-06 12:11:01,442 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 12:11:08,150 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 12:11:08,617 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:11:21,957 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:11:42,843 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:11:56,459 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:12:20,289 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:12:34,455 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:12:55,434 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:13:09,842 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:13:33,235 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:13:51,511 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:14:09,189 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:14:29,230 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:14:43,387 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:15:04,071 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:15:17,921 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:15:39,691 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:15:55,001 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:16:15,733 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:16:30,953 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:16:54,861 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:17:13,806 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:17:31,021 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:17:49,754 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:18:12,617 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:18:25,316 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:18:48,724 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:19:01,864 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:19:02,943 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 12:19:02,947 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 12:19:02,950 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 12:19:07,302 [INFO] No signal for GOLD (HOLD)
+2026-06-06 12:19:24,400 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:19:31,535 [INFO] No signal for EURUSD (HOLD)
+2026-06-06 12:19:38,392 [INFO] No signal for GBPUSD (HOLD)
+2026-06-06 12:19:44,751 [INFO] No signal for USDJPY (HOLD)
+2026-06-06 12:19:51,934 [INFO] No signal for US30Cash (HOLD)
+2026-06-06 12:19:58,357 [INFO] No signal for GER40Cash (HOLD)
+2026-06-06 12:19:58,607 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:20:04,533 [INFO] No signal for BTCUSD (HOLD)
+2026-06-06 12:20:18,505 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:20:34,701 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:20:54,006 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:21:08,881 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:21:29,624 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:21:43,322 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:22:05,191 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:22:19,407 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:22:39,515 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:22:53,975 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:23:13,477 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:23:31,260 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:23:49,014 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:24:07,082 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:24:24,597 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:24:41,937 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:24:58,699 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 12:25:16,887 [INFO] Synced 334414473: $2272.52 | P&L $-10.0
+2026-06-06 15:25:21,831 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-06 15:25:21,835 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-06 15:25:35,566 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-06 15:25:40,430 [WARNING] Cannot reach backend: ('Connection aborted.', ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None))
+2026-06-06 15:25:40,465 [WARNING] Symbol SPX500Cash not found on this broker
+2026-06-06 15:25:40,488 [WARNING] Skipping SPX500Cash — not available on this broker
+2026-06-06 15:25:40,545 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 15:25:43,480 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: ('Connection aborted.', ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None))
+2026-06-06 15:25:43,541 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-06 15:25:43,543 [INFO] Skipping GOLD signal — spread too wide: 117.0 pips
+2026-06-08 02:12:56,932 [ERROR] OHLCV error GOLD: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:12:57,637 [ERROR] OHLCV error EURUSD: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:12:58,170 [INFO] Skipping GBPUSD signal — spread too wide: 10.2 pips
+2026-06-08 02:12:58,328 [INFO] Skipping USDJPY signal — spread too wide: 3.7 pips
+2026-06-08 02:13:01,906 [ERROR] OHLCV error US30Cash: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:01,928 [ERROR] OHLCV error EURUSD: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:04,663 [ERROR] OHLCV error GER40Cash: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:04,887 [ERROR] OHLCV error GBPUSD: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:06,265 [ERROR] OHLCV error USDJPY: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:06,265 [ERROR] OHLCV error BTCUSD: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:07,585 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:07,769 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:07,878 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/accounts (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:08,794 [ERROR] OHLCV error US30Cash: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:09,021 [ERROR] OHLCV error GER40Cash: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:09,234 [ERROR] OHLCV error BTCUSD: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/ohlcv (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:10,325 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:10,521 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:10,568 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/accounts (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:18,193 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:20,857 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:40,633 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:40,637 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:53,758 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:13:53,760 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:14:24,912 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:14:37,455 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/accounts (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:14:37,550 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/accounts (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:14:50,685 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:14:50,703 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:14:51,737 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:14:51,860 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:03,080 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:03,214 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:13,159 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:13,244 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:21,178 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:21,253 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:23,183 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:23,268 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:33,190 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:33,274 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:38,197 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/accounts (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:15:38,284 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/accounts (Caused by NameResolutionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to resolve 'aethelgard-backend-uff7.onrender.com' ([Errno 11001] getaddrinfo failed)"))
+2026-06-08 02:19:52,280 [INFO] Aethelgard MT5 Bridge v5 starting...
+2026-06-08 02:19:52,280 [INFO] New: Trailing stops | Break-even | Partial closes | Spread filter
+2026-06-08 02:20:06,451 [INFO] MT5: (500, 5833, '25 Apr 2026') | Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-08 02:20:08,694 [INFO] Connected: 334414473@XMGlobal-MT5 9
+2026-06-08 02:20:12,506 [INFO] Synced 334414473: $2257.53 | P&L $-0.59
+2026-06-08 02:20:12,506 [INFO] Pushing initial OHLCV...
+2026-06-08 02:20:12,508 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 02:20:12,508 [INFO] Skipping GOLD signal — spread too wide: 56.0 pips
+2026-06-08 02:20:13,890 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 02:20:20,534 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 02:20:26,003 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 02:20:30,782 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 02:20:34,872 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 02:20:39,100 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 02:20:42,107 [INFO] Bridge v5 running. Press Ctrl+C to stop.
+2026-06-08 02:21:20,889 [INFO] Synced 334414473: $2257.53 | P&L $-0.47
+2026-06-08 02:21:56,042 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1006)')))
+2026-06-08 02:22:55,809 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1006)')))
+2026-06-08 02:23:41,493 [INFO] Synced 334414473: $2257.53 | P&L $-0.27
+2026-06-08 02:24:15,357 [INFO] Synced 334414473: $2257.53 | P&L $-0.31
+2026-06-08 02:25:06,271 [INFO] Aethelgard MT5 Bridge v5 starting...
+2026-06-08 02:25:06,272 [INFO] New: Trailing stops | Break-even | Partial closes | Spread filter
+2026-06-08 02:25:06,400 [INFO] MT5: (500, 5833, '25 Apr 2026') | Backend: https://aethelgard-backend-uff7.onrender.com
+2026-06-08 02:25:08,104 [INFO] Synced 334414473: $2257.53 | P&L $-0.31
+2026-06-08 02:25:10,455 [INFO] Connected: 334414473@XMGlobal-MT5 9
+2026-06-08 02:25:12,205 [INFO] Synced 334414473: $2257.53 | P&L $-0.33
+2026-06-08 02:25:12,205 [INFO] Pushing initial OHLCV...
+2026-06-08 02:25:12,382 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 02:25:12,383 [INFO] Skipping GOLD signal — spread too wide: 55.0 pips
+2026-06-08 02:25:13,937 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 02:25:18,416 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 02:25:26,189 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 02:25:31,467 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 02:25:35,962 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 02:25:40,274 [INFO] Synced 334414473: $2257.53 | P&L $-0.39
+2026-06-08 02:25:48,653 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 02:25:51,658 [INFO] Bridge v5 running. Press Ctrl+C to stop.
+2026-06-08 02:26:13,211 [INFO] Synced 334414473: $2257.53 | P&L $-0.36
+2026-06-08 02:26:23,474 [INFO] Synced 334414473: $2257.53 | P&L $-0.3
+2026-06-08 02:26:45,152 [INFO] Synced 334414473: $2257.53 | P&L $-0.29
+2026-06-08 02:26:55,810 [INFO] Synced 334414473: $2257.53 | P&L $-0.29
+2026-06-08 02:27:16,931 [INFO] Synced 334414473: $2257.53 | P&L $-0.31
+2026-06-08 02:27:27,305 [INFO] Synced 334414473: $2257.53 | P&L $-0.29
+2026-06-08 02:27:48,455 [INFO] Synced 334414473: $2257.53 | P&L $-0.23
+2026-06-08 02:27:59,499 [INFO] Synced 334414473: $2257.53 | P&L $-0.24
+2026-06-08 02:28:20,709 [INFO] Synced 334414473: $2257.53 | P&L $-0.25
+2026-06-08 02:28:33,330 [INFO] Synced 334414473: $2257.53 | P&L $-0.26
+2026-06-08 02:28:53,343 [INFO] Synced 334414473: $2257.53 | P&L $-0.22
+2026-06-08 02:29:04,949 [INFO] Synced 334414473: $2257.53 | P&L $-0.2
+2026-06-08 02:29:24,815 [INFO] Synced 334414473: $2257.53 | P&L $-0.27
+2026-06-08 02:29:37,227 [INFO] Synced 334414473: $2257.53 | P&L $-0.21
+2026-06-08 02:29:58,716 [INFO] Synced 334414473: $2257.53 | P&L $-0.22
+2026-06-08 02:30:09,653 [INFO] Synced 334414473: $2257.53 | P&L $-0.34
+2026-06-08 02:30:31,133 [INFO] Synced 334414473: $2257.53 | P&L $-0.5
+2026-06-08 02:30:41,978 [INFO] Synced 334414473: $2257.53 | P&L $-0.45
+2026-06-08 02:31:02,785 [INFO] Synced 334414473: $2257.53 | P&L $-0.41
+2026-06-08 02:31:13,497 [INFO] Synced 334414473: $2257.53 | P&L $-0.41
+2026-06-08 02:31:35,937 [INFO] Synced 334414473: $2257.53 | P&L $-0.44
+2026-06-08 02:31:45,901 [INFO] Synced 334414473: $2257.53 | P&L $-0.47
+2026-06-08 02:32:08,915 [INFO] Synced 334414473: $2257.53 | P&L $-0.51
+2026-06-08 02:32:17,593 [INFO] Synced 334414473: $2257.53 | P&L $-0.47
+2026-06-08 02:32:40,938 [INFO] Synced 334414473: $2257.53 | P&L $-0.44
+2026-06-08 02:32:49,400 [INFO] Synced 334414473: $2257.53 | P&L $-0.39
+2026-06-08 02:33:12,691 [INFO] Synced 334414473: $2257.53 | P&L $-0.46
+2026-06-08 02:33:21,890 [INFO] Synced 334414473: $2257.53 | P&L $-0.5
+2026-06-08 02:33:44,418 [INFO] Synced 334414473: $2257.53 | P&L $-0.46
+2026-06-08 02:33:53,681 [INFO] Synced 334414473: $2257.53 | P&L $-0.45
+2026-06-08 02:34:17,765 [INFO] Synced 334414473: $2257.53 | P&L $-0.52
+2026-06-08 02:34:26,270 [INFO] Synced 334414473: $2257.53 | P&L $-0.55
+2026-06-08 02:34:49,382 [INFO] Synced 334414473: $2257.53 | P&L $-0.59
+2026-06-08 02:34:57,917 [INFO] Synced 334414473: $2257.53 | P&L $-0.58
+2026-06-08 02:35:21,178 [INFO] Synced 334414473: $2257.53 | P&L $-0.6
+2026-06-08 02:35:31,356 [INFO] Synced 334414473: $2257.53 | P&L $-0.74
+2026-06-08 02:35:42,245 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 02:35:42,249 [INFO] Skipping GOLD signal — spread too wide: 55.0 pips
+2026-06-08 02:35:43,177 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 02:35:47,014 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 02:35:51,012 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 02:35:54,796 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 02:35:58,607 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 02:36:02,480 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 02:36:04,070 [INFO] Synced 334414473: $2257.53 | P&L $-0.96
+2026-06-08 02:36:07,531 [INFO] Synced 334414473: $2257.53 | P&L $-0.97
+2026-06-08 02:36:35,611 [INFO] Synced 334414473: $2257.53 | P&L $-0.8
+2026-06-08 02:36:39,301 [INFO] Synced 334414473: $2257.53 | P&L $-0.78
+2026-06-08 02:37:06,836 [INFO] Synced 334414473: $2257.53 | P&L $-0.75
+2026-06-08 02:37:11,460 [INFO] Synced 334414473: $2257.53 | P&L $-0.75
+2026-06-08 02:37:40,366 [INFO] Synced 334414473: $2257.53 | P&L $-0.9
+2026-06-08 02:37:43,082 [INFO] Synced 334414473: $2257.53 | P&L $-0.86
+2026-06-08 02:38:12,183 [INFO] Synced 334414473: $2257.53 | P&L $-1.0
+2026-06-08 02:38:16,066 [INFO] Synced 334414473: $2257.53 | P&L $-0.94
+2026-06-08 02:38:46,777 [INFO] Synced 334414473: $2257.53 | P&L $-0.86
+2026-06-08 02:38:47,626 [INFO] Synced 334414473: $2257.53 | P&L $-0.91
+2026-06-08 02:39:19,371 [INFO] Synced 334414473: $2257.53 | P&L $-0.92
+2026-06-08 02:39:19,909 [INFO] Synced 334414473: $2257.53 | P&L $-0.92
+2026-06-08 02:39:51,200 [INFO] Synced 334414473: $2257.53 | P&L $-0.91
+2026-06-08 02:39:51,796 [INFO] Synced 334414473: $2257.53 | P&L $-0.9
+2026-06-08 02:40:22,986 [INFO] Synced 334414473: $2257.53 | P&L $-0.92
+2026-06-08 02:40:24,470 [INFO] Synced 334414473: $2257.53 | P&L $-0.92
+2026-06-08 02:40:52,139 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 02:40:52,139 [INFO] Skipping GOLD signal — spread too wide: 56.0 pips
+2026-06-08 02:40:53,156 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 02:40:55,882 [INFO] Synced 334414473: $2257.53 | P&L $-0.87
+2026-06-08 02:40:57,215 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 02:41:01,305 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 02:41:05,708 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 02:41:10,044 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 02:41:14,555 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 02:41:20,354 [INFO] Synced 334414473: $2257.53 | P&L $-0.92
+2026-06-08 02:41:29,990 [INFO] Synced 334414473: $2257.53 | P&L $-0.8
+2026-06-08 02:41:55,048 [INFO] Synced 334414473: $2257.53 | P&L $-0.8
+2026-06-08 02:42:06,759 [INFO] Synced 334414473: $2257.53 | P&L $-0.85
+2026-06-08 02:42:28,147 [INFO] Synced 334414473: $2257.53 | P&L $-0.8
+2026-06-08 02:42:38,184 [INFO] Synced 334414473: $2257.53 | P&L $-0.79
+2026-06-08 02:43:00,667 [INFO] Synced 334414473: $2257.53 | P&L $-0.71
+2026-06-08 02:43:09,569 [INFO] Synced 334414473: $2257.53 | P&L $-0.65
+2026-06-08 02:43:32,708 [INFO] Synced 334414473: $2257.53 | P&L $-0.68
+2026-06-08 02:43:41,627 [INFO] Synced 334414473: $2257.53 | P&L $-0.7
+2026-06-08 02:44:07,855 [INFO] Synced 334414473: $2257.53 | P&L $-0.66
+2026-06-08 02:44:13,513 [INFO] Synced 334414473: $2257.53 | P&L $-0.66
+2026-06-08 02:44:39,720 [INFO] Synced 334414473: $2257.53 | P&L $-0.71
+2026-06-08 02:44:45,290 [INFO] Synced 334414473: $2257.53 | P&L $-0.71
+2026-06-08 02:45:11,952 [INFO] Synced 334414473: $2257.53 | P&L $-0.75
+2026-06-08 02:45:16,441 [INFO] Synced 334414473: $2257.53 | P&L $-0.74
+2026-06-08 02:45:44,565 [INFO] Synced 334414473: $2257.53 | P&L $-0.65
+2026-06-08 02:45:50,879 [INFO] Synced 334414473: $2257.53 | P&L $-0.67
+2026-06-08 02:46:16,568 [INFO] Synced 334414473: $2257.53 | P&L $-0.75
+2026-06-08 02:46:22,825 [INFO] Synced 334414473: $2257.53 | P&L $-0.71
+2026-06-08 02:46:48,499 [INFO] Synced 334414473: $2257.53 | P&L $-0.78
+2026-06-08 02:46:54,947 [INFO] Synced 334414473: $2257.53 | P&L $-0.78
+2026-06-08 02:47:19,711 [INFO] Synced 334414473: $2257.53 | P&L $-0.72
+2026-06-08 02:47:26,559 [INFO] Synced 334414473: $2257.53 | P&L $-0.74
+2026-06-08 02:47:51,823 [INFO] Synced 334414473: $2257.53 | P&L $-0.74
+2026-06-08 02:47:58,424 [INFO] Synced 334414473: $2257.53 | P&L $-0.74
+2026-06-08 02:48:23,616 [INFO] Synced 334414473: $2257.53 | P&L $-0.8
+2026-06-08 02:48:30,434 [INFO] Synced 334414473: $2257.53 | P&L $-0.8
+2026-06-08 02:48:55,522 [INFO] Synced 334414473: $2257.53 | P&L $-0.81
+2026-06-08 02:49:02,092 [INFO] Synced 334414473: $2257.53 | P&L $-0.82
+2026-06-08 02:49:28,603 [INFO] Synced 334414473: $2257.53 | P&L $-0.75
+2026-06-08 02:49:33,842 [INFO] Synced 334414473: $2257.53 | P&L $-0.76
+2026-06-08 02:50:00,557 [INFO] Synced 334414473: $2257.53 | P&L $-0.67
+2026-06-08 02:50:05,151 [INFO] Synced 334414473: $2257.53 | P&L $-0.7
+2026-06-08 02:50:32,162 [INFO] Synced 334414473: $2257.53 | P&L $-0.76
+2026-06-08 02:50:37,201 [INFO] Synced 334414473: $2257.53 | P&L $-0.8
+2026-06-08 02:51:03,373 [INFO] Synced 334414473: $2257.53 | P&L $-0.64
+2026-06-08 02:51:05,873 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 02:51:05,878 [INFO] Skipping GOLD signal — spread too wide: 53.0 pips
+2026-06-08 02:51:06,886 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 02:51:10,763 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 02:51:14,721 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 02:51:18,782 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 02:51:22,650 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 02:51:26,577 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 02:51:32,415 [INFO] Synced 334414473: $2257.53 | P&L $-0.66
+2026-06-08 02:51:34,728 [INFO] Synced 334414473: $2257.53 | P&L $-0.66
+2026-06-08 02:52:05,235 [INFO] Synced 334414473: $2257.53 | P&L $-0.63
+2026-06-08 02:52:07,246 [INFO] Synced 334414473: $2257.53 | P&L $-0.62
+2026-06-08 02:52:37,528 [INFO] Synced 334414473: $2257.53 | P&L $-0.5
+2026-06-08 02:52:39,554 [INFO] Synced 334414473: $2257.53 | P&L $-0.5
+2026-06-08 02:53:08,934 [INFO] Synced 334414473: $2257.53 | P&L $-0.5
+2026-06-08 02:53:12,177 [INFO] Synced 334414473: $2257.53 | P&L $-0.5
+2026-06-08 02:53:40,509 [INFO] Synced 334414473: $2257.53 | P&L $-0.54
+2026-06-08 02:53:44,381 [INFO] Synced 334414473: $2257.53 | P&L $-0.58
+2026-06-08 02:54:12,702 [INFO] Synced 334414473: $2257.53 | P&L $-0.62
+2026-06-08 02:54:15,969 [INFO] Synced 334414473: $2257.53 | P&L $-0.61
+2026-06-08 02:54:45,243 [INFO] Synced 334414473: $2257.53 | P&L $-0.75
+2026-06-08 02:54:47,815 [INFO] Synced 334414473: $2257.53 | P&L $-0.75
+2026-06-08 02:55:16,966 [INFO] Synced 334414473: $2257.53 | P&L $-1.11
+2026-06-08 02:55:19,713 [INFO] Synced 334414473: $2257.53 | P&L $-1.13
+2026-06-08 02:55:48,114 [INFO] Synced 334414473: $2257.53 | P&L $-1.12
+2026-06-08 02:55:52,447 [INFO] Synced 334414473: $2257.53 | P&L $-1.12
+2026-06-08 02:56:18,100 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 02:56:18,101 [INFO] Skipping GOLD signal — spread too wide: 55.0 pips
+2026-06-08 02:56:19,126 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 02:56:19,465 [INFO] Synced 334414473: $2257.53 | P&L $-1.22
+2026-06-08 02:56:23,042 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 02:56:26,914 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 02:56:30,945 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 02:56:34,843 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 02:56:38,780 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 02:56:44,954 [INFO] Synced 334414473: $2257.53 | P&L $-0.86
+2026-06-08 02:56:51,257 [INFO] Synced 334414473: $2257.53 | P&L $-0.8
+2026-06-08 02:57:16,741 [INFO] Synced 334414473: $2257.53 | P&L $-0.7
+2026-06-08 02:57:22,332 [INFO] Synced 334414473: $2257.53 | P&L $-0.7
+2026-06-08 02:57:48,341 [INFO] Synced 334414473: $2257.53 | P&L $-0.81
+2026-06-08 02:57:54,418 [INFO] Synced 334414473: $2257.53 | P&L $-0.82
+2026-06-08 02:58:19,524 [INFO] Synced 334414473: $2257.53 | P&L $-0.96
+2026-06-08 02:58:25,648 [INFO] Synced 334414473: $2257.53 | P&L $-0.96
+2026-06-08 02:58:51,170 [INFO] Synced 334414473: $2257.53 | P&L $-1.04
+2026-06-08 02:58:57,514 [INFO] Synced 334414473: $2257.53 | P&L $-1.0
+2026-06-08 02:59:22,873 [INFO] Synced 334414473: $2257.53 | P&L $-1.11
+2026-06-08 02:59:29,019 [INFO] Synced 334414473: $2257.53 | P&L $-1.11
+2026-06-08 02:59:54,743 [INFO] Synced 334414473: $2257.53 | P&L $-1.11
+2026-06-08 03:00:00,938 [INFO] Synced 334414473: $2257.53 | P&L $-1.09
+2026-06-08 03:00:26,577 [INFO] Synced 334414473: $2257.53 | P&L $-1.09
+2026-06-08 03:00:32,538 [INFO] Synced 334414473: $2257.53 | P&L $-1.06
+2026-06-08 03:00:58,117 [INFO] Synced 334414473: $2257.53 | P&L $-1.11
+2026-06-08 03:01:03,774 [INFO] Synced 334414473: $2257.53 | P&L $-0.96
+2026-06-08 03:01:30,014 [INFO] Synced 334414473: $2257.53 | P&L $-1.15
+2026-06-08 03:01:35,161 [INFO] Synced 334414473: $2257.53 | P&L $-1.11
+2026-06-08 03:02:01,683 [INFO] Synced 334414473: $2257.53 | P&L $-1.09
+2026-06-08 03:02:07,161 [INFO] Synced 334414473: $2257.53 | P&L $-1.11
+2026-06-08 03:02:33,230 [INFO] Synced 334414473: $2257.53 | P&L $-1.01
+2026-06-08 03:02:38,358 [INFO] Synced 334414473: $2257.53 | P&L $-1.03
+2026-06-08 03:03:05,889 [INFO] Synced 334414473: $2257.53 | P&L $-1.11
+2026-06-08 03:03:09,619 [INFO] Synced 334414473: $2257.53 | P&L $-1.07
+2026-06-08 03:03:39,128 [INFO] Synced 334414473: $2257.53 | P&L $-0.82
+2026-06-08 03:03:40,992 [INFO] Synced 334414473: $2257.53 | P&L $-0.77
+2026-06-08 03:04:11,106 [INFO] Synced 334414473: $2257.53 | P&L $-0.72
+2026-06-08 03:04:12,250 [INFO] Synced 334414473: $2257.53 | P&L $-0.7
+2026-06-08 03:04:42,943 [INFO] Synced 334414473: $2257.53 | P&L $-0.7
+2026-06-08 03:04:43,909 [INFO] Synced 334414473: $2257.53 | P&L $-0.7
+2026-06-08 03:05:14,594 [INFO] Synced 334414473: $2257.53 | P&L $-0.91
+2026-06-08 03:05:16,045 [INFO] Synced 334414473: $2257.53 | P&L $-0.91
+2026-06-08 03:05:46,796 [INFO] Synced 334414473: $2257.53 | P&L $-1.06
+2026-06-08 03:05:47,973 [INFO] Synced 334414473: $2257.53 | P&L $-1.06
+2026-06-08 03:06:17,988 [INFO] Synced 334414473: $2257.53 | P&L $-1.02
+2026-06-08 03:06:19,303 [INFO] Synced 334414473: $2257.53 | P&L $-1.02
+2026-06-08 03:06:30,091 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 03:06:30,094 [INFO] Skipping GOLD signal — spread too wide: 56.0 pips
+2026-06-08 03:06:46,944 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 03:06:49,669 [INFO] Synced 334414473: $2257.53 | P&L $-1.03
+2026-06-08 03:07:06,776 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 03:07:21,757 [INFO] Synced 334414473: $2257.53 | P&L $-1.11
+2026-06-08 03:07:25,879 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 03:07:45,685 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 03:07:53,527 [INFO] Synced 334414473: $2257.53 | P&L $-1.03
+2026-06-08 03:08:04,136 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 03:08:20,522 [INFO] Signal: BTCUSD → aca9a0e6-5bbe-4b01-810c-d6b346450c2d
+2026-06-08 03:08:25,160 [INFO] Synced 334414473: $2257.53 | P&L $-0.97
+2026-06-08 03:08:26,380 [INFO] Synced 334414473: $2257.53 | P&L $-0.97
+2026-06-08 03:08:56,862 [INFO] Synced 334414473: $2257.53 | P&L $-0.8
+2026-06-08 03:08:57,392 [INFO] Synced 334414473: $2257.53 | P&L $-0.8
+2026-06-08 03:09:28,343 [INFO] Synced 334414473: $2257.53 | P&L $-0.81
+2026-06-08 03:09:29,120 [INFO] Synced 334414473: $2257.53 | P&L $-0.81
+2026-06-08 03:09:59,846 [INFO] Synced 334414473: $2257.53 | P&L $-0.67
+2026-06-08 03:10:00,710 [INFO] Synced 334414473: $2257.53 | P&L $-0.64
+2026-06-08 03:10:31,606 [INFO] Synced 334414473: $2257.53 | P&L $-0.65
+2026-06-08 03:10:32,309 [INFO] Synced 334414473: $2257.53 | P&L $-0.64
+2026-06-08 03:11:03,789 [INFO] Synced 334414473: $2257.53 | P&L $-0.65
+2026-06-08 03:11:03,873 [INFO] Synced 334414473: $2257.53 | P&L $-0.67
+2026-06-08 03:11:35,785 [INFO] Synced 334414473: $2257.53 | P&L $-0.46
+2026-06-08 03:11:36,157 [INFO] Synced 334414473: $2257.53 | P&L $-0.46
+2026-06-08 03:11:42,064 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 03:11:42,069 [INFO] Skipping GOLD signal — spread too wide: 55.0 pips
+2026-06-08 03:11:59,957 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 03:12:07,761 [INFO] Synced 334414473: $2257.53 | P&L $-0.29
+2026-06-08 03:12:20,638 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 03:12:39,217 [INFO] Synced 334414473: $2257.53 | P&L $-0.34
+2026-06-08 03:12:41,944 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 03:13:02,116 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 03:13:10,693 [INFO] Synced 334414473: $2257.53 | P&L $-0.18
+2026-06-08 03:13:24,185 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 03:13:28,830 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 03:13:35,326 [INFO] Synced 334414473: $2257.53 | P&L $-0.12
+2026-06-08 03:13:42,194 [INFO] Synced 334414473: $2257.53 | P&L $-0.02
+2026-06-08 03:14:07,278 [INFO] Synced 334414473: $2257.53 | P&L $-0.06
+2026-06-08 03:14:14,494 [INFO] Synced 334414473: $2257.53 | P&L $-0.14
+2026-06-08 03:14:40,251 [INFO] Synced 334414473: $2257.53 | P&L $-0.18
+2026-06-08 03:14:46,692 [INFO] Synced 334414473: $2257.53 | P&L $-0.14
+2026-06-08 03:15:12,769 [INFO] Synced 334414473: $2257.53 | P&L $-0.42
+2026-06-08 03:15:18,144 [INFO] Synced 334414473: $2257.53 | P&L $-0.44
+2026-06-08 03:15:45,068 [INFO] Synced 334414473: $2257.53 | P&L $-0.41
+2026-06-08 03:15:49,972 [INFO] Synced 334414473: $2257.53 | P&L $-0.36
+2026-06-08 03:16:17,036 [INFO] Synced 334414473: $2257.53 | P&L $-0.26
+2026-06-08 03:16:21,218 [INFO] Synced 334414473: $2257.53 | P&L $-0.27
+2026-06-08 03:16:48,464 [INFO] Synced 334414473: $2257.53 | P&L $-0.22
+2026-06-08 03:16:52,703 [INFO] Synced 334414473: $2257.53 | P&L $-0.21
+2026-06-08 03:17:19,963 [INFO] Synced 334414473: $2257.53 | P&L $-0.11
+2026-06-08 03:17:24,430 [INFO] Synced 334414473: $2257.53 | P&L $-0.1
+2026-06-08 03:17:51,630 [INFO] Synced 334414473: $2257.53 | P&L $0.03
+2026-06-08 03:17:56,089 [INFO] Synced 334414473: $2257.53 | P&L $-0.07
+2026-06-08 03:18:23,850 [INFO] Synced 334414473: $2257.53 | P&L $-0.12
+2026-06-08 03:18:27,852 [INFO] Synced 334414473: $2257.53 | P&L $-0.07
+2026-06-08 03:18:57,493 [INFO] Synced 334414473: $2257.53 | P&L $0.04
+2026-06-08 03:18:59,305 [INFO] Synced 334414473: $2257.53 | P&L $0.04
+2026-06-08 03:19:30,553 [INFO] Synced 334414473: $2257.53 | P&L $-0.13
+2026-06-08 03:19:30,962 [INFO] Synced 334414473: $2257.53 | P&L $-0.13
+2026-06-08 03:20:03,767 [INFO] Synced 334414473: $2257.53 | P&L $0.0
+2026-06-08 03:20:03,843 [INFO] Synced 334414473: $2257.53 | P&L $0.0
+2026-06-08 03:20:36,551 [INFO] Synced 334414473: $2257.53 | P&L $0.03
+2026-06-08 03:20:36,870 [INFO] Synced 334414473: $2257.53 | P&L $0.03
+2026-06-08 03:21:07,791 [INFO] Synced 334414473: $2257.53 | P&L $0.0
+2026-06-08 03:21:08,778 [INFO] Synced 334414473: $2257.53 | P&L $0.01
+2026-06-08 03:21:39,373 [INFO] Synced 334414473: $2257.53 | P&L $0.01
+2026-06-08 03:21:40,605 [INFO] Synced 334414473: $2257.53 | P&L $0.01
+2026-06-08 03:22:11,359 [INFO] Synced 334414473: $2257.53 | P&L $-0.14
+2026-06-08 03:22:12,280 [INFO] Synced 334414473: $2257.53 | P&L $-0.19
+2026-06-08 03:22:42,831 [INFO] Synced 334414473: $2257.53 | P&L $-0.15
+2026-06-08 03:22:44,260 [INFO] Synced 334414473: $2257.53 | P&L $-0.16
+2026-06-08 03:23:14,946 [INFO] Synced 334414473: $2257.53 | P&L $-0.06
+2026-06-08 03:23:16,157 [INFO] Synced 334414473: $2257.53 | P&L $-0.06
+2026-06-08 03:23:23,639 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 03:23:23,640 [INFO] Skipping GOLD signal — spread too wide: 55.0 pips
+2026-06-08 03:23:39,467 [INFO] Signal: EURUSD → a64e727f-17a1-4f9c-b388-8b08ef5e4d8a
+2026-06-08 03:23:47,808 [INFO] Synced 334414473: $2257.53 | P&L $-0.08
+2026-06-08 03:23:56,749 [INFO] Signal: GBPUSD → d006e7f2-103e-42ef-9ad3-277a923a18e4
+2026-06-08 03:24:14,496 [INFO] Signal: USDJPY → 6eba9f6f-a602-422c-9018-4e2b187a47c5
+2026-06-08 03:24:20,770 [INFO] Synced 334414473: $2257.53 | P&L $-0.1
+2026-06-08 03:24:34,509 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 03:24:51,969 [INFO] Signal: GER40Cash → 5d12c7be-ea23-45ec-8ac5-d6f536f4f187
+2026-06-08 03:24:54,105 [INFO] Synced 334414473: $2257.53 | P&L $0.01
+2026-06-08 03:24:56,072 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 03:25:02,038 [INFO] Synced 334414473: $2257.53 | P&L $0.02
+2026-06-08 03:25:26,590 [INFO] Synced 334414473: $2257.53 | P&L $-0.02
+2026-06-08 03:25:33,616 [INFO] Synced 334414473: $2257.53 | P&L $0.0
+2026-06-08 03:26:00,263 [INFO] Synced 334414473: $2257.53 | P&L $0.03
+2026-06-08 03:26:05,960 [INFO] Synced 334414473: $2257.53 | P&L $0.06
+2026-06-08 03:26:31,878 [INFO] Synced 334414473: $2257.53 | P&L $0.05
+2026-06-08 03:26:37,703 [INFO] Synced 334414473: $2257.53 | P&L $0.05
+2026-06-08 03:27:04,214 [INFO] Synced 334414473: $2257.53 | P&L $-0.05
+2026-06-08 03:27:09,730 [INFO] Synced 334414473: $2257.53 | P&L $-0.04
+2026-06-08 03:27:36,054 [INFO] Synced 334414473: $2257.53 | P&L $-0.05
+2026-06-08 03:27:40,894 [INFO] Synced 334414473: $2257.53 | P&L $-0.07
+2026-06-08 03:28:08,313 [INFO] Synced 334414473: $2257.53 | P&L $-0.18
+2026-06-08 03:28:12,188 [INFO] Synced 334414473: $2257.53 | P&L $-0.18
+2026-06-08 03:28:32,288 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 03:28:32,289 [INFO] Skipping GOLD signal — spread too wide: 55.0 pips
+2026-06-08 03:28:33,739 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 03:28:38,310 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 03:28:42,719 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 03:28:44,383 [INFO] Synced 334414473: $2257.53 | P&L $-0.05
+2026-06-08 03:29:01,567 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 03:29:05,785 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 03:29:09,952 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 03:29:15,838 [INFO] Synced 334414473: $2257.53 | P&L $-0.1
+2026-06-08 03:29:16,179 [INFO] Synced 334414473: $2257.53 | P&L $-0.1
+2026-06-08 03:29:47,608 [INFO] Synced 334414473: $2257.53 | P&L $-0.26
+2026-06-08 03:29:47,745 [INFO] Synced 334414473: $2257.53 | P&L $-0.26
+2026-06-08 03:30:19,617 [INFO] Synced 334414473: $2257.53 | P&L $-0.25
+2026-06-08 03:30:20,397 [INFO] Synced 334414473: $2257.53 | P&L $-0.27
+2026-06-08 03:30:50,872 [INFO] Synced 334414473: $2257.53 | P&L $-0.1
+2026-06-08 03:30:52,200 [INFO] Synced 334414473: $2257.53 | P&L $-0.1
+2026-06-08 03:31:22,145 [INFO] Synced 334414473: $2257.53 | P&L $-0.04
+2026-06-08 03:31:23,809 [INFO] Synced 334414473: $2257.53 | P&L $-0.05
+2026-06-08 03:31:53,981 [INFO] Synced 334414473: $2257.53 | P&L $-0.05
+2026-06-08 03:31:55,825 [INFO] Synced 334414473: $2257.53 | P&L $-0.05
+2026-06-08 03:32:26,541 [INFO] Synced 334414473: $2257.53 | P&L $0.0
+2026-06-08 03:32:27,040 [INFO] Synced 334414473: $2257.53 | P&L $0.0
+2026-06-08 03:32:59,701 [INFO] Synced 334414473: $2257.53 | P&L $-0.15
+2026-06-08 03:33:00,008 [INFO] Synced 334414473: $2257.53 | P&L $-0.15
+2026-06-08 03:33:31,458 [INFO] Synced 334414473: $2257.53 | P&L $-0.08
+2026-06-08 03:33:32,213 [INFO] Synced 334414473: $2257.53 | P&L $-0.06
+2026-06-08 03:34:02,802 [INFO] Synced 334414473: $2257.53 | P&L $-0.07
+2026-06-08 03:34:04,132 [INFO] Synced 334414473: $2257.53 | P&L $-0.07
+2026-06-08 03:34:34,114 [INFO] Synced 334414473: $2257.53 | P&L $-0.05
+2026-06-08 03:34:35,739 [INFO] Synced 334414473: $2257.53 | P&L $-0.04
+2026-06-08 03:35:05,590 [INFO] Synced 334414473: $2257.53 | P&L $-0.05
+2026-06-08 03:35:07,331 [INFO] Synced 334414473: $2257.53 | P&L $-0.06
+2026-06-08 03:35:37,010 [INFO] Synced 334414473: $2257.53 | P&L $-0.25
+2026-06-08 03:35:38,945 [INFO] Synced 334414473: $2257.53 | P&L $-0.28
+2026-06-08 03:36:08,869 [INFO] Synced 334414473: $2257.53 | P&L $-0.3
+2026-06-08 03:36:10,632 [INFO] Synced 334414473: $2257.53 | P&L $-0.3
+2026-06-08 03:36:40,810 [INFO] Synced 334414473: $2257.53 | P&L $-0.49
+2026-06-08 03:36:43,233 [INFO] Synced 334414473: $2257.53 | P&L $-0.49
+2026-06-08 03:37:13,064 [INFO] Synced 334414473: $2257.53 | P&L $-0.45
+2026-06-08 03:37:15,952 [INFO] Synced 334414473: $2257.53 | P&L $-0.41
+2026-06-08 03:37:44,865 [INFO] Synced 334414473: $2257.53 | P&L $-0.46
+2026-06-08 03:37:47,943 [INFO] Synced 334414473: $2257.53 | P&L $-0.46
+2026-06-08 03:38:16,518 [INFO] Synced 334414473: $2257.53 | P&L $-0.5
+2026-06-08 03:38:18,139 [WARNING] Sync error c52f0190-d532-43e2-a078-53335e479e3e: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/sync (Caused by NewConnectionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-06-08 03:38:18,408 [ERROR] Command poll: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2026-06-08 03:38:20,425 [WARNING] Cannot reach backend: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/accounts (Caused by NewConnectionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-06-08 03:38:21,181 [ERROR] Command poll: HTTPSConnectionPool(host='aethelgard-backend-uff7.onrender.com', port=443): Max retries exceeded with url: /api/bridge/commands (Caused by NewConnectionError("HTTPSConnection(host='aethelgard-backend-uff7.onrender.com', port=443): Failed to establish a new connection: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions"))
+2026-06-08 03:38:48,793 [INFO] Synced 334414473: $2257.53 | P&L $-0.53
+2026-06-08 03:38:50,328 [INFO] Synced 334414473: $2257.53 | P&L $-0.53
+2026-06-08 03:39:20,908 [INFO] Synced 334414473: $2257.53 | P&L $-0.63
+2026-06-08 03:39:23,148 [INFO] Synced 334414473: $2257.53 | P&L $-0.62
+2026-06-08 03:39:53,992 [INFO] Synced 334414473: $2257.53 | P&L $-0.38
+2026-06-08 03:39:55,288 [INFO] Synced 334414473: $2257.53 | P&L $-0.37
+2026-06-08 03:40:00,005 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 03:40:00,009 [INFO] Skipping GOLD signal — spread too wide: 53.0 pips
+2026-06-08 03:40:02,474 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 03:40:07,716 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 03:40:12,795 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 03:40:27,281 [INFO] Synced 334414473: $2257.53 | P&L $-0.35
+2026-06-08 03:40:33,192 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 03:40:38,310 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 03:40:43,526 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 03:40:51,757 [INFO] Synced 334414473: $2257.53 | P&L $-0.3
+2026-06-08 03:40:59,302 [INFO] Synced 334414473: $2257.53 | P&L $-0.27
+2026-06-08 03:41:23,877 [INFO] Synced 334414473: $2257.53 | P&L $-0.26
+2026-06-08 03:41:31,918 [INFO] Synced 334414473: $2257.53 | P&L $-0.26
+2026-06-08 03:41:55,615 [INFO] Synced 334414473: $2257.53 | P&L $-0.3
+2026-06-08 03:42:04,367 [INFO] Synced 334414473: $2257.53 | P&L $-0.2
+2026-06-08 03:42:28,206 [INFO] Synced 334414473: $2257.53 | P&L $-0.17
+2026-06-08 03:42:36,616 [INFO] Synced 334414473: $2257.53 | P&L $-0.2
+2026-06-08 03:43:00,681 [INFO] Synced 334414473: $2257.53 | P&L $-0.2
+2026-06-08 03:43:09,829 [INFO] Synced 334414473: $2257.53 | P&L $-0.2
+2026-06-08 03:43:33,274 [INFO] Synced 334414473: $2257.53 | P&L $-0.26
+2026-06-08 03:43:43,336 [INFO] Synced 334414473: $2257.53 | P&L $-0.2
+2026-06-08 03:44:05,186 [INFO] Synced 334414473: $2257.53 | P&L $-0.17
+2026-06-08 03:44:13,795 [INFO] Generating signals for: GOLD, EURUSD, GBPUSD, USDJPY, US30Cash, GER40Cash, BTCUSD
+2026-06-08 03:44:13,795 [INFO] Skipping GOLD signal — spread too wide: 53.0 pips
+2026-06-08 03:44:15,985 [INFO] No signal for EURUSD (HOLD)
+2026-06-08 03:44:21,232 [INFO] No signal for GBPUSD (HOLD)
+2026-06-08 03:44:26,570 [INFO] No signal for USDJPY (HOLD)
+2026-06-08 03:44:37,183 [INFO] Synced 334414473: $2257.53 | P&L $-0.25
+2026-06-08 03:44:46,850 [INFO] No signal for US30Cash (HOLD)
+2026-06-08 03:44:52,344 [INFO] No signal for GER40Cash (HOLD)
+2026-06-08 03:44:57,775 [INFO] No signal for BTCUSD (HOLD)
+2026-06-08 03:45:02,547 [INFO] Synced 334414473: $2257.53 | P&L $-0.22
+2026-06-08 03:45:11,405 [INFO] Synced 334414473: $2257.53 | P&L $-0.16
+2026-06-08 03:45:34,878 [INFO] Synced 334414473: $2257.53 | P&L $-0.13
+2026-06-08 03:45:44,131 [INFO] Synced 334414473: $2257.53 | P&L $-0.1
+2026-06-08 03:46:07,523 [INFO] Synced 334414473: $2257.53 | P&L $-0.1
+2026-06-08 03:46:16,119 [INFO] Synced 334414473: $2257.53 | P&L $-0.2
+2026-06-08 03:46:41,222 [INFO] Synced 334414473: $2257.53 | P&L $-0.3
+2026-06-08 03:46:47,858 [INFO] Synced 334414473: $2257.53 | P&L $-0.3
+2026-06-08 03:47:14,394 [INFO] Synced 334414473: $2257.53 | P&L $-0.25
+2026-06-08 03:47:20,899 [INFO] Synced 334414473: $2257.53 | P&L $-0.21
+2026-06-08 03:47:46,424 [INFO] Synced 334414473: $2257.53 | P&L $-0.17
+2026-06-08 03:47:53,165 [INFO] Synced 334414473: $2257.53 | P&L $-0.16
+2026-06-08 03:48:18,779 [INFO] Synced 334414473: $2257.53 | P&L $-0.19
+2026-06-08 03:48:25,158 [INFO] Synced 334414473: $2257.53 | P&L $-0.16
+2026-06-08 03:48:50,734 [INFO] Synced 334414473: $2257.53 | P&L $-0.15
+2026-06-08 03:48:57,698 [INFO] Synced 334414473: $2257.53 | P&L $-0.16
+2026-06-08 03:49:23,159 [INFO] Synced 334414473: $2257.53 | P&L $-0.16
+2026-06-08 03:49:31,016 [INFO] Synced 334414473: $2257.53 | P&L $-0.15
+2026-06-08 03:49:55,166 [INFO] Synced 334414473: $2257.53 | P&L $-0.09
+2026-06-08 03:50:03,489 [INFO] Synced 334414473: $2257.53 | P&L $-0.1
+2026-06-08 03:50:27,810 [INFO] Synced 334414473: $2257.53 | P&L $-0.12
+2026-06-08 03:50:35,485 [INFO] Synced 334414473: $2257.53 | P&L $-0.11
