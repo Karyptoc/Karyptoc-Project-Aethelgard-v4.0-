@@ -58,8 +58,8 @@ PIP_SIZES = {
 
 # Max spread pips per instrument
 MAX_SPREAD_PIPS = {
-    "GOLD": 50, "EURUSD": 3, "GBPUSD": 5, "USDJPY": 3,
-    "US30Cash": 30, "GER40Cash": 30, "BTCUSD": 200,
+    "GOLD": 150, "EURUSD": 3, "GBPUSD": 5, "USDJPY": 3,
+    "US30Cash": 50, "GER40Cash": 50, "BTCUSD": 300,
     "AUDUSD": 3, "USDCAD": 4, "USDCHF": 4,
     "NZDUSD": 4, "GBPJPY": 8, "EURJPY": 6,
 }
