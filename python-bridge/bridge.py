@@ -1,8 +1,11 @@
 """
-AETHELGARD MT5 Bridge v6
-- 13 pairs including AUDUSD, USDCAD, USDCHF, NZDUSD, GBPJPY, EURJPY
-- Session-aware pair activation
-- All v5 features: trailing stops, break-even, partial closes, spread filter
+AETHELGARD MT5 Bridge v7
+python-bridge/bridge.py
+- All 13 pairs: GOLD, EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, USDCHF, NZDUSD, GBPJPY, EURJPY, US30Cash, GER40Cash, BTCUSD
+- Checks pair_controls halt status before executing trades
+- Trailing stops, break-even, partial closes
+- Spread filter
+- Communicates with backend via HTTP (not Supabase directly)
 """
 
 import MetaTrader5 as mt5
@@ -36,17 +39,12 @@ log = logging.getLogger("AethelgardBridge")
 
 connected_accounts = {}
 
-# All 13 pairs — broker symbol mapping
 SYMBOL_MAP = {
-    # Existing
     "GOLD": "GOLD", "EURUSD": "EURUSD", "GBPUSD": "GBPUSD",
     "USDJPY": "USDJPY", "US30Cash": "US30Cash", "GER40Cash": "GER40Cash",
-    "BTCUSD": "BTCUSD",
-    # New major pairs
-    "AUDUSD": "AUDUSD", "USDCAD": "USDCAD", "USDCHF": "USDCHF",
-    "NZDUSD": "NZDUSD",
-    # New cross pairs
-    "GBPJPY": "GBPJPY", "EURJPY": "EURJPY",
+    "BTCUSD": "BTCUSD", "AUDUSD": "AUDUSD", "USDCAD": "USDCAD",
+    "USDCHF": "USDCHF", "NZDUSD": "NZDUSD", "GBPJPY": "GBPJPY",
+    "EURJPY": "EURJPY",
 }
 
 PIP_SIZES = {
@@ -56,7 +54,6 @@ PIP_SIZES = {
     "NZDUSD": 0.0001, "GBPJPY": 0.01, "EURJPY": 0.01,
 }
 
-# Max spread pips per instrument
 MAX_SPREAD_PIPS = {
     "GOLD": 150, "EURUSD": 3, "GBPUSD": 5, "USDJPY": 3,
     "US30Cash": 50, "GER40Cash": 50, "BTCUSD": 300,
@@ -67,6 +64,11 @@ MAX_SPREAD_PIPS = {
 PAIRS = list(SYMBOL_MAP.keys())
 TIMEFRAMES = {}
 
+# Cache pair controls to avoid hammering backend
+pair_controls_cache = {}
+pair_controls_last_fetch = 0
+PAIR_CONTROLS_TTL = 60  # refresh every 60 seconds
+
 def api_headers():
     return {"Content-Type": "application/json", "x-bridge-secret": BRIDGE_SECRET}
 
@@ -74,10 +76,39 @@ def init_timeframes():
     global TIMEFRAMES
     TIMEFRAMES = {"M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4}
 
+def fetch_pair_controls():
+    global pair_controls_cache, pair_controls_last_fetch
+    now = time.time()
+    if now - pair_controls_last_fetch < PAIR_CONTROLS_TTL:
+        return pair_controls_cache
+    try:
+        r = requests.get(f"{BACKEND_URL}/api/pairs/controls", headers=api_headers(), timeout=10)
+        if r.status_code == 200:
+            data = r.json().get("controls", [])
+            pair_controls_cache = {item["symbol"]: item for item in data}
+            pair_controls_last_fetch = now
+            log.info(f"Pair controls refreshed — {len(pair_controls_cache)} pairs")
+    except Exception as e:
+        log.warning(f"Could not fetch pair controls: {e}")
+    return pair_controls_cache
+
+def is_pair_enabled(symbol):
+    controls = fetch_pair_controls()
+    ctrl = controls.get(symbol)
+    if ctrl is None:
+        return True  # allow if no control record found
+    if not ctrl.get("enabled", True):
+        log.info(f"{symbol}: HALTED (manually disabled)")
+        return False
+    if ctrl.get("auto_halted", False):
+        log.info(f"{symbol}: AUTO-HALTED — {ctrl.get('auto_halt_reason', '')}")
+        return False
+    return True
+
 def verify_symbol(symbol):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
     if not mt5.symbol_select(broker_symbol, True):
-        variations = [symbol, f"{symbol}.", symbol.replace("Cash",""), f"{symbol}m"]
+        variations = [symbol, f"{symbol}.", symbol.replace("Cash", ""), f"{symbol}m"]
         for var in variations:
             if mt5.symbol_select(var, True):
                 info = mt5.symbol_info(var)
@@ -90,7 +121,8 @@ def verify_symbol(symbol):
     return broker_symbol
 
 def connect_from_env():
-    if not MT5_LOGIN or not MT5_PASSWORD: return False
+    if not MT5_LOGIN or not MT5_PASSWORD:
+        return False
     result = mt5.login(int(MT5_LOGIN), password=MT5_PASSWORD, server=MT5_SERVER)
     if not result:
         log.error(f"Login failed: {mt5.last_error()}")
@@ -124,12 +156,16 @@ def connect_account(acc):
     login = int(acc["login"])
     password = acc.get("password") or MT5_PASSWORD
     server = acc.get("server") or MT5_SERVER
-    if not password: return False
+    if not password:
+        return False
     result = mt5.login(login, password=password, server=server)
     if not result:
         report_status(account_id, False)
         return False
-    connected_accounts[account_id] = {"login": login, "password": password, "server": server, "account_id": account_id}
+    connected_accounts[account_id] = {
+        "login": login, "password": password,
+        "server": server, "account_id": account_id
+    }
     report_status(account_id, True)
     log.info(f"Connected: {login}@{server}")
     return True
@@ -137,7 +173,8 @@ def connect_account(acc):
 def refresh_accounts():
     remote = fetch_remote_accounts()
     if not remote:
-        if not connected_accounts: connect_from_env()
+        if not connected_accounts:
+            connect_from_env()
         return
     remote_ids = {acc["id"] for acc in remote}
     for acc in remote:
@@ -151,65 +188,84 @@ def report_status(account_id, connected):
     try:
         requests.post(f"{BACKEND_URL}/api/bridge/status", headers=api_headers(),
             json={"account_id": account_id, "connected": connected}, timeout=5)
-    except: pass
+    except:
+        pass
 
 def get_account_info(login):
     info = mt5.account_info()
-    if not info: return None
-    return {"balance": round(info.balance,2), "equity": round(info.equity,2),
-            "margin": round(info.margin,2), "free_margin": round(info.margin_free,2),
-            "profit": round(info.profit,2), "currency": info.currency, "leverage": info.leverage}
+    if not info:
+        return None
+    return {
+        "balance": round(info.balance, 2), "equity": round(info.equity, 2),
+        "margin": round(info.margin, 2), "free_margin": round(info.margin_free, 2),
+        "profit": round(info.profit, 2), "currency": info.currency, "leverage": info.leverage
+    }
 
 def get_positions(login):
     positions = mt5.positions_get()
-    if not positions: return []
-    return [{"ticket": p.ticket, "symbol": p.symbol,
-             "direction": "BUY" if p.type == 0 else "SELL",
-             "volume": p.volume, "open_price": p.price_open,
-             "current_price": p.price_current, "stop_loss": p.sl,
-             "take_profit": p.tp, "profit": round(p.profit,2),
-             "open_time": datetime.fromtimestamp(p.time, tz=timezone.utc).isoformat()}
-            for p in positions]
+    if not positions:
+        return []
+    return [{
+        "ticket": p.ticket, "symbol": p.symbol,
+        "direction": "BUY" if p.type == 0 else "SELL",
+        "volume": p.volume, "open_price": p.price_open,
+        "current_price": p.price_current, "stop_loss": p.sl,
+        "take_profit": p.tp, "profit": round(p.profit, 2),
+        "open_time": datetime.fromtimestamp(p.time, tz=timezone.utc).isoformat(),
+    } for p in positions]
 
 def get_spread(symbol):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
     tick = mt5.symbol_info_tick(broker_symbol)
-    if not tick: return None
+    if not tick:
+        return None
     pip = PIP_SIZES.get(symbol, 0.0001)
     return round((tick.ask - tick.bid) / pip, 1)
 
 def check_spread_ok(symbol):
     spread = get_spread(symbol)
-    if spread is None: return True, 0
+    if spread is None:
+        return True, 0
     max_spread = MAX_SPREAD_PIPS.get(symbol, 10)
     return spread <= max_spread, spread
 
 def get_ohlcv(symbol, tf_key, count=150):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
     tf = TIMEFRAMES.get(tf_key, mt5.TIMEFRAME_H1)
-    if not mt5.symbol_select(broker_symbol, True): return []
+    if not mt5.symbol_select(broker_symbol, True):
+        return []
     rates = mt5.copy_rates_from_pos(broker_symbol, tf, 0, count)
-    if rates is None: return []
-    return [{"time": datetime.fromtimestamp(r["time"], tz=timezone.utc).isoformat(),
-             "open": float(r["open"]), "high": float(r["high"]),
-             "low": float(r["low"]), "close": float(r["close"]),
-             "volume": int(r["tick_volume"])} for r in rates]
+    if rates is None:
+        return []
+    return [{
+        "time": datetime.fromtimestamp(r["time"], tz=timezone.utc).isoformat(),
+        "open": float(r["open"]), "high": float(r["high"]),
+        "low": float(r["low"]), "close": float(r["close"]),
+        "volume": int(r["tick_volume"])
+    } for r in rates]
 
 def calc_atr(symbol, period=14):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
-    rates = mt5.copy_rates_from_pos(broker_symbol, mt5.TIMEFRAME_H1, 0, period+2)
-    if rates is None or len(rates) < period+1: return None
-    tr = [max(rates[i]["high"]-rates[i]["low"],
-              abs(rates[i]["high"]-rates[i-1]["close"]),
-              abs(rates[i]["low"]-rates[i-1]["close"]))
+    rates = mt5.copy_rates_from_pos(broker_symbol, mt5.TIMEFRAME_H1, 0, period + 2)
+    if rates is None or len(rates) < period + 1:
+        return None
+    tr = [max(rates[i]["high"] - rates[i]["low"],
+              abs(rates[i]["high"] - rates[i-1]["close"]),
+              abs(rates[i]["low"] - rates[i-1]["close"]))
           for i in range(1, len(rates))]
     return sum(tr[-period:]) / period
 
 def execute_trade(account_id, order):
     acc = connected_accounts.get(account_id) or connected_accounts.get(f"env_{MT5_LOGIN}")
-    if not acc: return {"success": False, "error": "Account not connected"}
+    if not acc:
+        return {"success": False, "error": "Account not connected"}
 
     symbol = order["symbol"]
+
+    # Pair halt check
+    if not is_pair_enabled(symbol):
+        return {"success": False, "error": f"{symbol} is halted"}
+
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
     direction = order["direction"]
     volume = float(order["volume"])
@@ -226,7 +282,8 @@ def execute_trade(account_id, order):
         return {"success": False, "error": f"Symbol {broker_symbol} not available"}
 
     tick = mt5.symbol_info_tick(broker_symbol)
-    if not tick: return {"success": False, "error": "Cannot get price"}
+    if not tick:
+        return {"success": False, "error": "Cannot get price"}
 
     sym_info = mt5.symbol_info(broker_symbol)
     if sym_info:
@@ -236,11 +293,13 @@ def execute_trade(account_id, order):
     order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
     price = tick.ask if direction == "BUY" else tick.bid
 
-    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": broker_symbol,
-           "volume": volume, "type": order_type, "price": price,
-           "sl": sl, "tp": tp, "deviation": 30, "magic": 20260101,
-           "comment": order.get("comment", "Aethelgard"),
-           "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
+    req = {
+        "action": mt5.TRADE_ACTION_DEAL, "symbol": broker_symbol,
+        "volume": volume, "type": order_type, "price": price,
+        "sl": sl, "tp": tp, "deviation": 30, "magic": 20260101,
+        "comment": order.get("comment", "Aethelgard"),
+        "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC
+    }
 
     result = mt5.order_send(req)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
@@ -253,69 +312,81 @@ def execute_trade(account_id, order):
 def modify_sl(ticket, symbol, new_sl, new_tp=None):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
     positions = mt5.positions_get(ticket=ticket)
-    if not positions: return {"success": False, "error": "Position not found"}
+    if not positions:
+        return {"success": False, "error": "Position not found"}
     pos = positions[0]
-    req = {"action": mt5.TRADE_ACTION_SLTP, "symbol": broker_symbol,
-           "position": ticket, "sl": new_sl, "tp": new_tp if new_tp else pos.tp}
+    req = {
+        "action": mt5.TRADE_ACTION_SLTP, "symbol": broker_symbol,
+        "position": ticket, "sl": new_sl, "tp": new_tp if new_tp else pos.tp
+    }
     result = mt5.order_send(req)
-    if result.retcode != mt5.TRADE_RETCODE_DONE: return {"success": False, "error": result.comment}
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        return {"success": False, "error": result.comment}
     return {"success": True}
 
 def partial_close(ticket, symbol, vol_to_close, direction):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
     tick = mt5.symbol_info_tick(broker_symbol)
-    if not tick: return {"success": False, "error": "Cannot get price"}
+    if not tick:
+        return {"success": False, "error": "Cannot get price"}
     close_type = mt5.ORDER_TYPE_SELL if direction == "BUY" else mt5.ORDER_TYPE_BUY
     price = tick.bid if direction == "BUY" else tick.ask
-    req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": broker_symbol,
-           "volume": round(vol_to_close, 2), "type": close_type, "position": ticket,
-           "price": price, "deviation": 30, "magic": 20260101,
-           "comment": "Aethelgard_PartialClose",
-           "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
+    req = {
+        "action": mt5.TRADE_ACTION_DEAL, "symbol": broker_symbol,
+        "volume": round(vol_to_close, 2), "type": close_type, "position": ticket,
+        "price": price, "deviation": 30, "magic": 20260101,
+        "comment": "Aethelgard_PartialClose",
+        "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC
+    }
     result = mt5.order_send(req)
-    if result.retcode != mt5.TRADE_RETCODE_DONE: return {"success": False, "error": result.comment}
+    if result.retcode != mt5.TRADE_RETCODE_DONE:
+        return {"success": False, "error": result.comment}
     log.info(f"Partial close: {vol_to_close} {broker_symbol} @ {result.price}")
     return {"success": True, "price": result.price}
 
 def manage_open_trades():
     positions = mt5.positions_get()
-    if not positions: return
+    if not positions:
+        return
     for pos in positions:
         try:
             symbol = pos.symbol
-            orig = next((k for k,v in SYMBOL_MAP.items() if v == symbol), symbol)
+            orig = next((k for k, v in SYMBOL_MAP.items() if v == symbol), symbol)
             pip = PIP_SIZES.get(orig, 0.0001)
             direction = "BUY" if pos.type == 0 else "SELL"
             price = pos.price_current
             open_price = pos.price_open
             current_sl = pos.sl
-            profit_pips = (price-open_price)/pip if direction=="BUY" else (open_price-price)/pip
+            profit_pips = (price - open_price) / pip if direction == "BUY" else (open_price - price) / pip
             atr_val = calc_atr(orig)
-            if not atr_val: continue
+            if not atr_val:
+                continue
 
-            # Break-even at 15 pips
+            # Break-even at 15 pips profit
             if profit_pips >= 15:
-                be = open_price + pip*2 if direction=="BUY" else open_price - pip*2
-                needs_update = (direction=="BUY" and be > (current_sl or 0)) or \
-                               (direction=="SELL" and (current_sl==0 or be < current_sl))
+                be = open_price + pip * 2 if direction == "BUY" else open_price - pip * 2
+                needs_update = (direction == "BUY" and be > (current_sl or 0)) or \
+                               (direction == "SELL" and (current_sl == 0 or be < current_sl))
                 if needs_update:
                     res = modify_sl(pos.ticket, orig, be)
                     if res["success"]:
-                        log.info(f"Break-even: #{pos.ticket} {orig} SL→{be:.5f}")
+                        log.info(f"Break-even: #{pos.ticket} {orig} SL->{be:.5f}")
 
-            # Trailing stop at 20 pips
+            # Trailing stop at 20 pips profit
             if profit_pips >= 20:
                 trail = atr_val * 1.5
-                if direction=="BUY":
+                if direction == "BUY":
                     new_sl = price - trail
                     if new_sl > (current_sl or 0):
                         res = modify_sl(pos.ticket, orig, new_sl)
-                        if res["success"]: log.info(f"Trail SL: #{pos.ticket} →{new_sl:.5f}")
+                        if res["success"]:
+                            log.info(f"Trail SL: #{pos.ticket} ->{new_sl:.5f}")
                 else:
                     new_sl = price + trail
-                    if current_sl==0 or new_sl < current_sl:
+                    if current_sl == 0 or new_sl < current_sl:
                         res = modify_sl(pos.ticket, orig, new_sl)
-                        if res["success"]: log.info(f"Trail SL: #{pos.ticket} →{new_sl:.5f}")
+                        if res["success"]:
+                            log.info(f"Trail SL: #{pos.ticket} ->{new_sl:.5f}")
         except Exception as e:
             log.error(f"Trade management #{pos.ticket}: {e}")
 
@@ -323,11 +394,13 @@ def sync_all():
     for account_id, acc in list(connected_accounts.items()):
         try:
             info = get_account_info(acc["login"])
-            if not info: continue
+            if not info:
+                continue
             positions = get_positions(acc["login"])
             requests.post(f"{BACKEND_URL}/api/bridge/sync", headers=api_headers(),
                 json={"account_id": account_id, "account_info": info,
-                      "positions": positions, "timestamp": datetime.now(timezone.utc).isoformat()},
+                      "positions": positions,
+                      "timestamp": datetime.now(timezone.utc).isoformat()},
                 timeout=10)
             log.info(f"Synced {acc['login']}: ${info['balance']} | P&L ${info['profit']}")
         except Exception as e:
@@ -337,12 +410,17 @@ def push_ohlcv():
     available = []
     for symbol in PAIRS:
         broker_sym = verify_symbol(symbol)
-        if broker_sym: available.append(symbol)
+        if broker_sym:
+            available.append(symbol)
 
     log.info(f"Signal generation for {len(available)} pairs: {', '.join(available)}")
 
     for symbol in available:
         try:
+            # Pair halt check before generating signal
+            if not is_pair_enabled(symbol):
+                continue
+
             spread_ok, spread = check_spread_ok(symbol)
             if not spread_ok:
                 log.info(f"Skipping {symbol} — spread: {spread} pips")
@@ -378,7 +456,8 @@ def push_ohlcv():
 def poll_commands():
     try:
         r = requests.get(f"{BACKEND_URL}/api/bridge/commands", headers=api_headers(), timeout=10)
-        if r.status_code != 200: return
+        if r.status_code != 200:
+            return
         for cmd in r.json().get("commands", []):
             cmd_type = cmd.get("type")
             if cmd_type == "EXECUTE_TRADE":
@@ -388,18 +467,20 @@ def poll_commands():
                 result = modify_sl(cmd["ticket"], cmd["symbol"], cmd["new_sl"], cmd.get("new_tp"))
             elif cmd_type == "PARTIAL_CLOSE":
                 result = partial_close(cmd["ticket"], cmd["symbol"], cmd["volume"], cmd["direction"])
-            else: continue
+            else:
+                continue
             try:
                 requests.post(f"{BACKEND_URL}/api/bridge/commands/{cmd['id']}/ack",
                     headers=api_headers(), json=result, timeout=5)
-            except: pass
+            except:
+                pass
     except Exception as e:
         log.error(f"Command poll: {e}")
 
 def main():
-    log.info("Aethelgard MT5 Bridge v6 starting...")
+    log.info("Aethelgard MT5 Bridge v7 starting...")
     log.info(f"Pairs: {', '.join(PAIRS)}")
-    log.info("Features: Trailing stops | Break-even | Partial closes | Spread filter | 13 pairs")
+    log.info("Features: Pair controls | Trailing stops | Break-even | Partial closes | Spread filter")
 
     if not mt5.initialize():
         log.error(f"MT5 init failed: {mt5.last_error()}")
@@ -410,8 +491,10 @@ def main():
 
     remote = fetch_remote_accounts()
     if remote:
-        for acc in remote: connect_account(acc)
-    if not connected_accounts: connect_from_env()
+        for acc in remote:
+            connect_account(acc)
+    if not connected_accounts:
+        connect_from_env()
 
     if not connected_accounts:
         log.error("No accounts connected")
@@ -419,7 +502,7 @@ def main():
         return
 
     sync_all()
-    log.info("Pushing initial OHLCV for all 13 pairs...")
+    log.info("Pushing initial OHLCV for all pairs...")
     push_ohlcv()
 
     schedule.every(SYNC_INTERVAL_SECONDS).seconds.do(sync_all)
@@ -428,7 +511,7 @@ def main():
     schedule.every(15).minutes.do(push_ohlcv)
     schedule.every(10).seconds.do(poll_commands)
 
-    log.info("Bridge v6 running. Ctrl+C to stop.")
+    log.info("Bridge v7 running. Ctrl+C to stop.")
     try:
         while True:
             schedule.run_pending()

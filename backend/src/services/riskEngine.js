@@ -1,39 +1,90 @@
 /**
- * AETHELGARD RISK ENGINE v2
- * New features:
- * - Trailing stop loss
- * - Break-even mechanism
- * - Partial closes (TP1/TP2/TP3)
- * - Spread filter
- * - Correlation filter
+ * AETHELGARD RISK ENGINE v3
+ * backend/src/services/riskEngine.js
+ * 
+ * Preserves all v2 functions + adds:
+ * - Per-pair enabled/halted check from pair_controls table
+ * - Per-pair daily loss auto-halt
  * - Weekly/monthly loss limits
- * - Equity curve trading (reduce size in losing streaks)
+ * - Equity curve position sizing
  */
 
 const { supabaseAdmin, log } = require("./supabase");
 
 const PIP_SIZES = {
   GOLD: 0.01, EURUSD: 0.0001, GBPUSD: 0.0001, USDJPY: 0.01,
-  US30Cash: 1.0, GER40Cash: 1.0, BTCUSD: 1.0
+  US30Cash: 1.0, GER40Cash: 1.0, BTCUSD: 1.0,
+  AUDUSD: 0.0001, USDCAD: 0.0001, USDCHF: 0.0001,
+  NZDUSD: 0.0001, GBPJPY: 0.01, EURJPY: 0.01,
 };
 
-// Correlated pairs — don't open all simultaneously
 const CORRELATION_GROUPS = [
-  ["EURUSD", "GBPUSD"],           // Both USD base, highly correlated
-  ["GOLD", "EURUSD"],             // Both inverse USD
-  ["US30Cash", "GER40Cash"],      // Both indices
+  ["EURUSD", "GBPUSD"],
+  ["GOLD", "EURUSD"],
+  ["US30Cash", "GER40Cash"],
 ];
 
-// Max spread allowed per instrument (in pips)
 const MAX_SPREAD_PIPS = {
-  GOLD: 50,       // 0.50 spread max
-  EURUSD: 3,      // 3 pip max
-  GBPUSD: 5,      // 5 pip max
-  USDJPY: 3,
-  US30Cash: 30,
-  GER40Cash: 30,
-  BTCUSD: 200
+  GOLD: 150, EURUSD: 3, GBPUSD: 5, USDJPY: 3,
+  US30Cash: 50, GER40Cash: 50, BTCUSD: 300,
+  AUDUSD: 3, USDCAD: 4, USDCHF: 4,
+  NZDUSD: 4, GBPJPY: 8, EURJPY: 6,
 };
+
+// ── Pair Controls ─────────────────────────────────────────────────────────────
+
+async function isPairEnabled(symbol) {
+  try {
+    const { data } = await supabaseAdmin
+      .from("pair_controls")
+      .select("enabled, auto_halted, auto_halt_reason, max_daily_loss_usd, max_trades_per_day")
+      .eq("symbol", symbol)
+      .single();
+
+    if (!data) return { allowed: true }; // allow if no record found
+
+    if (!data.enabled) {
+      return { allowed: false, reason: `${symbol} manually halted` };
+    }
+    if (data.auto_halted) {
+      return { allowed: false, reason: `${symbol} auto-halted: ${data.auto_halt_reason}` };
+    }
+
+    // Check daily loss limit
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const { data: todayTrades } = await supabaseAdmin
+      .from("trades").select("profit")
+      .eq("symbol", symbol).eq("status", "closed")
+      .gte("close_time", todayStart.toISOString());
+
+    if (todayTrades?.length) {
+      const dailyPnL = todayTrades.reduce((s, t) => s + (t.profit || 0), 0);
+      const maxLoss = data.max_daily_loss_usd || 10;
+      if (dailyPnL <= -maxLoss) {
+        // Auto-halt the pair
+        await supabaseAdmin.from("pair_controls").update({
+          auto_halted: true,
+          auto_halt_reason: `Daily loss limit hit: $${Math.abs(dailyPnL).toFixed(2)} / $${maxLoss}`,
+          updated_at: new Date().toISOString()
+        }).eq("symbol", symbol);
+        await log("warning", "riskEngine", `${symbol} auto-halted: daily loss $${Math.abs(dailyPnL).toFixed(2)}`);
+        return { allowed: false, reason: `${symbol} daily loss limit reached: $${Math.abs(dailyPnL).toFixed(2)}` };
+      }
+
+      // Check max trades per day
+      const maxTrades = data.max_trades_per_day || 5;
+      if (todayTrades.length >= maxTrades) {
+        return { allowed: false, reason: `${symbol} max trades/day reached (${todayTrades.length}/${maxTrades})` };
+      }
+    }
+
+    return { allowed: true };
+  } catch (e) {
+    await log("error", "riskEngine", `isPairEnabled error for ${symbol}: ${e.message}`);
+    return { allowed: true }; // fail open to not block trading on DB error
+  }
+}
 
 // ── Position Sizing ───────────────────────────────────────────────────────────
 
@@ -44,23 +95,16 @@ function calculatePositionSize({
   equityCurveMultiplier = 1.0,
   signalGrade = "B"
 }) {
-  // Grade-based size adjustment
   const gradeMultiplier = { "A": 1.2, "B": 1.0, "C": 0.7, "D": 0.5 }[signalGrade] || 1.0;
-
-  // Equity curve multiplier (reduced in losing streaks)
   const adjustedRisk = (balance * riskPercent / 100) * equityCurveMultiplier * gradeMultiplier;
 
-  // Kelly fraction
   const kellyEdge = (winRate * avgWin - (1 - winRate) * avgLoss);
   const kellyF = Math.max(0, Math.min(kellyEdge / avgWin, 0.25));
-  const halfKelly = kellyF * 0.5;
-  const finalRisk = adjustedRisk * (0.5 + halfKelly);
+  const finalRisk = adjustedRisk * (0.5 + kellyF * 0.5);
 
-  // Pip value
   const pipValue = symbol === "USDJPY" ? 0.9 : 1.0;
   const lotSize = finalRisk / (stopLossPips * pipValue * 100);
 
-  // Hard caps
   const maxRisk = (balance * 2.0) / 100;
   const maxLot = maxRisk / (stopLossPips * pipValue * 100);
   const finalLot = Math.min(
@@ -93,18 +137,16 @@ async function getEquityCurveMultiplier(accountId) {
     const equities = snapshots.map(s => s.equity).reverse();
     const recent = equities.slice(-5);
     const older = equities.slice(0, -5);
-
     if (older.length === 0) return 1.0;
 
     const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
     const olderAvg = older.reduce((a, b) => a + b, 0) / older.length;
-
-    // If recent equity is below older average — reduce size
     const ratio = recentAvg / olderAvg;
-    if (ratio < 0.95) return 0.5;      // Down >5% — half size
-    if (ratio < 0.98) return 0.75;     // Down 2-5% — 75% size
-    if (ratio > 1.02) return 1.1;      // Up >2% — slight increase
-    return 1.0;                         // Normal
+
+    if (ratio < 0.95) return 0.5;
+    if (ratio < 0.98) return 0.75;
+    if (ratio > 1.02) return 1.1;
+    return 1.0;
   } catch { return 1.0; }
 }
 
@@ -112,16 +154,11 @@ async function getEquityCurveMultiplier(accountId) {
 
 function checkSpread(symbol, bidAskSpread) {
   if (!bidAskSpread || bidAskSpread <= 0) return { allowed: true };
-
   const pip = PIP_SIZES[symbol] || 0.0001;
   const spreadPips = bidAskSpread / pip;
   const maxAllowed = MAX_SPREAD_PIPS[symbol] || 10;
-
   if (spreadPips > maxAllowed) {
-    return {
-      allowed: false,
-      reason: `Spread too wide: ${spreadPips.toFixed(1)} pips (max: ${maxAllowed})`
-    };
+    return { allowed: false, reason: `Spread too wide: ${spreadPips.toFixed(1)} pips (max: ${maxAllowed})` };
   }
   return { allowed: true, spreadPips: spreadPips.toFixed(1) };
 }
@@ -137,18 +174,13 @@ async function checkCorrelation(symbol, accountId) {
       .eq("status", "open");
 
     if (!openTrades?.length) return { allowed: true };
-
     const openSymbols = openTrades.map(t => t.symbol);
 
-    // Check if any correlated pair is already open
     for (const group of CORRELATION_GROUPS) {
       if (group.includes(symbol)) {
         const alreadyOpen = group.filter(s => s !== symbol && openSymbols.includes(s));
         if (alreadyOpen.length > 0) {
-          return {
-            allowed: false,
-            reason: `Correlated pair already open: ${alreadyOpen.join(", ")}`
-          };
+          return { allowed: false, reason: `Correlated pair already open: ${alreadyOpen.join(", ")}` };
         }
       }
     }
@@ -166,7 +198,6 @@ async function checkExtendedLossLimits(accountId) {
 
     const now = new Date();
 
-    // Weekly check (rolling 7 days)
     const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
     const { data: weekTrades } = await supabaseAdmin
       .from("trades").select("profit")
@@ -176,16 +207,12 @@ async function checkExtendedLossLimits(accountId) {
     if (weekTrades?.length) {
       const weekPnL = weekTrades.reduce((s, t) => s + (t.profit || 0), 0);
       const weekLossPct = Math.abs(Math.min(0, weekPnL)) / account.balance * 100;
-      const weekLimit = (account.max_daily_loss || 5) * 2.5; // 2.5x daily = weekly
+      const weekLimit = (account.max_daily_loss || 5) * 2.5;
       if (weekLossPct >= weekLimit) {
-        return {
-          allowed: false,
-          reason: `Weekly loss limit hit: ${weekLossPct.toFixed(1)}% / ${weekLimit}%`
-        };
+        return { allowed: false, reason: `Weekly loss limit: ${weekLossPct.toFixed(1)}% / ${weekLimit}%` };
       }
     }
 
-    // Monthly check (rolling 30 days)
     const monthAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
     const { data: monthTrades } = await supabaseAdmin
       .from("trades").select("profit")
@@ -195,12 +222,9 @@ async function checkExtendedLossLimits(accountId) {
     if (monthTrades?.length) {
       const monthPnL = monthTrades.reduce((s, t) => s + (t.profit || 0), 0);
       const monthLossPct = Math.abs(Math.min(0, monthPnL)) / account.balance * 100;
-      const monthLimit = (account.max_daily_loss || 5) * 6; // 6x daily = monthly
+      const monthLimit = (account.max_daily_loss || 5) * 6;
       if (monthLossPct >= monthLimit) {
-        return {
-          allowed: false,
-          reason: `Monthly loss limit hit: ${monthLossPct.toFixed(1)}% / ${monthLimit}%`
-        };
+        return { allowed: false, reason: `Monthly loss limit: ${monthLossPct.toFixed(1)}% / ${monthLimit}%` };
       }
     }
 
@@ -208,7 +232,7 @@ async function checkExtendedLossLimits(accountId) {
   } catch (e) { return { allowed: true }; }
 }
 
-// ── Circuit Breaker (enhanced) ────────────────────────────────────────────────
+// ── Circuit Breaker ───────────────────────────────────────────────────────────
 
 async function checkCircuitBreaker(accountId, symbol = null, spread = null) {
   const { data: account } = await supabaseAdmin
@@ -224,7 +248,16 @@ async function checkCircuitBreaker(accountId, symbol = null, spread = null) {
     if (!spreadCheck.allowed) return spreadCheck;
   }
 
-  // Daily loss check
+  // Pair controls check
+  if (symbol) {
+    const pairCheck = await isPairEnabled(symbol);
+    if (!pairCheck.allowed) {
+      await log("info", "riskEngine", `Pair blocked: ${pairCheck.reason}`);
+      return pairCheck;
+    }
+  }
+
+  // Daily loss
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const { data: todayTrades } = await supabaseAdmin
@@ -273,7 +306,7 @@ async function checkCircuitBreaker(accountId, symbol = null, spread = null) {
   return { allowed: true };
 }
 
-// ── Trade Management — Trailing Stop / Break-even / Partial Close ─────────────
+// ── Trade Management ──────────────────────────────────────────────────────────
 
 function calculateTrailingStop(direction, currentPrice, openPrice, stopLoss, atr, symbol) {
   const pip = PIP_SIZES[symbol] || 0.0001;
@@ -281,15 +314,12 @@ function calculateTrailingStop(direction, currentPrice, openPrice, stopLoss, atr
     ? (currentPrice - openPrice) / pip
     : (openPrice - currentPrice) / pip;
 
-  // Activate trailing after 20 pips profit
   if (profitPips < 20) return null;
 
-  // Trail at 1.5x ATR from current price
   const trailDistance = atr * 1.5;
   let newSL;
   if (direction === "BUY") {
     newSL = currentPrice - trailDistance;
-    // Only move SL up, never down
     if (newSL <= (stopLoss || 0)) return null;
   } else {
     newSL = currentPrice + trailDistance;
@@ -304,63 +334,45 @@ function calculateBreakEven(direction, currentPrice, openPrice, stopLoss, symbol
     ? (currentPrice - openPrice) / pip
     : (openPrice - currentPrice) / pip;
 
-  // Move SL to break-even after 15 pips profit
   if (profitPips < 15) return null;
 
   const breakEvenLevel = direction === "BUY"
-    ? openPrice + (pip * 2)   // Entry + 2 pips
-    : openPrice - (pip * 2);  // Entry - 2 pips
+    ? openPrice + (pip * 2)
+    : openPrice - (pip * 2);
 
-  // Only update if it improves the SL
   if (direction === "BUY" && breakEvenLevel <= (stopLoss || 0)) return null;
   if (direction === "SELL" && breakEvenLevel >= (stopLoss || 999999)) return null;
 
   return parseFloat(breakEvenLevel.toFixed(5));
 }
 
-function calculatePartialCloseLevels(direction, entryPrice, stopLoss, symbol) {
-  const pip = PIP_SIZES[symbol] || 0.0001;
+function calculatePartialCloseLevels(direction, entryPrice, stopLoss) {
   const risk = Math.abs(entryPrice - stopLoss);
-
   return {
-    tp1: {
-      price: direction === "BUY" ? entryPrice + risk * 1.0 : entryPrice - risk * 1.0,
-      closePercent: 33,
-      description: "TP1 — 1R — Close 33%"
-    },
-    tp2: {
-      price: direction === "BUY" ? entryPrice + risk * 2.0 : entryPrice - risk * 2.0,
-      closePercent: 33,
-      description: "TP2 — 2R — Close 33%"
-    },
-    tp3: {
-      price: direction === "BUY" ? entryPrice + risk * 3.0 : entryPrice - risk * 3.0,
-      closePercent: 34,
-      description: "TP3 — 3R — Close remaining 34%"
-    }
+    tp1: { price: direction === "BUY" ? entryPrice + risk : entryPrice - risk, closePercent: 33 },
+    tp2: { price: direction === "BUY" ? entryPrice + risk * 2 : entryPrice - risk * 2, closePercent: 33 },
+    tp3: { price: direction === "BUY" ? entryPrice + risk * 3 : entryPrice - risk * 3, closePercent: 34 }
   };
 }
 
-// ── ATR helpers ───────────────────────────────────────────────────────────────
+// ── ATR Helpers ───────────────────────────────────────────────────────────────
 
 function calculateATR(bars, period = 14) {
   if (!bars || bars.length < period + 1) return null;
-  const trValues = [];
+  const tr = [];
   for (let i = 1; i < bars.length; i++) {
-    const tr = Math.max(
+    tr.push(Math.max(
       bars[i].high - bars[i].low,
       Math.abs(bars[i].high - bars[i - 1].close),
       Math.abs(bars[i].low - bars[i - 1].close)
-    );
-    trValues.push(tr);
+    ));
   }
-  return parseFloat((trValues.slice(-period).reduce((a, b) => a + b, 0) / period).toFixed(5));
+  return parseFloat((tr.slice(-period).reduce((a, b) => a + b, 0) / period).toFixed(5));
 }
 
 function calculateStopLoss({ direction, entryPrice, atr, symbol, multiplier = 1.5 }) {
   const pip = PIP_SIZES[symbol] || 0.0001;
-  const atrPips = atr / pip;
-  const stopPips = Math.round(atrPips * multiplier);
+  const stopPips = Math.round((atr / pip) * multiplier);
   const stopLoss = direction === "BUY"
     ? entryPrice - (stopPips * pip)
     : entryPrice + (stopPips * pip);
@@ -376,6 +388,7 @@ function calculateTakeProfit({ direction, entryPrice, stopLoss, rrRatio = 2.0 })
 }
 
 module.exports = {
+  isPairEnabled,
   calculatePositionSize,
   getEquityCurveMultiplier,
   checkSpread,

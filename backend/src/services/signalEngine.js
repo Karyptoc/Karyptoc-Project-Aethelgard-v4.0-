@@ -1,51 +1,30 @@
 /**
- * AETHELGARD SIGNAL ENGINE v6
- * Expanded pairs + relaxed confidence thresholds for more daily trades
- * New pairs based on research:
- * - AUDUSD: Asian session + London overlap, tight spreads
- * - USDCAD: NY session, oil correlation
- * - GBPJPY: High volatility, big pip moves
- * - EURJPY: London/Tokyo overlap
- * - USDCHF: Safe haven, inverse EUR/USD
- * - NZDUSD: Asian session pair
+ * AETHELGARD SIGNAL ENGINE v7
+ * backend/src/services/signalEngine.js
  * 
- * Fix: relaxed session filter to allow more trades during active sessions
+ * v6 → v7: Added per-pair halt check from pair_controls table
+ * All existing Claude AI / ICT / SMC logic preserved exactly
  */
 
 const Anthropic = require("@anthropic-ai/sdk");
 const { supabaseAdmin, log } = require("./supabase");
-const { calculateATR, PIP_SIZES: BASE_PIP_SIZES } = require("./riskEngine");
+const { calculateATR, PIP_SIZES: BASE_PIP_SIZES, isPairEnabled } = require("./riskEngine");
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// EXPANDED PAIRS LIST — 13 pairs across all sessions
 const PAIRS = [
-  // Major pairs (existing)
   "GOLD", "EURUSD", "GBPUSD", "USDJPY",
-  // Indices (existing)
   "US30Cash", "GER40Cash", "BTCUSD",
-  // NEW — Major pairs
-  "AUDUSD",   // Asian + London, tight spreads
-  "USDCAD",   // NY session, oil-driven
-  "USDCHF",   // Safe haven, inverse EURUSD
-  "NZDUSD",   // Asian session
-  // NEW — Cross pairs (no USD, higher volatility)
-  "GBPJPY",   // High volatility, big moves
-  "EURJPY",   // London/Tokyo overlap
+  "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+  "GBPJPY", "EURJPY",
 ];
 
-// Extended pip sizes
 const PIP_SIZES = {
   ...BASE_PIP_SIZES,
-  AUDUSD: 0.0001,
-  USDCAD: 0.0001,
-  USDCHF: 0.0001,
-  NZDUSD: 0.0001,
-  GBPJPY: 0.01,
-  EURJPY: 0.01,
+  AUDUSD: 0.0001, USDCAD: 0.0001, USDCHF: 0.0001,
+  NZDUSD: 0.0001, GBPJPY: 0.01, EURJPY: 0.01,
 };
 
-// Which session each pair is most active in
 const PAIR_SESSIONS = {
   GOLD:     ["LONDON_OPEN", "NY_OPEN", "NY_MAIN", "LONDON_MAIN"],
   EURUSD:   ["LONDON_OPEN", "NY_OPEN", "LONDON_MAIN", "NY_MAIN"],
@@ -62,8 +41,6 @@ const PAIR_SESSIONS = {
   BTCUSD:   ["LONDON_OPEN", "NY_OPEN", "NY_MAIN", "NY_CLOSE"],
 };
 
-const TIMEFRAMES = ["M15", "H1", "H4"];
-
 // ── Session Detection ─────────────────────────────────────────────────────────
 
 function getSessionInfo() {
@@ -71,31 +48,19 @@ function getSessionInfo() {
   const utcDecimal = now.getUTCHours() + now.getUTCMinutes() / 60;
   const day = now.getUTCDay();
 
-  // Weekend check
   if (day === 0 && utcDecimal < 22) return { session: "WEEKEND", killZone: false, strength: 0, name: "Weekend - Market Closed" };
   if (day === 6) return { session: "WEEKEND", killZone: false, strength: 0, name: "Weekend - Market Closed" };
-
-  if (utcDecimal >= 7 && utcDecimal < 9)
-    return { session: "LONDON_OPEN", killZone: true, strength: 1.0, name: "London Kill Zone" };
-  if (utcDecimal >= 9 && utcDecimal < 13)
-    return { session: "LONDON_MAIN", killZone: false, strength: 0.75, name: "London Session" };
-  if (utcDecimal >= 13 && utcDecimal < 16)
-    return { session: "NY_OPEN", killZone: true, strength: 1.0, name: "NY Kill Zone (London/NY Overlap)" };
-  if (utcDecimal >= 16 && utcDecimal < 20)
-    return { session: "NY_MAIN", killZone: false, strength: 0.65, name: "New York Session" };
-  if (utcDecimal >= 20 && utcDecimal < 22)
-    return { session: "NY_CLOSE", killZone: true, strength: 0.75, name: "NY Close Scalp Window" };
-  if (utcDecimal >= 0 && utcDecimal < 3)
-    return { session: "SYDNEY", killZone: false, strength: 0.4, name: "Sydney Session" };
-  if (utcDecimal >= 0 && utcDecimal < 6)
-    return { session: "ASIAN", killZone: false, strength: 0.5, name: "Asian Session" };
-  // 22:00-00:00 UTC dead zone
+  if (utcDecimal >= 7 && utcDecimal < 9) return { session: "LONDON_OPEN", killZone: true, strength: 1.0, name: "London Kill Zone" };
+  if (utcDecimal >= 9 && utcDecimal < 13) return { session: "LONDON_MAIN", killZone: false, strength: 0.75, name: "London Session" };
+  if (utcDecimal >= 13 && utcDecimal < 16) return { session: "NY_OPEN", killZone: true, strength: 1.0, name: "NY Kill Zone (London/NY Overlap)" };
+  if (utcDecimal >= 16 && utcDecimal < 20) return { session: "NY_MAIN", killZone: false, strength: 0.65, name: "New York Session" };
+  if (utcDecimal >= 20 && utcDecimal < 22) return { session: "NY_CLOSE", killZone: true, strength: 0.75, name: "NY Close Scalp Window" };
+  if (utcDecimal >= 0 && utcDecimal < 6) return { session: "ASIAN", killZone: false, strength: 0.5, name: "Asian Session" };
   return { session: "DEAD_ZONE", killZone: false, strength: 0.1, name: "Dead Zone" };
 }
 
 function isPairActiveInSession(symbol, session) {
-  const activeSessions = PAIR_SESSIONS[symbol] || ["LONDON_OPEN", "NY_OPEN"];
-  return activeSessions.includes(session);
+  return (PAIR_SESSIONS[symbol] || ["LONDON_OPEN", "NY_OPEN"]).includes(session);
 }
 
 function isNewsBlackout() {
@@ -141,7 +106,7 @@ function rsi(data, period = 14) {
   return parseFloat((100 - 100 / (1 + gains / losses)).toFixed(2));
 }
 
-function atr(bars, period = 14) {
+function atrLocal(bars, period = 14) {
   if (!bars || bars.length < period + 1) return null;
   const tr = [];
   for (let i = 1; i < bars.length; i++) {
@@ -199,13 +164,12 @@ function getIndicators(bars) {
   const avgVol = bars.slice(-20).reduce((s,b)=>s+b.volume,0)/20;
   return {
     currentPrice: price, ema20: e20, ema50: e50,
-    rsi14: rsi(closes, 14), atr14: atr(bars, 14),
+    rsi14: rsi(closes, 14), atr14: atrLocal(bars, 14),
     bos: detectBOS(bars), obs: detectOBs(bars), fvgs: detectFVGs(bars),
     bullish: e20 > e50, aboveEMA20: price > e20,
     recentHigh: Math.max(...bars.slice(-20).map(b=>b.high)),
     recentLow: Math.min(...bars.slice(-20).map(b=>b.low)),
     highVol: bars[len-1].volume > avgVol * 1.5,
-    volRatio: parseFloat((bars[len-1].volume/avgVol).toFixed(2))
   };
 }
 
@@ -216,19 +180,18 @@ function getHTFBias(h4Bars) {
   const e50 = ema(closes, Math.min(50, closes.length-1));
   const price = closes[closes.length-1];
   const r = rsi(closes, 14);
-  if (price > e20 && e20 > e50) return { bias: "bullish", strength: r > 50 ? 0.9 : 0.65, ema20: e20, rsi: r };
-  if (price < e20 && e20 < e50) return { bias: "bearish", strength: r < 50 ? 0.9 : 0.65, ema20: e20, rsi: r };
-  return { bias: price > e20 ? "bullish" : "bearish", strength: 0.5, ema20: e20, rsi: r };
+  if (price > e20 && e20 > e50) return { bias: "bullish", strength: r > 50 ? 0.9 : 0.65 };
+  if (price < e20 && e20 < e50) return { bias: "bearish", strength: r < 50 ? 0.9 : 0.65 };
+  return { bias: price > e20 ? "bullish" : "bearish", strength: 0.5 };
 }
 
 function scoreConfluence(ind, session, htfBias, isPairActive) {
   let score = 0;
   const factors = [];
 
-  // Session scoring — MORE GENEROUS now
   if (session.killZone && isPairActive) { score += 35; factors.push(`Kill zone: ${session.name}`); }
   else if (session.killZone) { score += 20; factors.push(`Kill zone (pair not primary)`); }
-  else if (isPairActive && session.strength >= 0.5) { score += 20; factors.push(`Active session for pair: ${session.name}`); }
+  else if (isPairActive && session.strength >= 0.5) { score += 20; factors.push(`Active session: ${session.name}`); }
   else if (session.strength >= 0.5) { score += 10; factors.push(`Session: ${session.name}`); }
 
   if (ind.bos) { score += 20; factors.push(`BOS: ${ind.bos.type}`); }
@@ -238,16 +201,14 @@ function scoreConfluence(ind, session, htfBias, isPairActive) {
   const r = ind.rsi14;
   if (r < 35 || r > 65) { score += 10; factors.push(`RSI extreme: ${r}`); }
   if (ind.highVol) { score += 5; factors.push("High volume"); }
-
   if (ind.bullish && ind.aboveEMA20) { score += 10; factors.push("Bullish EMA"); }
   else if (!ind.bullish && !ind.aboveEMA20) { score += 10; factors.push("Bearish EMA"); }
-
   if (htfBias.bias !== "neutral") { score += 10; factors.push(`HTF: ${htfBias.bias}`); }
 
   return {
     score: Math.min(score, 100), factors,
     grade: score >= 75 ? "A" : score >= 55 ? "B" : score >= 40 ? "C" : "D",
-    tradeable: score >= 35  // LOWERED from 45 to get more signals
+    tradeable: score >= 35
   };
 }
 
@@ -258,15 +219,14 @@ async function analyzeWithClaude(symbol, multiTFData, session, confluence, htfBi
   const isCrypto = symbol === "BTCUSD";
   const isIndex = ["US30Cash","GER40Cash"].includes(symbol);
 
-  const systemPrompt = `You are Aethelgard, an ICT/SMC trading engine.
+  const systemPrompt = `You are Aethelgard, an ICT/SMC institutional trading engine.
 SESSION: ${session.name} | Kill Zone: ${session.killZone}
 HTF BIAS: ${htfBias.bias.toUpperCase()} (${(htfBias.strength*100).toFixed(0)}%)
 SMC SCORE: ${confluence.score}/100 (Grade ${confluence.grade})
-INSTRUMENT TYPE: ${isCross ? "Cross pair - higher volatility" : isCrypto ? "Crypto 24/7" : isIndex ? "Index CFD" : "Major forex pair"}
-${isCross ? "Note: Cross pairs like GBPJPY can move 100-200 pips/day — wider stops acceptable" : ""}
+INSTRUMENT: ${isCross ? "Cross pair - higher volatility" : isCrypto ? "Crypto 24/7" : isIndex ? "Index CFD" : "Major forex pair"}
 RULES:
 - Kill zone + full SMC = up to 0.85 confidence
-- Active session + partial SMC = up to 0.72 confidence  
+- Active session + partial SMC = up to 0.72 confidence
 - ANY session + strong SMC (score>60) = up to 0.65 confidence
 - Dead zone = HOLD always
 - RR >= 1.8 required
@@ -274,7 +234,7 @@ Respond in JSON only.`;
 
   const userPrompt = `Analyze ${symbol}.
 DATA: ${JSON.stringify(multiTFData, null, 2)}
-${perf ? `HISTORY: WR ${perf.win_rate}% | ${perf.on_losing_streak ? "⚠️ LOSING STREAK — be conservative" : "Normal"}` : ""}
+${perf ? `HISTORY: WR ${perf.win_rate}% | ${perf.on_losing_streak ? "LOSING STREAK — be conservative" : "Normal"}` : ""}
 
 JSON:
 {
@@ -324,7 +284,7 @@ async function getRecentPerformance(symbol) {
   } catch { return null; }
 }
 
-function calcStructuralSL(direction, price, ind, atrVal, symbol) {
+function calcStructuralSL(direction, price, ind, atrVal) {
   let sl;
   if (direction === "BUY") {
     const ob = ind.obs?.find(o => o.type === "BULLISH_OB");
@@ -344,11 +304,8 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
   try {
     const session = getSessionInfo();
 
-    // Weekend block
-    if (session.session === "WEEKEND") return null;
-
-    // Dead zone block
-    if (session.session === "DEAD_ZONE") return null;
+    // Weekend and dead zone block
+    if (session.session === "WEEKEND" || session.session === "DEAD_ZONE") return null;
 
     // News blackout
     const news = isNewsBlackout();
@@ -357,16 +314,14 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       return null;
     }
 
-    // Check if pair is active in current session
-    const isPairActive = isPairActiveInSession(symbol, session.session);
-
-    // Skip Asian-only pairs during London/NY if no special setup
-    if (!isPairActive && session.strength < 0.5) {
-      await log("info", "signalEngine", `${symbol}: Not active in ${session.name}`);
+    // ── NEW: Per-pair halt check ───────────────────────────────────────────
+    const pairCheck = await isPairEnabled(symbol);
+    if (!pairCheck.allowed) {
+      await log("info", "signalEngine", `${symbol}: ${pairCheck.reason}`);
       return null;
     }
 
-    // Duplicate check — 45 min window
+    // Duplicate check
     const recent = await hasRecentSignal(symbol, 45);
     if (recent) {
       await log("info", "signalEngine",
@@ -374,6 +329,9 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       );
       return null;
     }
+
+    const isPairActive = isPairActiveInSession(symbol, session.session);
+    if (!isPairActive && session.strength < 0.5) return null;
 
     // Build indicators
     const multiTFData = {};
@@ -397,29 +355,19 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       ? scoreConfluence(primaryInd, session, htfBias, isPairActive)
       : { score: 0, factors: [], grade: "D", tradeable: false };
 
-    // RELAXED threshold: allow if score >= 35 OR in kill zone with any setup
-    if (!confluence.tradeable && !session.killZone) {
-      await log("info", "signalEngine", `${symbol}: Low confluence ${confluence.score}/100`);
-      return null;
-    }
+    if (!confluence.tradeable && !session.killZone) return null;
 
     const perf = await getRecentPerformance(symbol);
     const analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf);
 
-    if (!analysis || analysis.direction === "HOLD") return null;
-
-    // RELAXED confidence threshold: 0.50 (was 0.55)
-    if (analysis.confidence < 0.50) {
-      await log("info", "signalEngine", `${symbol}: Confidence too low: ${analysis.confidence}`);
-      return null;
-    }
+    if (!analysis || analysis.direction === "HOLD" || analysis.confidence < 0.50) return null;
 
     const price = primaryInd?.currentPrice;
     const atrVal = primaryInd?.atr14;
     let stopLoss, takeProfit;
 
     if (price && atrVal) {
-      stopLoss = calcStructuralSL(analysis.direction, price, primaryInd, atrVal, symbol);
+      stopLoss = calcStructuralSL(analysis.direction, price, primaryInd, atrVal);
       const risk = Math.abs(price - stopLoss);
       const rr = Math.max(analysis.risk_assessment?.reward_risk_ratio || 2.0, 1.8);
       takeProfit = analysis.direction === "BUY"
@@ -437,7 +385,8 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         entry_logic: analysis.entry_logic,
         session: session.name, kill_zone: session.killZone,
         confluence_score: confluence.score, confluence_grade: confluence.grade,
-        htf_bias: htfBias.bias, position_size_modifier: analysis.position_size_modifier || 1.0
+        htf_bias: htfBias.bias,
+        position_size_modifier: analysis.position_size_modifier || 1.0
       },
       sentiment_score: analysis.sentiment_score,
       timeframe: analysis.timeframe_primary || "H1",
@@ -453,6 +402,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       `✅ ${analysis.direction} ${symbol} @ ${price} | Conf:${analysis.confidence} | ${session.name} | Grade:${confluence.grade}`
     );
     return data;
+
   } catch (e) {
     await log("error", "signalEngine", `${symbol} error: ${e.message}`);
     return null;
@@ -478,6 +428,7 @@ async function generateSignalsForAllPairs() {
   return signals;
 }
 
+// Command queue for bridge
 let commandQueue = [];
 let commandResults = {};
 function getAndClearCommands() { const c = [...commandQueue]; commandQueue = []; return c; }

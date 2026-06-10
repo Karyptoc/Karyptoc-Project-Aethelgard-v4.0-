@@ -1,4 +1,3 @@
-// App.js
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
@@ -12,8 +11,9 @@ import Trades from "./pages/Trades";
 import Analytics from "./pages/Analytics";
 import Billing from "./pages/Billing";
 import SystemControl from "./pages/SystemControl";
-import ClientPortal from "./pages/ClientPortal";
+import PairControls from "./pages/PairControls";
 import Settings from "./pages/Settings";
+import ClientPortal from "./pages/ClientPortal";
 import Layout from "./components/Layout";
 import ClientLayout from "./components/ClientLayout";
 import "./index.css";
@@ -29,36 +29,6 @@ function ProtectedRoute({ children }) {
   );
   if (!user) return <Navigate to="/login" replace />;
   return children;
-}
-
-export default function App() {
-  return (
-    <ThemeProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-              <Route index element={<Dashboard />} />
-              <Route path="accounts" element={<Accounts />} />
-              <Route path="clients" element={<Clients />} />
-              <Route path="signals" element={<Signals />} />
-              <Route path="trades" element={<Trades />} />
-              <Route path="analytics" element={<Analytics />} />
-              <Route path="billing" element={<Billing />} />
-              <Route path="system" element={<SystemControl />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-            <Route path="/client" element={<ProtectedRoute><ClientLayout /></ProtectedRoute>}>
-              <Route index element={<ClientPortal />} />
-              <Route path="payment-success" element={<PaySuccess />} />
-              <Route path="payment-failed" element={<PayFail />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </AuthProvider>
-    </ThemeProvider>
-  );
 }
 
 function PaySuccess() {
@@ -80,5 +50,37 @@ function PayFail() {
       <div style={{ color: "var(--text-muted)", marginBottom: 24 }}>Something went wrong. Please try again.</div>
       <a href="/client" className="btn btn-primary">Back to Dashboard</a>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+              <Route index element={<Dashboard />} />
+              <Route path="accounts" element={<Accounts />} />
+              <Route path="clients" element={<Clients />} />
+              <Route path="signals" element={<Signals />} />
+              <Route path="trades" element={<Trades />} />
+              <Route path="analytics" element={<Analytics />} />
+              <Route path="billing" element={<Billing />} />
+              <Route path="system" element={<SystemControl />} />
+              <Route path="pairs" element={<PairControls />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+            <Route path="/client" element={<ProtectedRoute><ClientLayout /></ProtectedRoute>}>
+              <Route index element={<ClientPortal />} />
+              <Route path="payment-success" element={<PaySuccess />} />
+              <Route path="payment-failed" element={<PayFail />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
