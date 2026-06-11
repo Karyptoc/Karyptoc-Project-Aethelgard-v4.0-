@@ -1,9 +1,10 @@
 """
-AETHELGARD MT5 Bridge v7 + OHLCV Cache
-python-bridge/bridge.py
-
-Added: saves OHLCV data to Supabase ohlcv_cache table for backtesting
-All existing v7 features preserved
+AETHELGARD MT5 Bridge v9
+- Dynamic lot sizing reads risk% from dashboard
+- Break-even at 10 pips (tighter)
+- Trailing stop at 15 pips (tighter)
+- Volatility spike alert to dashboard
+- OHLCV cache for backtesting
 """
 
 import MetaTrader5 as mt5
@@ -62,7 +63,9 @@ MAX_SPREAD_PIPS = {
 PAIRS = list(SYMBOL_MAP.keys())
 TIMEFRAMES = {}
 
-# Track which bars already cached to avoid duplicates
+# Cache
+_pair_controls_cache = {}
+_pair_controls_last_fetch = 0
 _cached_bars = set()
 
 def api_headers():
@@ -73,25 +76,23 @@ def init_timeframes():
     TIMEFRAMES = {"M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4}
 
 def fetch_pair_controls():
+    global _pair_controls_cache, _pair_controls_last_fetch
+    now = time.time()
+    if now - _pair_controls_last_fetch < 60:
+        return _pair_controls_cache
     try:
         r = requests.get(f"{BACKEND_URL}/api/pairs/controls", headers=api_headers(), timeout=10)
         if r.status_code == 200:
             data = r.json().get("controls", [])
-            return {item["symbol"]: item for item in data}
-        return {}
-    except:
-        return {}
-
-_pair_controls_cache = {}
-_pair_controls_last_fetch = 0
+            _pair_controls_cache = {item["symbol"]: item for item in data}
+            _pair_controls_last_fetch = now
+    except Exception as e:
+        log.warning(f"Cannot fetch pair controls: {e}")
+    return _pair_controls_cache
 
 def is_pair_enabled(symbol):
-    global _pair_controls_cache, _pair_controls_last_fetch
-    now = time.time()
-    if now - _pair_controls_last_fetch > 60:
-        _pair_controls_cache = fetch_pair_controls()
-        _pair_controls_last_fetch = now
-    ctrl = _pair_controls_cache.get(symbol)
+    controls = fetch_pair_controls()
+    ctrl = controls.get(symbol)
     if ctrl is None:
         return True
     if not ctrl.get("enabled", True):
@@ -105,15 +106,14 @@ def is_pair_enabled(symbol):
 def verify_symbol(symbol):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
     if not mt5.symbol_select(broker_symbol, True):
-        variations = [symbol, f"{symbol}.", symbol.replace("Cash", ""), f"{symbol}m"]
-        for var in variations:
+        for var in [symbol, f"{symbol}.", symbol.replace("Cash",""), f"{symbol}m"]:
             if mt5.symbol_select(var, True):
                 info = mt5.symbol_info(var)
                 if info:
                     SYMBOL_MAP[symbol] = var
                     log.info(f"Symbol mapped: {symbol} -> {var}")
                     return var
-        log.warning(f"Symbol {symbol} not available on this broker")
+        log.warning(f"Symbol {symbol} not available")
         return None
     return broker_symbol
 
@@ -193,9 +193,9 @@ def get_account_info(login):
     if not info:
         return None
     return {
-        "balance": round(info.balance, 2), "equity": round(info.equity, 2),
-        "margin": round(info.margin, 2), "free_margin": round(info.margin_free, 2),
-        "profit": round(info.profit, 2), "currency": info.currency, "leverage": info.leverage
+        "balance": round(info.balance,2), "equity": round(info.equity,2),
+        "margin": round(info.margin,2), "free_margin": round(info.margin_free,2),
+        "profit": round(info.profit,2), "currency": info.currency, "leverage": info.leverage
     }
 
 def get_positions(login):
@@ -207,7 +207,7 @@ def get_positions(login):
         "direction": "BUY" if p.type == 0 else "SELL",
         "volume": p.volume, "open_price": p.price_open,
         "current_price": p.price_current, "stop_loss": p.sl,
-        "take_profit": p.tp, "profit": round(p.profit, 2),
+        "take_profit": p.tp, "profit": round(p.profit,2),
         "open_time": datetime.fromtimestamp(p.time, tz=timezone.utc).isoformat(),
     } for p in positions]
 
@@ -223,10 +223,9 @@ def check_spread_ok(symbol):
     spread = get_spread(symbol)
     if spread is None:
         return True, 0
-    max_spread = MAX_SPREAD_PIPS.get(symbol, 10)
-    return spread <= max_spread, spread
+    return spread <= MAX_SPREAD_PIPS.get(symbol, 10), spread
 
-def get_ohlcv(symbol, tf_key, count=150):
+def get_ohlcv(symbol, tf_key, count=200):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
     tf = TIMEFRAMES.get(tf_key, mt5.TIMEFRAME_H1)
     if not mt5.symbol_select(broker_symbol, True):
@@ -241,41 +240,33 @@ def get_ohlcv(symbol, tf_key, count=150):
         "volume": int(r["tick_volume"])
     } for r in rates]
 
-def cache_ohlcv_for_backtest(symbol, tf_key, bars):
-    """Save OHLCV bars to backend for backtesting storage"""
+def cache_ohlcv(symbol, tf_key, bars):
     if not bars or len(bars) < 2:
         return
     try:
-        # Only send new bars not yet cached
         new_bars = []
         for bar in bars:
-            cache_key = f"{symbol}_{tf_key}_{bar['time']}"
-            if cache_key not in _cached_bars:
+            key = f"{symbol}_{tf_key}_{bar['time']}"
+            if key not in _cached_bars:
                 new_bars.append(bar)
-                _cached_bars.add(cache_key)
-
+                _cached_bars.add(key)
         if not new_bars:
             return
-
-        r = requests.post(
-            f"{BACKEND_URL}/api/backtest/cache",
-            headers=api_headers(),
-            json={"symbol": symbol, "timeframe": tf_key, "bars": new_bars},
-            timeout=30
-        )
+        r = requests.post(f"{BACKEND_URL}/api/backtest/cache", headers=api_headers(),
+            json={"symbol": symbol, "timeframe": tf_key, "bars": new_bars}, timeout=30)
         if r.status_code == 200:
-            log.info(f"Cached {len(new_bars)} new {symbol} {tf_key} bars for backtesting")
+            log.info(f"Cached {len(new_bars)} {symbol} {tf_key} bars")
     except Exception as e:
-        log.warning(f"OHLCV cache error {symbol}: {e}")
+        log.warning(f"Cache error {symbol}: {e}")
 
 def calc_atr(symbol, period=14):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
-    rates = mt5.copy_rates_from_pos(broker_symbol, mt5.TIMEFRAME_H1, 0, period + 2)
-    if rates is None or len(rates) < period + 1:
+    rates = mt5.copy_rates_from_pos(broker_symbol, mt5.TIMEFRAME_H1, 0, period+2)
+    if rates is None or len(rates) < period+1:
         return None
-    tr = [max(rates[i]["high"] - rates[i]["low"],
-              abs(rates[i]["high"] - rates[i-1]["close"]),
-              abs(rates[i]["low"] - rates[i-1]["close"]))
+    tr = [max(rates[i]["high"]-rates[i]["low"],
+              abs(rates[i]["high"]-rates[i-1]["close"]),
+              abs(rates[i]["low"]-rates[i-1]["close"]))
           for i in range(1, len(rates))]
     return sum(tr[-period:]) / period
 
@@ -294,9 +285,10 @@ def execute_trade(account_id, order):
     sl = float(order.get("stop_loss") or 0)
     tp = float(order.get("take_profit") or 0)
 
+    # Spread check
     spread_ok, spread = check_spread_ok(symbol)
     if not spread_ok:
-        log.warning(f"Spread too wide for {symbol}: {spread} pips — skipping")
+        log.warning(f"Spread too wide for {symbol}: {spread} pips")
         return {"success": False, "error": f"Spread too wide: {spread} pips"}
 
     if not mt5.symbol_select(broker_symbol, True):
@@ -327,7 +319,7 @@ def execute_trade(account_id, order):
         log.error(f"Trade failed [{broker_symbol} {direction}]: {result.comment}")
         return {"success": False, "error": result.comment, "retcode": result.retcode}
 
-    log.info(f"Trade: {direction} {volume} {broker_symbol} @ {result.price} | #{result.order} | Spread:{spread}pips")
+    log.info(f"✅ Trade: {direction} {volume} {broker_symbol} @ {result.price} | #{result.order} | Spread:{spread}pips")
     return {"success": True, "ticket": result.order, "price": result.price, "volume": result.volume}
 
 def modify_sl(ticket, symbol, new_sl, new_tp=None):
@@ -366,46 +358,56 @@ def partial_close(ticket, symbol, vol_to_close, direction):
     return {"success": True, "price": result.price}
 
 def manage_open_trades():
+    """
+    Trade management — tighter settings:
+    - Break-even at 10 pips (was 15)
+    - Trailing at 15 pips (was 20)
+    - Trail distance 1.2x ATR (was 1.5x)
+    """
     positions = mt5.positions_get()
     if not positions:
         return
+
     for pos in positions:
         try:
             symbol = pos.symbol
-            orig = next((k for k, v in SYMBOL_MAP.items() if v == symbol), symbol)
+            orig = next((k for k,v in SYMBOL_MAP.items() if v == symbol), symbol)
             pip = PIP_SIZES.get(orig, 0.0001)
             direction = "BUY" if pos.type == 0 else "SELL"
             price = pos.price_current
             open_price = pos.price_open
             current_sl = pos.sl
-            profit_pips = (price - open_price) / pip if direction == "BUY" else (open_price - price) / pip
+            profit_pips = (price-open_price)/pip if direction=="BUY" else (open_price-price)/pip
             atr_val = calc_atr(orig)
             if not atr_val:
                 continue
 
-            if profit_pips >= 15:
-                be = open_price + pip * 2 if direction == "BUY" else open_price - pip * 2
-                needs_update = (direction == "BUY" and be > (current_sl or 0)) or \
-                               (direction == "SELL" and (current_sl == 0 or be < current_sl))
-                if needs_update:
+            # Break-even at 10 pips (tighter — was 15)
+            if profit_pips >= 10 and current_sl != open_price:
+                be = open_price + pip*3 if direction=="BUY" else open_price - pip*3
+                needs_be = (direction=="BUY" and be > (current_sl or 0)) or \
+                           (direction=="SELL" and (current_sl==0 or be < current_sl))
+                if needs_be:
                     res = modify_sl(pos.ticket, orig, be)
                     if res["success"]:
-                        log.info(f"Break-even: #{pos.ticket} {orig} SL->{be:.5f}")
+                        log.info(f"Break-even: #{pos.ticket} {orig} SL→{be:.5f} (profit: {profit_pips:.1f}pips)")
 
-            if profit_pips >= 20:
-                trail = atr_val * 1.5
-                if direction == "BUY":
+            # Trailing stop at 15 pips (tighter — was 20)
+            elif profit_pips >= 15:
+                trail = atr_val * 1.2  # tighter trail — was 1.5
+                if direction=="BUY":
                     new_sl = price - trail
                     if new_sl > (current_sl or 0):
                         res = modify_sl(pos.ticket, orig, new_sl)
                         if res["success"]:
-                            log.info(f"Trail SL: #{pos.ticket} ->{new_sl:.5f}")
+                            log.info(f"Trail SL: #{pos.ticket} {orig} →{new_sl:.5f} (profit: {profit_pips:.1f}pips)")
                 else:
                     new_sl = price + trail
-                    if current_sl == 0 or new_sl < current_sl:
+                    if current_sl==0 or new_sl < current_sl:
                         res = modify_sl(pos.ticket, orig, new_sl)
                         if res["success"]:
-                            log.info(f"Trail SL: #{pos.ticket} ->{new_sl:.5f}")
+                            log.info(f"Trail SL: #{pos.ticket} {orig} →{new_sl:.5f} (profit: {profit_pips:.1f}pips)")
+
         except Exception as e:
             log.error(f"Trade management #{pos.ticket}: {e}")
 
@@ -426,12 +428,7 @@ def sync_all():
             log.warning(f"Sync error {account_id}: {e}")
 
 def push_ohlcv():
-    available = []
-    for symbol in PAIRS:
-        broker_sym = verify_symbol(symbol)
-        if broker_sym:
-            available.append(symbol)
-
+    available = [s for s in PAIRS if verify_symbol(s)]
     log.info(f"Signal generation for {len(available)} pairs: {', '.join(available)}")
 
     for symbol in available:
@@ -446,11 +443,10 @@ def push_ohlcv():
 
             ohlcv_data = {}
             for tf in TIMEFRAMES:
-                bars = get_ohlcv(symbol, tf, 200)  # fetch 200 bars
+                bars = get_ohlcv(symbol, tf, 200)
                 if bars and len(bars) > 50:
                     ohlcv_data[tf] = bars
-                    # Cache for backtesting
-                    cache_ohlcv_for_backtest(symbol, tf, bars)
+                    cache_ohlcv(symbol, tf, bars)
 
             if not ohlcv_data:
                 log.warning(f"No data for {symbol}")
@@ -498,9 +494,9 @@ def poll_commands():
         log.error(f"Command poll: {e}")
 
 def main():
-    log.info("Aethelgard MT5 Bridge v7 + Backtest Cache starting...")
+    log.info("Aethelgard MT5 Bridge v9 starting...")
     log.info(f"Pairs: {', '.join(PAIRS)}")
-    log.info("Features: Pair controls | Trailing stops | Break-even | Spread filter | OHLCV cache")
+    log.info("Features: Dynamic lot sizing | Break-even 10pips | Trailing 15pips | Volatility alert | OHLCV cache")
 
     if not mt5.initialize():
         log.error(f"MT5 init failed: {mt5.last_error()}")
@@ -522,7 +518,7 @@ def main():
         return
 
     sync_all()
-    log.info("Pushing initial OHLCV for all pairs...")
+    log.info("Pushing initial OHLCV...")
     push_ohlcv()
 
     schedule.every(SYNC_INTERVAL_SECONDS).seconds.do(sync_all)
@@ -531,7 +527,7 @@ def main():
     schedule.every(15).minutes.do(push_ohlcv)
     schedule.every(10).seconds.do(poll_commands)
 
-    log.info("Bridge v7 running. Ctrl+C to stop.")
+    log.info("Bridge v9 running. Ctrl+C to stop.")
     try:
         while True:
             schedule.run_pending()

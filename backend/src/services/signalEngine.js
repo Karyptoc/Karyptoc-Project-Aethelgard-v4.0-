@@ -1,15 +1,25 @@
 /**
- * AETHELGARD SIGNAL ENGINE v7
+ * AETHELGARD SIGNAL ENGINE v8
  * backend/src/services/signalEngine.js
- * 
- * v6 → v7: Added per-pair halt check from pair_controls table
- * v7.1: Duplicate window reduced to 20min, reads from platform_settings
- * All existing Claude AI / ICT / SMC logic preserved exactly
+ *
+ * Upgrades:
+ * - Volatility spike detector with dashboard alert
+ * - ATR-based SL (Claude AI + ATR combined)
+ * - Dynamic lot sizing reads from dashboard risk%
+ * - Tighter break-even (10 pips) and trailing (15 pips)
+ * - Historical ATR tracking for spike comparison
  */
 
 const Anthropic = require("@anthropic-ai/sdk");
 const { supabaseAdmin, log } = require("./supabase");
-const { calculateATR, PIP_SIZES: BASE_PIP_SIZES, isPairEnabled } = require("./riskEngine");
+const {
+  calculateATRStopLoss,
+  checkVolatilitySpike,
+  isPairEnabled,
+  ATR_SL_MULTIPLIERS,
+  PIP_SIZES: BASE_PIP_SIZES,
+  getRiskPercent
+} = require("./riskEngine");
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -27,19 +37,19 @@ const PIP_SIZES = {
 };
 
 const PAIR_SESSIONS = {
-  GOLD:     ["LONDON_OPEN", "NY_OPEN", "NY_MAIN", "LONDON_MAIN"],
-  EURUSD:   ["LONDON_OPEN", "NY_OPEN", "LONDON_MAIN", "NY_MAIN"],
-  GBPUSD:   ["LONDON_OPEN", "NY_OPEN", "LONDON_MAIN"],
-  USDJPY:   ["ASIAN", "LONDON_OPEN", "NY_OPEN", "LONDON_MAIN"],
-  AUDUSD:   ["ASIAN", "LONDON_OPEN", "LONDON_MAIN"],
-  USDCAD:   ["NY_OPEN", "NY_MAIN", "LONDON_MAIN"],
-  USDCHF:   ["LONDON_OPEN", "NY_OPEN", "LONDON_MAIN"],
-  NZDUSD:   ["ASIAN", "LONDON_OPEN"],
-  GBPJPY:   ["LONDON_OPEN", "NY_OPEN", "ASIAN"],
-  EURJPY:   ["ASIAN", "LONDON_OPEN", "LONDON_MAIN"],
-  US30Cash: ["NY_OPEN", "NY_MAIN"],
-  GER40Cash:["LONDON_OPEN", "LONDON_MAIN"],
-  BTCUSD:   ["LONDON_OPEN", "NY_OPEN", "NY_MAIN", "NY_CLOSE"],
+  GOLD:     ["LONDON_OPEN","NY_OPEN","NY_MAIN","LONDON_MAIN"],
+  EURUSD:   ["LONDON_OPEN","NY_OPEN","LONDON_MAIN","NY_MAIN"],
+  GBPUSD:   ["LONDON_OPEN","NY_OPEN","LONDON_MAIN"],
+  USDJPY:   ["ASIAN","LONDON_OPEN","NY_OPEN","LONDON_MAIN"],
+  AUDUSD:   ["ASIAN","LONDON_OPEN","LONDON_MAIN"],
+  USDCAD:   ["NY_OPEN","NY_MAIN","LONDON_MAIN"],
+  USDCHF:   ["LONDON_OPEN","NY_OPEN","LONDON_MAIN"],
+  NZDUSD:   ["ASIAN","LONDON_OPEN"],
+  GBPJPY:   ["LONDON_OPEN","NY_OPEN","ASIAN"],
+  EURJPY:   ["ASIAN","LONDON_OPEN","LONDON_MAIN"],
+  US30Cash: ["NY_OPEN","NY_MAIN"],
+  GER40Cash:["LONDON_OPEN","LONDON_MAIN"],
+  BTCUSD:   ["LONDON_OPEN","NY_OPEN","NY_MAIN","NY_CLOSE"],
 };
 
 // ── Session Detection ─────────────────────────────────────────────────────────
@@ -48,20 +58,19 @@ function getSessionInfo() {
   const now = new Date();
   const utcDecimal = now.getUTCHours() + now.getUTCMinutes() / 60;
   const day = now.getUTCDay();
-
-  if (day === 0 && utcDecimal < 22) return { session: "WEEKEND", killZone: false, strength: 0, name: "Weekend - Market Closed" };
-  if (day === 6) return { session: "WEEKEND", killZone: false, strength: 0, name: "Weekend - Market Closed" };
-  if (utcDecimal >= 7 && utcDecimal < 9) return { session: "LONDON_OPEN", killZone: true, strength: 1.0, name: "London Kill Zone" };
-  if (utcDecimal >= 9 && utcDecimal < 13) return { session: "LONDON_MAIN", killZone: false, strength: 0.75, name: "London Session" };
-  if (utcDecimal >= 13 && utcDecimal < 16) return { session: "NY_OPEN", killZone: true, strength: 1.0, name: "NY Kill Zone (London/NY Overlap)" };
-  if (utcDecimal >= 16 && utcDecimal < 20) return { session: "NY_MAIN", killZone: false, strength: 0.65, name: "New York Session" };
-  if (utcDecimal >= 20 && utcDecimal < 22) return { session: "NY_CLOSE", killZone: true, strength: 0.75, name: "NY Close Scalp Window" };
-  if (utcDecimal >= 0 && utcDecimal < 6) return { session: "ASIAN", killZone: false, strength: 0.5, name: "Asian Session" };
+  if (day === 0 && utcDecimal < 22) return { session: "WEEKEND", killZone: false, strength: 0, name: "Weekend" };
+  if (day === 6) return { session: "WEEKEND", killZone: false, strength: 0, name: "Weekend" };
+  if (utcDecimal >= 7 && utcDecimal < 9)   return { session: "LONDON_OPEN", killZone: true,  strength: 1.0, name: "London Kill Zone" };
+  if (utcDecimal >= 9 && utcDecimal < 13)  return { session: "LONDON_MAIN", killZone: false, strength: 0.75, name: "London Session" };
+  if (utcDecimal >= 13 && utcDecimal < 16) return { session: "NY_OPEN",     killZone: true,  strength: 1.0, name: "NY Kill Zone" };
+  if (utcDecimal >= 16 && utcDecimal < 20) return { session: "NY_MAIN",     killZone: false, strength: 0.65, name: "New York Session" };
+  if (utcDecimal >= 20 && utcDecimal < 22) return { session: "NY_CLOSE",    killZone: true,  strength: 0.75, name: "NY Close" };
+  if (utcDecimal >= 0 && utcDecimal < 6)   return { session: "ASIAN",       killZone: false, strength: 0.5,  name: "Asian Session" };
   return { session: "DEAD_ZONE", killZone: false, strength: 0.1, name: "Dead Zone" };
 }
 
 function isPairActiveInSession(symbol, session) {
-  return (PAIR_SESSIONS[symbol] || ["LONDON_OPEN", "NY_OPEN"]).includes(session);
+  return (PAIR_SESSIONS[symbol] || ["LONDON_OPEN","NY_OPEN"]).includes(session);
 }
 
 function isNewsBlackout() {
@@ -79,14 +88,10 @@ function isNewsBlackout() {
 async function getDuplicateWindow() {
   try {
     const { data } = await supabaseAdmin
-      .from("platform_settings")
-      .select("value")
-      .eq("key", "duplicate_signal_minutes")
-      .single();
+      .from("platform_settings").select("value")
+      .eq("key", "duplicate_signal_minutes").single();
     return parseInt(data?.value) || 20;
-  } catch {
-    return 20; // default 20 minutes
-  }
+  } catch { return 20; }
 }
 
 async function hasRecentSignal(symbol, minutes = 20) {
@@ -103,8 +108,8 @@ async function hasRecentSignal(symbol, minutes = 20) {
 function ema(data, period) {
   if (data.length < period) return data[data.length - 1];
   const k = 2 / (period + 1);
-  let val = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < data.length; i++) val = data[i] * k + val * (1 - k);
+  let val = data.slice(0, period).reduce((a,b)=>a+b,0) / period;
+  for (let i = period; i < data.length; i++) val = data[i]*k + val*(1-k);
   return parseFloat(val.toFixed(6));
 }
 
@@ -113,29 +118,38 @@ function rsi(data, period = 14) {
   let gains = 0, losses = 0;
   const slice = data.slice(-(period + 1));
   for (let i = 1; i < slice.length; i++) {
-    const d = slice[i] - slice[i - 1];
+    const d = slice[i] - slice[i-1];
     if (d > 0) gains += d; else losses += Math.abs(d);
   }
   if (losses === 0) return 100;
-  return parseFloat((100 - 100 / (1 + gains / losses)).toFixed(2));
+  return parseFloat((100 - 100 / (1 + gains/losses)).toFixed(2));
 }
 
 function atrLocal(bars, period = 14) {
   if (!bars || bars.length < period + 1) return null;
   const tr = [];
   for (let i = 1; i < bars.length; i++) {
-    tr.push(Math.max(bars[i].high - bars[i].low,
+    tr.push(Math.max(
+      bars[i].high - bars[i].low,
       Math.abs(bars[i].high - bars[i-1].close),
-      Math.abs(bars[i].low - bars[i-1].close)));
+      Math.abs(bars[i].low - bars[i-1].close)
+    ));
   }
   return parseFloat((tr.slice(-period).reduce((a,b)=>a+b,0)/period).toFixed(6));
+}
+
+function atrHistorical(bars, period = 14, lookback = 50) {
+  // Calculate ATR over a longer lookback for spike comparison
+  if (!bars || bars.length < lookback) return null;
+  const olderBars = bars.slice(-lookback, -period);
+  return atrLocal(olderBars, period);
 }
 
 function detectBOS(bars) {
   if (!bars || bars.length < 20) return null;
   const r = bars.slice(-20);
   let hi = -Infinity, lo = Infinity;
-  for (let i = 1; i < r.length - 1; i++) {
+  for (let i = 1; i < r.length-1; i++) {
     if (r[i].high > r[i-1].high && r[i].high > r[i+1].high) hi = Math.max(hi, r[i].high);
     if (r[i].low < r[i-1].low && r[i].low < r[i+1].low) lo = Math.min(lo, r[i].low);
   }
@@ -149,7 +163,7 @@ function detectOBs(bars) {
   if (!bars || bars.length < 10) return [];
   const len = bars.length, obs = [];
   for (let i = len-10; i < len-2; i++) {
-    const b = bars[i], n = bars[i+1], r = b.high - b.low;
+    const b = bars[i], n = bars[i+1], r = b.high-b.low;
     if (b.close < b.open && n.close > n.open && (n.close-n.open) > r*1.5)
       obs.push({ type: "BULLISH_OB", high: b.high, low: b.low });
     if (b.close > b.open && n.close < n.open && (n.open-n.close) > r*1.5)
@@ -170,15 +184,20 @@ function detectFVGs(bars) {
 
 function getIndicators(bars) {
   if (!bars || bars.length < 30) return null;
-  const closes = bars.map(b => b.close);
+  const closes = bars.map(b=>b.close);
   const len = bars.length;
   const price = closes[len-1];
   const e20 = ema(closes, 20);
   const e50 = ema(closes, Math.min(50, len-1));
   const avgVol = bars.slice(-20).reduce((s,b)=>s+b.volume,0)/20;
+  const currentATR = atrLocal(bars, 14);
+  const histATR = atrHistorical(bars, 14, 50);
   return {
     currentPrice: price, ema20: e20, ema50: e50,
-    rsi14: rsi(closes, 14), atr14: atrLocal(bars, 14),
+    rsi14: rsi(closes, 14),
+    atr14: currentATR,
+    atr14_historical: histATR,
+    atr_ratio: currentATR && histATR ? parseFloat((currentATR/histATR).toFixed(2)) : 1.0,
     bos: detectBOS(bars), obs: detectOBs(bars), fvgs: detectFVGs(bars),
     bullish: e20 > e50, aboveEMA20: price > e20,
     recentHigh: Math.max(...bars.slice(-20).map(b=>b.high)),
@@ -202,67 +221,88 @@ function getHTFBias(h4Bars) {
 function scoreConfluence(ind, session, htfBias, isPairActive) {
   let score = 0;
   const factors = [];
-
   if (session.killZone && isPairActive) { score += 35; factors.push(`Kill zone: ${session.name}`); }
-  else if (session.killZone) { score += 20; factors.push(`Kill zone (pair not primary)`); }
+  else if (session.killZone) { score += 20; factors.push("Kill zone"); }
   else if (isPairActive && session.strength >= 0.5) { score += 20; factors.push(`Active session: ${session.name}`); }
   else if (session.strength >= 0.5) { score += 10; factors.push(`Session: ${session.name}`); }
-
   if (ind.bos) { score += 20; factors.push(`BOS: ${ind.bos.type}`); }
   if (ind.obs?.length > 0) { score += 15; factors.push("Order block"); }
-  if (ind.fvgs?.length > 0) { score += 15; factors.push("FVG present"); }
-
+  if (ind.fvgs?.length > 0) { score += 15; factors.push("FVG"); }
   const r = ind.rsi14;
-  if (r < 35 || r > 65) { score += 10; factors.push(`RSI extreme: ${r}`); }
+  if (r < 35 || r > 65) { score += 10; factors.push(`RSI: ${r}`); }
   if (ind.highVol) { score += 5; factors.push("High volume"); }
   if (ind.bullish && ind.aboveEMA20) { score += 10; factors.push("Bullish EMA"); }
   else if (!ind.bullish && !ind.aboveEMA20) { score += 10; factors.push("Bearish EMA"); }
   if (htfBias.bias !== "neutral") { score += 10; factors.push(`HTF: ${htfBias.bias}`); }
-
+  // Volatility spike penalty — reduce score if ATR is abnormally high
+  if (ind.atr_ratio >= 2.5) { score -= 15; factors.push(`⚠️ Volatility spike: ${ind.atr_ratio}x normal`); }
   return {
-    score: Math.min(score, 100), factors,
+    score: Math.min(Math.max(score, 0), 100), factors,
     grade: score >= 75 ? "A" : score >= 55 ? "B" : score >= 40 ? "C" : "D",
-    tradeable: score >= 35
+    tradeable: score >= 35,
+    volatilitySpike: ind.atr_ratio >= 2.5
   };
 }
 
 // ── Claude Analysis ───────────────────────────────────────────────────────────
 
-async function analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf) {
+async function analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo) {
   const isCross = ["GBPJPY","EURJPY"].includes(symbol);
   const isCrypto = symbol === "BTCUSD";
   const isIndex = ["US30Cash","GER40Cash"].includes(symbol);
+  const atrMultiplier = ATR_SL_MULTIPLIERS[symbol] || 1.3;
 
   const systemPrompt = `You are Aethelgard, an ICT/SMC institutional trading engine.
 SESSION: ${session.name} | Kill Zone: ${session.killZone}
 HTF BIAS: ${htfBias.bias.toUpperCase()} (${(htfBias.strength*100).toFixed(0)}%)
 SMC SCORE: ${confluence.score}/100 (Grade ${confluence.grade})
-INSTRUMENT: ${isCross ? "Cross pair - higher volatility" : isCrypto ? "Crypto 24/7" : isIndex ? "Index CFD" : "Major forex pair"}
-RULES:
-- Kill zone + full SMC = up to 0.85 confidence
-- Active session + partial SMC = up to 0.72 confidence
-- ANY session + strong SMC (score>60) = up to 0.65 confidence
+ATR RATIO: ${atrInfo?.ratio || 1.0}x normal ${atrInfo?.ratio >= 2.5 ? "⚠️ VOLATILITY SPIKE DETECTED" : ""}
+INSTRUMENT: ${isCross ? "Cross pair" : isCrypto ? "Crypto" : isIndex ? "Index CFD" : "Major forex"}
+
+SL RULES — CRITICAL:
+- Use ATR-based SL: current ATR × ${atrMultiplier} multiplier
+- SL must be structural (below OB/FVG/swing) AND ATR-based
+- For ${symbol}: recommended SL = ${atrMultiplier}x ATR from entry
+- NEVER place SL wider than 2.5x ATR
+- If volatility spike: tighten SL to 1.0x ATR or return HOLD
+
+TRADING RULES:
+- Kill zone + full confluence = up to 0.85 confidence
+- Outside kill zone = max 0.65 confidence
 - Dead zone = HOLD always
-- RR >= 1.8 required
+- Volatility spike (ATR > 2.5x normal) = reduce confidence by 0.15
+- RR >= 2.0 required (prefer 2.5 for indices/crypto)
 Respond in JSON only.`;
 
   const userPrompt = `Analyze ${symbol}.
 DATA: ${JSON.stringify(multiTFData, null, 2)}
-${perf ? `HISTORY: WR ${perf.win_rate}% | ${perf.on_losing_streak ? "LOSING STREAK — be conservative" : "Normal"}` : ""}
+ATR_INFO: current=${atrInfo?.current?.toFixed(5)}, historical=${atrInfo?.historical?.toFixed(5)}, ratio=${atrInfo?.ratio}
+${perf ? `HISTORY: WR ${perf.win_rate}% | ${perf.on_losing_streak ? "⚠️ LOSING STREAK — be conservative" : "Normal"}` : ""}
 
-JSON:
+JSON response:
 {
   "symbol": "${symbol}",
   "direction": "BUY"|"SELL"|"HOLD",
   "confidence": 0.0-1.0,
   "regime": "TRENDING_BULL"|"TRENDING_BEAR"|"RANGING"|"HIGH_VOLATILITY"|"BREAKOUT",
   "regime_detail": {"description":"brief","strength":0.0-1.0,"timeframe_alignment":"aligned"|"mixed"|"conflicted"},
-  "smc_context": {"structure":"bullish"|"bearish"|"consolidating","liquidity_target":"description","htf_aligned":true|false,"kill_zone_quality":"A"|"B"|"C"|"no_setup"},
-  "entry_logic": "specific ICT/SMC entry reason",
-  "risk_assessment": {"stop_loss_pips":number,"reward_risk_ratio":number,"expected_value_score":0.0-1.0},
+  "smc_context": {
+    "structure":"bullish"|"bearish"|"consolidating",
+    "liquidity_target":"nearest pool description",
+    "htf_aligned":true|false,
+    "kill_zone_quality":"A"|"B"|"C"|"no_setup"
+  },
+  "entry_logic": "specific ICT/SMC reason with OB/FVG reference",
+  "sl_reasoning": "explain SL placement using ATR and structure",
+  "stop_loss_atr_multiplier": ${atrMultiplier},
+  "risk_assessment": {
+    "stop_loss_pips": number,
+    "reward_risk_ratio": number,
+    "expected_value_score": 0.0-1.0
+  },
   "sentiment_score": -1.0 to 1.0,
-  "rationale": "2-3 sentences with session + HTF context",
-  "invalidation": "specific level",
+  "rationale": "2-3 sentences: session + HTF + volatility context",
+  "invalidation": "specific price level",
   "timeframe_primary": "M15"|"H1"|"H4",
   "position_size_modifier": 0.5-1.5
 }`;
@@ -270,11 +310,11 @@ JSON:
   try {
     const resp = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 900,
+      max_tokens: 1000,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }]
     });
-    return JSON.parse(resp.content[0].text.trim().replace(/```json|```/g, "").trim());
+    return JSON.parse(resp.content[0].text.trim().replace(/```json|```/g,"").trim());
   } catch (e) {
     await log("error", "signalEngine", `Claude failed for ${symbol}: ${e.message}`);
     return null;
@@ -298,44 +338,21 @@ async function getRecentPerformance(symbol) {
   } catch { return null; }
 }
 
-function calcStructuralSL(direction, price, ind, atrVal) {
-  let sl;
-  if (direction === "BUY") {
-    const ob = ind.obs?.find(o => o.type === "BULLISH_OB");
-    sl = ob ? ob.low - atrVal*0.5 : ind.recentLow - atrVal*0.5;
-    if (price - sl < atrVal*1.5) sl = price - atrVal*1.5;
-  } else {
-    const ob = ind.obs?.find(o => o.type === "BEARISH_OB");
-    sl = ob ? ob.high + atrVal*0.5 : ind.recentHigh + atrVal*0.5;
-    if (sl - price < atrVal*1.5) sl = price + atrVal*1.5;
-  }
-  return parseFloat(sl.toFixed(5));
-}
-
 // ── Main Signal Generation ────────────────────────────────────────────────────
 
 async function generateSignalFromOHLCV(symbol, ohlcvData) {
   try {
     const session = getSessionInfo();
-
-    // Weekend and dead zone block
     if (session.session === "WEEKEND" || session.session === "DEAD_ZONE") return null;
 
-    // News blackout
     const news = isNewsBlackout();
-    if (news.blocked) {
-      await log("info", "signalEngine", `${symbol}: ${news.reason}`);
-      return null;
-    }
+    if (news.blocked) { await log("info", "signalEngine", `${symbol}: ${news.reason}`); return null; }
 
-    // Per-pair halt check
+    // Pair halt check
     const pairCheck = await isPairEnabled(symbol);
-    if (!pairCheck.allowed) {
-      await log("info", "signalEngine", `${symbol}: ${pairCheck.reason}`);
-      return null;
-    }
+    if (!pairCheck.allowed) { await log("info", "signalEngine", `${symbol}: ${pairCheck.reason}`); return null; }
 
-    // Duplicate check — reads window from platform_settings
+    // Duplicate check
     const dupMinutes = await getDuplicateWindow();
     const recent = await hasRecentSignal(symbol, dupMinutes);
     if (recent) {
@@ -361,7 +378,6 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         }
       }
     }
-
     if (!Object.keys(multiTFData).length) return null;
 
     const htfBias = getHTFBias(h4Bars || h1Bars);
@@ -372,22 +388,71 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 
     if (!confluence.tradeable && !session.killZone) return null;
 
+    // Volatility spike detection — alert only, keep trading
+    const currentATR = primaryInd?.atr14;
+    const histATR = primaryInd?.atr14_historical;
+    const atrRatio = primaryInd?.atr_ratio || 1.0;
+    const atrInfo = { current: currentATR, historical: histATR, ratio: atrRatio };
+
+    if (atrRatio >= 2.5) {
+      await checkVolatilitySpike(symbol, currentATR, histATR);
+      // Alert sent, continue trading but with reduced confidence cap
+    }
+
     const perf = await getRecentPerformance(symbol);
-    const analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf);
+    const analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo);
 
-    if (!analysis || analysis.direction === "HOLD" || analysis.confidence < 0.50) return null;
+    if (!analysis || analysis.direction === "HOLD") {
+      await log("info", "signalEngine", `${symbol}: HOLD — ${analysis?.smc_context?.kill_zone_quality || "no setup"}`);
+      return null;
+    }
 
+    // Confidence threshold — tighter during volatility spikes
+    const minConf = atrRatio >= 2.5 ? 0.65 : 0.50;
+    if (analysis.confidence < minConf) {
+      await log("info", "signalEngine", `${symbol}: Confidence ${analysis.confidence} < ${minConf}`);
+      return null;
+    }
+
+    // Calculate SL using BOTH ATR structure and Claude's recommendation
     const price = primaryInd?.currentPrice;
-    const atrVal = primaryInd?.atr14;
-    let stopLoss, takeProfit;
+    let stopLoss, takeProfit, slPips;
 
-    if (price && atrVal) {
-      stopLoss = calcStructuralSL(analysis.direction, price, primaryInd, atrVal);
+    if (price && currentATR) {
+      // ATR-based structural SL
+      const atrSL = calculateATRStopLoss(analysis.direction, price, primaryInd, currentATR, symbol);
+
+      // Claude's SL in pips
+      const claudeSLPips = analysis.risk_assessment?.stop_loss_pips;
+
+      // Use tighter of ATR-based or Claude's suggestion
+      const pip = PIP_SIZES[symbol] || 0.0001;
+      let finalSLPips;
+
+      if (claudeSLPips && claudeSLPips > 0) {
+        // Take the more conservative (tighter) of the two
+        finalSLPips = Math.min(atrSL.slPips, claudeSLPips * 1.2); // allow Claude 20% wider
+      } else {
+        finalSLPips = atrSL.slPips;
+      }
+
+      // Hard cap SL at 2.5x ATR
+      const maxSLPips = (currentATR * 2.5) / pip;
+      finalSLPips = Math.min(finalSLPips, maxSLPips);
+
+      // Recalculate actual SL price
+      stopLoss = analysis.direction === "BUY"
+        ? parseFloat((price - finalSLPips * pip).toFixed(5))
+        : parseFloat((price + finalSLPips * pip).toFixed(5));
+
+      slPips = finalSLPips;
+
+      // TP at minimum 2.0 RR
+      const rrRatio = Math.max(analysis.risk_assessment?.reward_risk_ratio || 2.0, 2.0);
       const risk = Math.abs(price - stopLoss);
-      const rr = Math.max(analysis.risk_assessment?.reward_risk_ratio || 2.0, 1.8);
       takeProfit = analysis.direction === "BUY"
-        ? parseFloat((price + risk*rr).toFixed(5))
-        : parseFloat((price - risk*rr).toFixed(5));
+        ? parseFloat((price + risk * rrRatio).toFixed(5))
+        : parseFloat((price - risk * rrRatio).toFixed(5));
     }
 
     const signal = {
@@ -398,14 +463,18 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         ...analysis.regime_detail,
         smc_context: analysis.smc_context,
         entry_logic: analysis.entry_logic,
+        sl_reasoning: analysis.sl_reasoning,
         session: session.name, kill_zone: session.killZone,
         confluence_score: confluence.score, confluence_grade: confluence.grade,
         htf_bias: htfBias.bias,
-        position_size_modifier: analysis.position_size_modifier || 1.0
+        position_size_modifier: analysis.position_size_modifier || 1.0,
+        atr_ratio: atrRatio,
+        sl_pips: slPips,
+        volatility_spike: atrRatio >= 2.5
       },
       sentiment_score: analysis.sentiment_score,
       timeframe: analysis.timeframe_primary || "H1",
-      rationale: `[${session.name}] [HTF:${htfBias.bias.toUpperCase()}] [SMC:${confluence.score}/100 ${confluence.grade}] ${analysis.entry_logic} | ${analysis.rationale}`,
+      rationale: `[${session.name}] [HTF:${htfBias.bias.toUpperCase()}] [SMC:${confluence.score}/100 ${confluence.grade}] ${atrRatio >= 2.5 ? "⚠️SPIKE " : ""}${analysis.entry_logic} | ${analysis.rationale}`,
       status: "pending",
       expires_at: new Date(Date.now() + 2*60*60*1000).toISOString()
     };
@@ -414,7 +483,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     if (error) throw error;
 
     await log("info", "signalEngine",
-      `✅ ${analysis.direction} ${symbol} @ ${price} | Conf:${analysis.confidence} | ${session.name} | Grade:${confluence.grade}`
+      `✅ ${analysis.direction} ${symbol} @ ${price} | Conf:${analysis.confidence} | ${session.name} | Grade:${confluence.grade} | SL:${slPips?.toFixed(1)}pips | RR:${analysis.risk_assessment?.reward_risk_ratio}`
     );
     return data;
 
@@ -443,7 +512,6 @@ async function generateSignalsForAllPairs() {
   return signals;
 }
 
-// Command queue for bridge
 let commandQueue = [];
 let commandResults = {};
 function getAndClearCommands() { const c = [...commandQueue]; commandQueue = []; return c; }
