@@ -1,6 +1,7 @@
 /**
- * AETHELGARD - Bridge Routes (Fixed)
- * Key fix: signals only marked "executed" AFTER bridge confirms trade success
+ * AETHELGARD - Bridge Routes v2
+ * Fix: reads max_concurrent_trades, default_risk_percent, circuit_breaker_daily_loss_pct
+ * from platform_settings table — dashboard changes take effect immediately
  */
 
 const express = require("express");
@@ -18,6 +19,40 @@ function verifyBridgeSecret(req, res, next) {
 }
 
 router.use(verifyBridgeSecret);
+
+// ── Helper: read platform settings from DB ────────────────────────────────────
+async function getPlatformSettings() {
+  try {
+    const { data } = await supabaseAdmin
+      .from("platform_settings")
+      .select("key, value");
+    const settings = {};
+    (data || []).forEach(s => { settings[s.key] = s.value; });
+    return {
+      maxConcurrentTrades: parseInt(settings["max_concurrent_trades"]) || 5,
+      defaultRiskPercent: parseFloat(settings["default_risk_percent"]) || 1.0,
+      circuitBreakerPct: parseFloat(settings["circuit_breaker_daily_loss_pct"]) || 5.0,
+      tradingEnabled: settings["trading_enabled"] === true || settings["trading_enabled"] === "true",
+      allowedPairs: (() => {
+        try {
+          const p = settings["allowed_pairs"];
+          return Array.isArray(p) ? p : JSON.parse(p);
+        } catch {
+          return ["GOLD","EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","GBPJPY","EURJPY","US30Cash","GER40Cash","BTCUSD"];
+        }
+      })()
+    };
+  } catch (e) {
+    await log("error", "bridge", `Failed to read platform settings: ${e.message}`);
+    return {
+      maxConcurrentTrades: 5,
+      defaultRiskPercent: 1.0,
+      circuitBreakerPct: 5.0,
+      tradingEnabled: true,
+      allowedPairs: ["GOLD","EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","GBPJPY","EURJPY","US30Cash","GER40Cash","BTCUSD"]
+    };
+  }
+}
 
 // GET accounts
 router.get("/accounts", async (req, res) => {
@@ -85,7 +120,6 @@ router.post("/sync", async (req, res) => {
         }
       }
     } else {
-      // No open positions — close any we have open
       await supabaseAdmin.from("trades").update({
         status: "closed", close_time: new Date().toISOString()
       }).eq("account_id", account_id).eq("status", "open");
@@ -98,10 +132,16 @@ router.post("/sync", async (req, res) => {
   }
 });
 
-// POST ohlcv — bridge pushes data, backend generates signal
+// POST ohlcv
 router.post("/ohlcv", async (req, res) => {
   const { symbol, data, spread } = req.body;
   try {
+    // Check trading enabled before generating signal
+    const settings = await getPlatformSettings();
+    if (!settings.tradingEnabled) {
+      return res.json({ ok: true, signal: null, reason: "Trading disabled" });
+    }
+
     await log("info", "bridge", `OHLCV received: ${symbol} | spread: ${spread || "N/A"}pips`);
     const signal = await signalEngine.generateSignalFromOHLCV(symbol, data);
     res.json({ ok: true, signal: signal ? signal.id : null });
@@ -111,24 +151,35 @@ router.post("/ohlcv", async (req, res) => {
   }
 });
 
-// GET commands — bridge polls for trade commands
+// GET commands
 router.get("/commands", async (req, res) => {
   try {
+    // Read live settings from DB — respects dashboard changes immediately
+    const settings = await getPlatformSettings();
+
+    if (!settings.tradingEnabled) {
+      return res.json({ commands: [] });
+    }
+
     const commands = signalEngine.getAndClearCommands();
 
-    // Get pending signals with lower confidence threshold (match v6 engine)
     const { data: pendingSignals } = await supabaseAdmin
       .from("signals")
       .select("*")
       .eq("status", "pending")
       .gt("expires_at", new Date().toISOString())
-      .gte("confidence", 0.50);  // FIXED: lowered to match v6 engine threshold
+      .gte("confidence", 0.50);
 
     if (pendingSignals?.length > 0) {
       for (const signal of pendingSignals) {
         if (signal.direction === "HOLD") continue;
 
-        // Get connected accounts that allow this pair
+        // Check against platform allowed_pairs setting
+        if (!settings.allowedPairs.includes(signal.symbol)) {
+          await log("info", "bridge", `${signal.symbol} not in allowed pairs — skipping`);
+          continue;
+        }
+
         const { data: accounts } = await supabaseAdmin
           .from("mt5_accounts")
           .select("*")
@@ -137,21 +188,49 @@ router.get("/commands", async (req, res) => {
 
         if (!accounts?.length) continue;
 
-        // Filter accounts that allow this symbol
-        const eligibleAccounts = accounts.filter(acc => {
-          const allowed = acc.allowed_pairs || ["GOLD","EURUSD","GBPUSD","USDJPY","US30Cash","GER40Cash","BTCUSD","AUDUSD","USDCAD","USDCHF","NZDUSD","GBPJPY","EURJPY"];
-          return Array.isArray(allowed) ? allowed.includes(signal.symbol) : true;
-        });
+        for (const account of accounts) {
+          // Check max concurrent trades from platform_settings
+          const { data: openTrades } = await supabaseAdmin
+            .from("trades").select("id")
+            .eq("account_id", account.id).eq("status", "open");
 
-        for (const account of eligibleAccounts) {
-          const cbCheck = await checkCircuitBreaker(account.id);
-          if (!cbCheck.allowed) {
-            await log("info", "bridge", `Circuit breaker blocked ${account.id}: ${cbCheck.reason}`);
+          if ((openTrades?.length || 0) >= settings.maxConcurrentTrades) {
+            await log("info", "bridge",
+              `Max concurrent trades reached: ${openTrades.length}/${settings.maxConcurrentTrades}`
+            );
             continue;
           }
 
-          const pip = { GOLD:0.01, USDJPY:0.01, US30Cash:1, GER40Cash:1, BTCUSD:1,
-                        GBPJPY:0.01, EURJPY:0.01 }[signal.symbol] || 0.0001;
+          // Circuit breaker using platform settings
+          const cbCheck = await checkCircuitBreaker(account.id, signal.symbol);
+          if (!cbCheck.allowed) {
+            await log("info", "bridge", `Circuit breaker: ${cbCheck.reason}`);
+            continue;
+          }
+
+          // Check daily loss against platform setting
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+          const { data: todayTrades } = await supabaseAdmin
+            .from("trades").select("profit")
+            .eq("account_id", account.id).eq("status", "closed")
+            .gte("close_time", todayStart.toISOString());
+
+          if (todayTrades?.length) {
+            const dailyPnL = todayTrades.reduce((s, t) => s + (t.profit || 0), 0);
+            const maxLoss = (account.balance || 1000) * settings.circuitBreakerPct / 100;
+            if (dailyPnL <= -maxLoss) {
+              await log("warning", "bridge",
+                `Daily loss limit hit: $${Math.abs(dailyPnL).toFixed(2)} / $${maxLoss.toFixed(2)}`
+              );
+              continue;
+            }
+          }
+
+          const pip = {
+            GOLD: 0.01, USDJPY: 0.01, US30Cash: 1, GER40Cash: 1,
+            BTCUSD: 1, GBPJPY: 0.01, EURJPY: 0.01
+          }[signal.symbol] || 0.0001;
 
           const stopPips = signal.stop_loss && signal.entry_price
             ? Math.abs(signal.entry_price - signal.stop_loss) / pip
@@ -159,9 +238,10 @@ router.get("/commands", async (req, res) => {
 
           const positionSizeModifier = signal.regime_detail?.position_size_modifier || 1.0;
 
+          // Use default_risk_percent from platform_settings
           const sizing = calculatePositionSize({
             balance: account.balance || 500,
-            riskPercent: (account.risk_percent || 1.0) * positionSizeModifier,
+            riskPercent: settings.defaultRiskPercent * positionSizeModifier,
             stopLossPips: Math.max(stopPips, 5),
             symbol: signal.symbol
           });
@@ -172,7 +252,7 @@ router.get("/commands", async (req, res) => {
             id: cmdId,
             type: "EXECUTE_TRADE",
             account_id: account.id,
-            signal_id: signal.id,  // Include signal_id for tracking
+            signal_id: signal.id,
             order: {
               symbol: signal.symbol,
               direction: signal.direction,
@@ -184,7 +264,7 @@ router.get("/commands", async (req, res) => {
           });
         }
 
-        // ⚠️ KEY FIX: Mark as "sent" not "executed" — only mark executed after ACK confirms success
+        // Mark as sent — not executed yet
         await supabaseAdmin.from("signals")
           .update({ status: "sent" })
           .eq("id", signal.id);
@@ -197,25 +277,24 @@ router.get("/commands", async (req, res) => {
   }
 });
 
-// POST commands/:id/ack — bridge confirms command result
+// POST commands/:id/ack
 router.post("/commands/:id/ack", async (req, res) => {
   const { id } = req.params;
   const result = req.body;
 
   signalEngine.acknowledgeCommand(id, result);
 
-  // Only mark as executed if trade actually succeeded
   if (id.startsWith("sig_") && result.success) {
     try {
-      // Extract signal_id from command id: sig_{signal_id}_{account_id}
-      const parts = id.split("_");
-      // account_id is the last UUID portion (5 parts with hyphens)
-      // signal_id is everything between "sig_" and the last UUID
-      const signalIdEnd = id.lastIndexOf("_");
-      const afterSig = id.substring(4); // remove "sig_"
-      const accountId = parts[parts.length - 1];
+      // Parse account_id — it's the last UUID in the command id
+      // Format: sig_{signal_uuid}_{account_uuid}
+      // Both UUIDs contain hyphens so we split differently
+      const withoutPrefix = id.substring(4); // remove "sig_"
+      // UUID is 36 chars: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+      const accountId = withoutPrefix.substring(withoutPrefix.length - 36);
+      const signalId = withoutPrefix.substring(0, withoutPrefix.length - 37); // remove trailing underscore + UUID
 
-      // Log trade
+      // Insert trade record
       await supabaseAdmin.from("trades").insert({
         account_id: accountId,
         ticket: result.ticket,
@@ -229,11 +308,11 @@ router.post("/commands/:id/ack", async (req, res) => {
         open_time: new Date().toISOString()
       });
 
-      // NOW mark signal as executed — only after trade confirmed
-      if (result.signal_id) {
+      // Mark signal executed only after confirmed trade
+      if (signalId) {
         await supabaseAdmin.from("signals")
           .update({ status: "executed" })
-          .eq("id", result.signal_id);
+          .eq("id", signalId);
       }
 
       await log("info", "bridge",
@@ -243,12 +322,16 @@ router.post("/commands/:id/ack", async (req, res) => {
       await log("error", "bridge", `ACK processing error: ${e.message}`);
     }
   } else if (id.startsWith("sig_") && !result.success) {
-    // Trade failed — mark signal back to pending so it can retry
     await log("warning", "bridge", `Trade failed for ${id}: ${result.error}`);
-    // Extract signal id and revert status
+    // Revert signal to pending so it can retry on next cycle
     try {
-      // Find the signal by looking at commands
-      await log("info", "bridge", `Signal reverted to pending after failed execution`);
+      const withoutPrefix = id.substring(4);
+      const signalId = withoutPrefix.substring(0, withoutPrefix.length - 37);
+      if (signalId) {
+        await supabaseAdmin.from("signals")
+          .update({ status: "pending" })
+          .eq("id", signalId);
+      }
     } catch (e) {}
   }
 
