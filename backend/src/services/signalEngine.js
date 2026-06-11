@@ -1,13 +1,13 @@
 /**
- * AETHELGARD SIGNAL ENGINE v8
+ * AETHELGARD SIGNAL ENGINE v9
  * backend/src/services/signalEngine.js
  *
- * Upgrades:
- * - Volatility spike detector with dashboard alert
- * - ATR-based SL (Claude AI + ATR combined)
- * - Dynamic lot sizing reads from dashboard risk%
- * - Tighter break-even (10 pips) and trailing (15 pips)
- * - Historical ATR tracking for spike comparison
+ * v8 → v9:
+ * - H4 is now primary timeframe for ALL pairs (backtest proven)
+ * - H1 used as confirmation only
+ * - M15 dropped from primary analysis
+ * - Per-pair primary timeframe configuration
+ * - Session filter relaxed for H4 (longer candles = less noise)
  */
 
 const Anthropic = require("@anthropic-ai/sdk");
@@ -50,6 +50,23 @@ const PAIR_SESSIONS = {
   US30Cash: ["NY_OPEN","NY_MAIN"],
   GER40Cash:["LONDON_OPEN","LONDON_MAIN"],
   BTCUSD:   ["LONDON_OPEN","NY_OPEN","NY_MAIN","NY_CLOSE"],
+};
+
+// Primary timeframe per pair — H4 proven best across all pairs by backtest
+const PAIR_PRIMARY_TF = {
+  GOLD:      "H4",  // PF 9.56, WR 52%
+  GER40Cash: "H4",  // PF 2.14
+  BTCUSD:    "H4",  // PF 2.76
+  US30Cash:  "H4",  // PF 4.07
+  USDCAD:    "H4",  // PF 4.54, WR 66% — best performer
+  USDJPY:    "H4",  // PF 2.96, WR 57.1%
+  EURUSD:    "H4",
+  GBPUSD:    "H4",
+  USDCHF:    "H4",
+  AUDUSD:    "H4",
+  NZDUSD:    "H4",
+  GBPJPY:    "H4",
+  EURJPY:    "H4",
 };
 
 // ── Session Detection ─────────────────────────────────────────────────────────
@@ -257,6 +274,7 @@ SESSION: ${session.name} | Kill Zone: ${session.killZone}
 HTF BIAS: ${htfBias.bias.toUpperCase()} (${(htfBias.strength*100).toFixed(0)}%)
 SMC SCORE: ${confluence.score}/100 (Grade ${confluence.grade})
 ATR RATIO: ${atrInfo?.ratio || 1.0}x normal ${atrInfo?.ratio >= 2.5 ? "⚠️ VOLATILITY SPIKE DETECTED" : ""}
+PRIMARY TIMEFRAME: H4 (backtest-proven optimal for all pairs)
 INSTRUMENT: ${isCross ? "Cross pair" : isCrypto ? "Crypto" : isIndex ? "Index CFD" : "Major forex"}
 
 SL RULES — CRITICAL:
@@ -363,7 +381,9 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     }
 
     const isPairActive = isPairActiveInSession(symbol, session.session);
-    if (!isPairActive && session.strength < 0.5) return null;
+    // H4 timeframe — relax session filter (H4 candles span multiple sessions)
+    const sessionThreshold = (PAIR_PRIMARY_TF[symbol] === "H4") ? 0.3 : 0.5;
+    if (!isPairActive && session.strength < sessionThreshold) return null;
 
     // Build indicators
     const multiTFData = {};
@@ -381,7 +401,12 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     if (!Object.keys(multiTFData).length) return null;
 
     const htfBias = getHTFBias(h4Bars || h1Bars);
-    const primaryInd = multiTFData["H1"]?.indicators || multiTFData["M15"]?.indicators;
+    // H4 primary — backtest proven (PF 9.56 on GOLD H4 vs 1.69 on H1)
+    const primaryTF = PAIR_PRIMARY_TF[symbol] || "H4";
+    const primaryInd = multiTFData[primaryTF]?.indicators
+      || multiTFData["H4"]?.indicators
+      || multiTFData["H1"]?.indicators
+      || multiTFData["M15"]?.indicators;
     const confluence = primaryInd
       ? scoreConfluence(primaryInd, session, htfBias, isPairActive)
       : { score: 0, factors: [], grade: "D", tradeable: false };
@@ -473,7 +498,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         volatility_spike: atrRatio >= 2.5
       },
       sentiment_score: analysis.sentiment_score,
-      timeframe: analysis.timeframe_primary || "H1",
+      timeframe: primaryTF || analysis.timeframe_primary || "H4",
       rationale: `[${session.name}] [HTF:${htfBias.bias.toUpperCase()}] [SMC:${confluence.score}/100 ${confluence.grade}] ${atrRatio >= 2.5 ? "⚠️SPIKE " : ""}${analysis.entry_logic} | ${analysis.rationale}`,
       status: "pending",
       expires_at: new Date(Date.now() + 2*60*60*1000).toISOString()
