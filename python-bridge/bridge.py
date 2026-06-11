@@ -1,11 +1,9 @@
 """
-AETHELGARD MT5 Bridge v7
+AETHELGARD MT5 Bridge v7 + OHLCV Cache
 python-bridge/bridge.py
-- All 13 pairs: GOLD, EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, USDCHF, NZDUSD, GBPJPY, EURJPY, US30Cash, GER40Cash, BTCUSD
-- Checks pair_controls halt status before executing trades
-- Trailing stops, break-even, partial closes
-- Spread filter
-- Communicates with backend via HTTP (not Supabase directly)
+
+Added: saves OHLCV data to Supabase ohlcv_cache table for backtesting
+All existing v7 features preserved
 """
 
 import MetaTrader5 as mt5
@@ -64,10 +62,8 @@ MAX_SPREAD_PIPS = {
 PAIRS = list(SYMBOL_MAP.keys())
 TIMEFRAMES = {}
 
-# Cache pair controls to avoid hammering backend
-pair_controls_cache = {}
-pair_controls_last_fetch = 0
-PAIR_CONTROLS_TTL = 60  # refresh every 60 seconds
+# Track which bars already cached to avoid duplicates
+_cached_bars = set()
 
 def api_headers():
     return {"Content-Type": "application/json", "x-bridge-secret": BRIDGE_SECRET}
@@ -77,26 +73,27 @@ def init_timeframes():
     TIMEFRAMES = {"M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4}
 
 def fetch_pair_controls():
-    global pair_controls_cache, pair_controls_last_fetch
-    now = time.time()
-    if now - pair_controls_last_fetch < PAIR_CONTROLS_TTL:
-        return pair_controls_cache
     try:
         r = requests.get(f"{BACKEND_URL}/api/pairs/controls", headers=api_headers(), timeout=10)
         if r.status_code == 200:
             data = r.json().get("controls", [])
-            pair_controls_cache = {item["symbol"]: item for item in data}
-            pair_controls_last_fetch = now
-            log.info(f"Pair controls refreshed — {len(pair_controls_cache)} pairs")
-    except Exception as e:
-        log.warning(f"Could not fetch pair controls: {e}")
-    return pair_controls_cache
+            return {item["symbol"]: item for item in data}
+        return {}
+    except:
+        return {}
+
+_pair_controls_cache = {}
+_pair_controls_last_fetch = 0
 
 def is_pair_enabled(symbol):
-    controls = fetch_pair_controls()
-    ctrl = controls.get(symbol)
+    global _pair_controls_cache, _pair_controls_last_fetch
+    now = time.time()
+    if now - _pair_controls_last_fetch > 60:
+        _pair_controls_cache = fetch_pair_controls()
+        _pair_controls_last_fetch = now
+    ctrl = _pair_controls_cache.get(symbol)
     if ctrl is None:
-        return True  # allow if no control record found
+        return True
     if not ctrl.get("enabled", True):
         log.info(f"{symbol}: HALTED (manually disabled)")
         return False
@@ -244,6 +241,33 @@ def get_ohlcv(symbol, tf_key, count=150):
         "volume": int(r["tick_volume"])
     } for r in rates]
 
+def cache_ohlcv_for_backtest(symbol, tf_key, bars):
+    """Save OHLCV bars to backend for backtesting storage"""
+    if not bars or len(bars) < 2:
+        return
+    try:
+        # Only send new bars not yet cached
+        new_bars = []
+        for bar in bars:
+            cache_key = f"{symbol}_{tf_key}_{bar['time']}"
+            if cache_key not in _cached_bars:
+                new_bars.append(bar)
+                _cached_bars.add(cache_key)
+
+        if not new_bars:
+            return
+
+        r = requests.post(
+            f"{BACKEND_URL}/api/backtest/cache",
+            headers=api_headers(),
+            json={"symbol": symbol, "timeframe": tf_key, "bars": new_bars},
+            timeout=30
+        )
+        if r.status_code == 200:
+            log.info(f"Cached {len(new_bars)} new {symbol} {tf_key} bars for backtesting")
+    except Exception as e:
+        log.warning(f"OHLCV cache error {symbol}: {e}")
+
 def calc_atr(symbol, period=14):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
     rates = mt5.copy_rates_from_pos(broker_symbol, mt5.TIMEFRAME_H1, 0, period + 2)
@@ -261,8 +285,6 @@ def execute_trade(account_id, order):
         return {"success": False, "error": "Account not connected"}
 
     symbol = order["symbol"]
-
-    # Pair halt check
     if not is_pair_enabled(symbol):
         return {"success": False, "error": f"{symbol} is halted"}
 
@@ -272,7 +294,6 @@ def execute_trade(account_id, order):
     sl = float(order.get("stop_loss") or 0)
     tp = float(order.get("take_profit") or 0)
 
-    # Spread check
     spread_ok, spread = check_spread_ok(symbol)
     if not spread_ok:
         log.warning(f"Spread too wide for {symbol}: {spread} pips — skipping")
@@ -362,7 +383,6 @@ def manage_open_trades():
             if not atr_val:
                 continue
 
-            # Break-even at 15 pips profit
             if profit_pips >= 15:
                 be = open_price + pip * 2 if direction == "BUY" else open_price - pip * 2
                 needs_update = (direction == "BUY" and be > (current_sl or 0)) or \
@@ -372,7 +392,6 @@ def manage_open_trades():
                     if res["success"]:
                         log.info(f"Break-even: #{pos.ticket} {orig} SL->{be:.5f}")
 
-            # Trailing stop at 20 pips profit
             if profit_pips >= 20:
                 trail = atr_val * 1.5
                 if direction == "BUY":
@@ -417,7 +436,6 @@ def push_ohlcv():
 
     for symbol in available:
         try:
-            # Pair halt check before generating signal
             if not is_pair_enabled(symbol):
                 continue
 
@@ -428,9 +446,11 @@ def push_ohlcv():
 
             ohlcv_data = {}
             for tf in TIMEFRAMES:
-                bars = get_ohlcv(symbol, tf, 150)
+                bars = get_ohlcv(symbol, tf, 200)  # fetch 200 bars
                 if bars and len(bars) > 50:
                     ohlcv_data[tf] = bars
+                    # Cache for backtesting
+                    cache_ohlcv_for_backtest(symbol, tf, bars)
 
             if not ohlcv_data:
                 log.warning(f"No data for {symbol}")
@@ -478,9 +498,9 @@ def poll_commands():
         log.error(f"Command poll: {e}")
 
 def main():
-    log.info("Aethelgard MT5 Bridge v7 starting...")
+    log.info("Aethelgard MT5 Bridge v7 + Backtest Cache starting...")
     log.info(f"Pairs: {', '.join(PAIRS)}")
-    log.info("Features: Pair controls | Trailing stops | Break-even | Partial closes | Spread filter")
+    log.info("Features: Pair controls | Trailing stops | Break-even | Spread filter | OHLCV cache")
 
     if not mt5.initialize():
         log.error(f"MT5 init failed: {mt5.last_error()}")

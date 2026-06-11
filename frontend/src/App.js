@@ -12,6 +12,7 @@ import Analytics from "./pages/Analytics";
 import Billing from "./pages/Billing";
 import SystemControl from "./pages/SystemControl";
 import PairControls from "./pages/PairControls";
+import Backtest from "./pages/Backtest";
 import Settings from "./pages/Settings";
 import ClientPortal from "./pages/ClientPortal";
 import Layout from "./components/Layout";
@@ -70,6 +71,7 @@ export default function App() {
               <Route path="billing" element={<Billing />} />
               <Route path="system" element={<SystemControl />} />
               <Route path="pairs" element={<PairControls />} />
+              <Route path="backtest" element={<Backtest />} />
               <Route path="settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

@@ -11,16 +11,17 @@ const supabase = createClient(
 );
 
 const NAV = [
-  { to: "/",        icon: "◈", label: "Dashboard",     exact: true },
-  { to: "/accounts",icon: "⬡", label: "Accounts" },
-  { to: "/clients", icon: "◎", label: "Clients" },
-  { to: "/signals", icon: "⚡", label: "Signals" },
-  { to: "/trades",  icon: "◆", label: "Journal" },
-  { to: "/analytics",icon: "📊",label: "Analytics" },
-  { to: "/billing", icon: "💳", label: "Billing" },
-  { to: "/pairs",   icon: "⚙", label: "Pair Controls", badge: "halted" },
-  { to: "/system",  icon: "🖥", label: "System" },
-  { to: "/settings",icon: "⚙", label: "Settings" },
+  { to: "/",         icon: "◈", label: "Dashboard",     exact: true },
+  { to: "/accounts", icon: "⬡", label: "Accounts" },
+  { to: "/clients",  icon: "◎", label: "Clients" },
+  { to: "/signals",  icon: "⚡", label: "Signals" },
+  { to: "/trades",   icon: "◆", label: "Journal" },
+  { to: "/analytics",icon: "📊", label: "Analytics" },
+  { to: "/billing",  icon: "💳", label: "Billing" },
+  { to: "/pairs",    icon: "⚙", label: "Pair Controls", badge: "halted" },
+  { to: "/backtest", icon: "📈", label: "Backtest" },
+  { to: "/system",   icon: "🖥", label: "System" },
+  { to: "/settings", icon: "⚙", label: "Settings" },
 ];
 
 export default function Layout() {
