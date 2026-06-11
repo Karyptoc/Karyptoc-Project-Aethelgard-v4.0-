@@ -3,6 +3,7 @@
  * backend/src/services/signalEngine.js
  * 
  * v6 → v7: Added per-pair halt check from pair_controls table
+ * v7.1: Duplicate window reduced to 20min, reads from platform_settings
  * All existing Claude AI / ICT / SMC logic preserved exactly
  */
 
@@ -75,7 +76,20 @@ function isNewsBlackout() {
 
 // ── Duplicate Prevention ──────────────────────────────────────────────────────
 
-async function hasRecentSignal(symbol, minutes = 45) {
+async function getDuplicateWindow() {
+  try {
+    const { data } = await supabaseAdmin
+      .from("platform_settings")
+      .select("value")
+      .eq("key", "duplicate_signal_minutes")
+      .single();
+    return parseInt(data?.value) || 20;
+  } catch {
+    return 20; // default 20 minutes
+  }
+}
+
+async function hasRecentSignal(symbol, minutes = 20) {
   const cutoff = new Date(Date.now() - minutes * 60 * 1000).toISOString();
   const { data } = await supabaseAdmin
     .from("signals").select("id, direction, created_at")
@@ -314,15 +328,16 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       return null;
     }
 
-    // ── NEW: Per-pair halt check ───────────────────────────────────────────
+    // Per-pair halt check
     const pairCheck = await isPairEnabled(symbol);
     if (!pairCheck.allowed) {
       await log("info", "signalEngine", `${symbol}: ${pairCheck.reason}`);
       return null;
     }
 
-    // Duplicate check
-    const recent = await hasRecentSignal(symbol, 45);
+    // Duplicate check — reads window from platform_settings
+    const dupMinutes = await getDuplicateWindow();
+    const recent = await hasRecentSignal(symbol, dupMinutes);
     if (recent) {
       await log("info", "signalEngine",
         `${symbol}: Duplicate skip — ${recent.direction} was ${Math.round((Date.now()-new Date(recent.created_at))/60000)}min ago`
