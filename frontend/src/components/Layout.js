@@ -13,7 +13,8 @@ const supabase = createClient(
 const NAV = [
   { to: "/",         icon: "◈", label: "Dashboard",     exact: true },
   { to: "/accounts", icon: "⬡", label: "Accounts" },
-  { to: "/clients",  icon: "◎", label: "Clients" },
+  { to: "/clients",          icon: "◎", label: "Clients" },
+  { to: "/clients/manage",   icon: "👥", label: "Client Accounts" },
   { to: "/signals",  icon: "⚡", label: "Signals" },
   { to: "/trades",   icon: "◆", label: "Journal" },
   { to: "/analytics",icon: "📊", label: "Analytics" },

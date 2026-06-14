@@ -15,6 +15,8 @@ import PairControls from "./pages/PairControls";
 import Backtest from "./pages/Backtest";
 import Settings from "./pages/Settings";
 import ClientPortal from "./pages/ClientPortal";
+import ClientPortalPublic from "./pages/ClientPortalPublic";
+import ClientManagement from "./pages/ClientManagement";
 import Layout from "./components/Layout";
 import ClientLayout from "./components/ClientLayout";
 import "./index.css";
@@ -61,10 +63,12 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/client-portal" element={<ClientPortalPublic />} />
             <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Dashboard />} />
               <Route path="accounts" element={<Accounts />} />
               <Route path="clients" element={<Clients />} />
+              <Route path="clients/manage" element={<ClientManagement />} />
               <Route path="signals" element={<Signals />} />
               <Route path="trades" element={<Trades />} />
               <Route path="analytics" element={<Analytics />} />
