@@ -22,6 +22,7 @@ const clientPortalRoutes = require("./routes/clientPortal");
 const systemRoutes = require("./routes/system");
 const pairsRoutes = require("./routes/pairs");
 const backtestRoutes = require("./routes/backtest");
+const copyTradingRoutes = require("./routes/copyTrading");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -61,6 +62,7 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/client-portal", clientPortalRoutes);
 app.use("/api/system", systemRoutes);
 app.use("/api/pairs", pairsRoutes);
+app.use("/api/copy-trading", copyTradingRoutes);
 app.use("/api/backtest", backtestRoutes);
 
 // Health check (used by UptimeRobot)
