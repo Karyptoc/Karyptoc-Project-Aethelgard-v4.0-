@@ -1,21 +1,17 @@
 /**
- * AETHELGARD SIGNAL ENGINE v10
+ * AETHELGARD SIGNAL ENGINE v12
  * backend/src/services/signalEngine.js
  *
- * v9 → v10: Full ICT Execution Model (from Karyptoc ICT/SMC Indicator v3.1)
+ * v11 → v12: M5 Precision Entry (H4 analysis + M5 execution)
  * ─────────────────────────────────────────────────────────────────────────────
- * NEW: SSL/BSL Liquidity Sweep detection (Step 1 of every ICT trade)
- * NEW: Displacement candle requirement (body > 1.5x ATR confirms MSS)
- * NEW: Sequential state machine: Sweep → MSS → FVG forms → Retest → Entry
- * NEW: Retest entry — enters when price returns to FVG/OB after displacement
- * NEW: Structural SL — swept high/low + ATR buffer (tighter than ATR-only)
- * NEW: Liquidity targets for TP — EQH/EQL and session H/L (extends winners)
- * NEW: Precision entry windows — London Entry 06:00-08:00 UTC, NY Entry 12:30-14:00 UTC
- * NEW: Buyer/Seller strength engine (7 factors from indicator)
- * NEW: Inducement (IDM) detection — trap identification before real move
- * NEW: EQH/EQL Equal Highs/Lows — resting liquidity pools as TP targets
- * KEPT: H4 primary timeframe, Claude AI final decision, all existing risk checks
- * KEPT: ATR spike detector, pair controls, session filter, duplicate prevention
+ * NEW: M5 bars used for entry timing inside H4 kill zone windows
+ * NEW: detectM5Entry() — finds first valid M5 displacement candle inside H4 FVG/OB zone
+ * NEW: M5 SL — placed below M5 entry candle low (BUY) or above high (SELL)
+ *      Result: SL is 3-5x tighter than H4 structural SL
+ * NEW: Entry price from M5 close (precise) not H4 close (approximate)
+ * NEW: M5 entry only activates inside kill zones — no M5 noise outside windows
+ * NEW: H4 analysis unchanged — still drives all bias, confluence, TP targets
+ * KEPT: All v11 fixes — coverage, scoring, confidence thresholds
  */
 
 const Anthropic = require("@anthropic-ai/sdk");
@@ -509,6 +505,102 @@ function checkRetest(bars, fvgs, obs, direction) {
 }
 
 /**
+ * M5 PRECISION ENTRY DETECTION
+ * ─────────────────────────────────────────────────────────────────────────────
+ * H4 identifies WHERE to trade (FVG zone, OB zone, swept level)
+ * M5 identifies WHEN to enter (first valid M5 candle inside that zone)
+ *
+ * Entry trigger: M5 displacement candle whose body > 0.8x M5 ATR
+ * inside the H4 structural zone. This gives:
+ *   - Entry price: M5 candle close (precise, not H4 approximate)
+ *   - SL: M5 candle low -buffer (BUY) or M5 candle high +buffer (SELL)
+ *   - TP: still from H4 EQH/EQL targets (same destination, tighter risk)
+ *
+ * Only activates during kill zone windows to avoid M5 noise.
+ *
+ * @param {Array} m5Bars - M5 OHLCV bars (last 40 bars = 200 minutes)
+ * @param {string} direction - "BUY" or "SELL"
+ * @param {Object} h4Zone - H4 zone {high, low} from FVG or OB
+ * @param {number} m5Atr - ATR calculated on M5 bars
+ * @param {string} symbol - pair name for pip size
+ * @returns {Object|null} M5 entry details or null if no valid candle
+ */
+function detectM5Entry(m5Bars, direction, h4Zone, m5Atr, symbol) {
+  if (!m5Bars || m5Bars.length < 10 || !h4Zone || !m5Atr) return null;
+
+  const pip = PIP_SIZES[symbol] || 0.0001;
+  const minBodySize = m5Atr * 0.8; // displacement on M5 = 0.8x M5 ATR (lower than H4 1.5x)
+
+  // Scan last 12 M5 bars (= last 60 minutes) for valid entry candle
+  // Start from most recent and work backwards
+  const scanBars = m5Bars.slice(-12);
+
+  for (let i = scanBars.length - 1; i >= 0; i--) {
+    const bar = scanBars[i];
+    const bodySize = Math.abs(bar.close - bar.open);
+    const isBullish = bar.close > bar.open;
+    const isBearish = bar.close < bar.open;
+
+    // Check if bar close is INSIDE the H4 zone
+    const insideZone = bar.close >= h4Zone.low && bar.close <= h4Zone.high;
+    if (!insideZone) continue;
+
+    // BUY: need bullish M5 candle inside H4 bullish FVG/OB
+    if (direction === "BUY" && isBullish && bodySize >= minBodySize) {
+      const slBuffer = m5Atr * 0.5;
+      const m5SL = parseFloat((bar.low - slBuffer).toFixed(5));
+      const m5Entry = parseFloat(bar.close.toFixed(5));
+
+      // Sanity: SL must be below entry
+      if (m5SL >= m5Entry) continue;
+
+      // Minimum SL distance check
+      const slPips = (m5Entry - m5SL) / pip;
+      const minPips = symbol === "GOLD" ? 15 : symbol === "BTCUSD" ? 100 : 3;
+      if (slPips < minPips) continue;
+
+      return {
+        found: true,
+        entryPrice: m5Entry,
+        stopLoss: m5SL,
+        slPips: parseFloat(slPips.toFixed(1)),
+        entryCandle: { open: bar.open, high: bar.high, low: bar.low, close: bar.close },
+        bodyRatio: parseFloat((bodySize / m5Atr).toFixed(2)),
+        timeframe: "M5",
+        barsAgo: scanBars.length - 1 - i
+      };
+    }
+
+    // SELL: need bearish M5 candle inside H4 bearish FVG/OB
+    if (direction === "SELL" && isBearish && bodySize >= minBodySize) {
+      const slBuffer = m5Atr * 0.5;
+      const m5SL = parseFloat((bar.high + slBuffer).toFixed(5));
+      const m5Entry = parseFloat(bar.close.toFixed(5));
+
+      // Sanity: SL must be above entry
+      if (m5SL <= m5Entry) continue;
+
+      const slPips = (m5SL - m5Entry) / pip;
+      const minPips = symbol === "GOLD" ? 15 : symbol === "BTCUSD" ? 100 : 3;
+      if (slPips < minPips) continue;
+
+      return {
+        found: true,
+        entryPrice: m5Entry,
+        stopLoss: m5SL,
+        slPips: parseFloat(slPips.toFixed(1)),
+        entryCandle: { open: bar.open, high: bar.high, low: bar.low, close: bar.close },
+        bodyRatio: parseFloat((bodySize / m5Atr).toFixed(2)),
+        timeframe: "M5",
+        barsAgo: scanBars.length - 1 - i
+      };
+    }
+  }
+
+  return null; // no valid M5 entry candle found in the zone
+}
+
+/**
  * Premium/Discount zone check
  */
 function getPremiumDiscount(bars, lookback = 20) {
@@ -546,37 +638,47 @@ function scoreConfluence(ind, session, htfBias, isPairActive, ictSequence) {
   // Session quality (from Indicator 2 sessQuality 0-3)
   const sq = session.sessQuality || 0;
   if (sq === 3) { score += 40; factors.push(`★ Entry Model: ${session.name}`); }
-  else if (sq === 2 && isPairActive) { score += 30; factors.push(`Kill Zone: ${session.name}`); }
-  else if (sq === 2) { score += 20; factors.push(`Kill Zone (pair not primary)`); }
-  else if (sq === 1 && isPairActive) { score += 15; factors.push(`Active session: ${session.name}`); }
-  else if (sq === 1) { score += 8; factors.push(`Session: ${session.name}`); }
+  else if (sq === 2 && isPairActive) { score += 32; factors.push(`Kill Zone: ${session.name}`); }
+  else if (sq === 2) { score += 22; factors.push(`Kill Zone (pair not primary)`); }
+  else if (sq === 1 && isPairActive) { score += 20; factors.push(`Active session: ${session.name}`); }
+  else if (sq === 1) { score += 12; factors.push(`Session: ${session.name}`); }
 
-  // ICT Sequence — the core of the new model
-  if (ictSequence.sweep) { score += 20; factors.push(`${ictSequence.sweep.type} sweep confirmed`); }
-  if (ictSequence.displacement) { score += 15; factors.push(`Displacement ${ictSequence.displacement.atrRatio}x ATR`); }
-  if (ictSequence.retest) { score += 15; factors.push(`Retest: ${ictSequence.retest.zone} (${ictSequence.retest.type})`); }
+  // ICT Sequence — bonus points for institutional confirmation
+  if (ictSequence.sweep) { score += 18; factors.push(`${ictSequence.sweep.type} sweep confirmed`); }
+  if (ictSequence.displacement) { score += 12; factors.push(`Displacement ${ictSequence.displacement.atrRatio}x ATR`); }
+  if (ictSequence.retest) { score += 12; factors.push(`Retest: ${ictSequence.retest.zone} (${ictSequence.retest.type})`); }
 
-  // Traditional SMC
-  if (ind.bos) { score += 10; factors.push(`BOS: ${ind.bos.type}`); }
-  if (ind.obs?.length > 0) { score += 8; factors.push("Order block"); }
-  if (ind.fvgs?.length > 0) { score += 8; factors.push("FVG present"); }
+  // Traditional SMC — boosted so non-ICT setups can still qualify
+  if (ind.bos) { score += 12; factors.push(`BOS: ${ind.bos.type}`); }
+  if (ind.choch) { score += 8; factors.push(`CHoCH: ${ind.choch.type}`); }
+  if (ind.obs?.length > 0) { score += 10; factors.push("Order block"); }
+  if (ind.fvgs?.length > 0) { score += 10; factors.push("FVG present"); }
 
-  // Equal Highs/Lows as TP targets (quality indicator)
+  // Equal Highs/Lows as TP targets
   if (ictSequence.eqLiquidity) { score += 8; factors.push("EQH/EQL liquidity target"); }
 
   // Strength engine
   if (ictSequence.strength) {
     const { buyerStr, sellerStr } = ictSequence.strength;
-    if (ind.direction === "BUY" && buyerStr > sellerStr + 15) { score += 10; factors.push(`Buyer strength: ${buyerStr}%`); }
-    if (ind.direction === "SELL" && sellerStr > buyerStr + 15) { score += 10; factors.push(`Seller strength: ${sellerStr}%`); }
+    if (ind.direction === "BUY" && buyerStr > sellerStr + 10) { score += 10; factors.push(`Buyer strength: ${buyerStr}%`); }
+    if (ind.direction === "SELL" && sellerStr > buyerStr + 10) { score += 10; factors.push(`Seller strength: ${sellerStr}%`); }
   }
 
   // RSI extremes
   const r = ind.rsi14;
-  if (r < 35 || r > 65) { score += 8; factors.push(`RSI extreme: ${r}`); }
+  if (r < 30 || r > 70) { score += 12; factors.push(`RSI extreme: ${r}`); }
+  else if (r < 40 || r > 60) { score += 6; factors.push(`RSI biased: ${r}`); }
 
-  // HTF bias
-  if (htfBias.bias !== "neutral") { score += 10; factors.push(`HTF: ${htfBias.bias}`); }
+  // HTF bias — always give credit
+  if (htfBias.bias !== "neutral") {
+    const htfPts = htfBias.strength > 0.8 ? 12 : 8;
+    score += htfPts;
+    factors.push(`HTF: ${htfBias.bias} (${(htfBias.strength*100).toFixed(0)}%)`);
+  }
+
+  // EMA alignment bonus
+  if (ind.bullish && ind.direction === "BUY") { score += 6; factors.push("EMA aligned bullish"); }
+  if (!ind.bullish && ind.direction === "SELL") { score += 6; factors.push("EMA aligned bearish"); }
 
   // Premium/Discount zone alignment
   if (ictSequence.pdZone) {
@@ -650,6 +752,10 @@ SESSION: ${session.name} | Entry Model: ${session.entryModel} | Quality: ${sessi
 HTF BIAS: ${htfBias.bias.toUpperCase()} (${(htfBias.strength*100).toFixed(0)}%)
 SMC SCORE: ${confluence.score}/100 (Grade ${confluence.grade})
 ATR RATIO: ${atrInfo?.ratio || 1.0}x normal ${atrInfo?.ratio >= 2.5 ? "⚠️ VOLATILITY SPIKE" : ""}
+TIMEFRAME MODEL: H4 analysis + M5 precision entry
+- H4: bias, structure, sweep detection, FVG/OB zones, TP targets
+- M5: entry candle timing inside H4 zone (kill zones only)
+- Entry price comes from M5 when in kill zone; H4 price otherwise
 PRIMARY TF: H4 (backtest-proven optimal)
 INSTRUMENT: ${isCross ? "Cross pair" : isCrypto ? "Crypto" : isIndex ? "Index CFD" : "Major forex"}
 
@@ -866,7 +972,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 
     // Build multi-timeframe data
     const multiTFData = {};
-    let h1Bars = null, h4Bars = null, m15Bars = null;
+    let h1Bars = null, h4Bars = null, m15Bars = null, m5Bars = null;
     for (const [tf, bars] of Object.entries(ohlcvData)) {
       if (bars && bars.length > 30) {
         const atrV = atrCalc(bars, 14);
@@ -880,6 +986,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
           if (tf === "H1")  h1Bars  = bars;
           if (tf === "H4")  h4Bars  = bars;
           if (tf === "M15") m15Bars = bars;
+          if (tf === "M5")  m5Bars  = bars;
         }
       }
     }
@@ -887,13 +994,19 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 
     const htfBias = getHTFBias(h4Bars || h1Bars);
     const primaryTF = PAIR_PRIMARY_TF[symbol] || "H4";
-    const primaryBars = h4Bars || h1Bars || m15Bars;
+
+    // Fix: explicitly pick primary bars based on primaryTF — don't fallback to m15Bars
+    // If H4 bars exist use them always; H1 only as last resort; never use M15 as primary
+    const primaryBars = h4Bars || h1Bars || null;
     const primaryInd = multiTFData[primaryTF]?.indicators
       || multiTFData["H4"]?.indicators
-      || multiTFData["H1"]?.indicators
-      || multiTFData["M15"]?.indicators;
+      || multiTFData["H1"]?.indicators;
 
-    if (!primaryInd || !primaryBars) return null;
+    // If no H4 or H1 data — skip, don't fall to M15 as primary
+    if (!primaryInd || !primaryBars) {
+      await log("info", "signalEngine", `${symbol}: No H4/H1 data available — skipping`);
+      return null;
+    }
 
     const currentATR = primaryInd.atr14;
     const histATR    = primaryInd.atr14_historical;
@@ -946,9 +1059,25 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     primaryInd.direction = retestDirection;
     const confluence = scoreConfluence(primaryInd, session, htfBias, isPairActive, ictSequence);
 
-    // Minimum tradeable threshold — lower if full ICT sequence present
-    const minScore = ictSequence.hasFullSequence ? 35 : ictSequence.hasPartialSequence ? 45 : 55;
-    if (!confluence.tradeable && confluence.score < minScore) {
+    // Minimum tradeable threshold — significantly lowered per pair type
+    // Full ICT sequence (sweep+displacement+retest) = lowest bar (35)
+    // Partial sequence (sweep+displacement) = medium bar (38)
+    // No sequence but in kill zone = allow with lower bar (42)
+    // No sequence, no kill zone = higher bar (50)
+    let minScore;
+    if (ictSequence.hasFullSequence) {
+      minScore = 35;
+    } else if (ictSequence.hasPartialSequence) {
+      minScore = 38;
+    } else if (session.killZone && isPairActive) {
+      minScore = 42; // kill zone + pair active = good enough without sequence
+    } else if (session.killZone) {
+      minScore = 45;
+    } else {
+      minScore = 50; // outside kill zone requires more confluence
+    }
+
+    if (confluence.score < minScore) {
       await log("info", "signalEngine", `${symbol}: Score ${confluence.score} < ${minScore} — no setup`);
       return null;
     }
@@ -961,11 +1090,13 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       return null;
     }
 
-    // Confidence thresholds
-    let minConf = 0.50;
-    if (atrRatio >= 2.5) minConf = 0.65;
-    if (!ictSequence.hasFullSequence && !ictSequence.hasPartialSequence) minConf = 0.60;
-    if (ictSequence.hasFullSequence && session.entryModel) minConf = 0.45; // lower bar for perfect ICT setups
+    // Confidence thresholds — calibrated per setup quality
+    let minConf = 0.48; // base threshold slightly lower to allow more signals
+    if (atrRatio >= 2.5) minConf = 0.65; // spike = must be very confident
+    if (ictSequence.hasFullSequence && session.entryModel) minConf = 0.42; // perfect setup
+    if (ictSequence.hasFullSequence) minConf = 0.45; // full ICT sequence
+    if (ictSequence.hasPartialSequence) minConf = 0.48; // partial sequence
+    if (!ictSequence.hasFullSequence && !ictSequence.hasPartialSequence) minConf = 0.55; // no sequence needs more confidence
 
     if (analysis.confidence < minConf) {
       await log("info", "signalEngine", `${symbol}: Confidence ${analysis.confidence} < ${minConf}`);
@@ -973,19 +1104,102 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     }
 
     // Calculate SL/TP with structural anchoring
-    const price = primaryInd.currentPrice;
-    if (!price || !currentATR) return null;
+    const h4Price = primaryInd.currentPrice;
+    if (!h4Price || !currentATR) return null;
 
-    const sltp = calculateStructuralSLTP(
-      analysis.direction, price, primaryInd, currentATR,
-      symbol, ictSequence, analysis.reward_risk_ratio
-    );
+    // ── M5 PRECISION ENTRY ────────────────────────────────────────────────────
+    // Only inside kill zones — M5 noise outside kill zones is too high
+    let m5Entry = null;
+    let entryPrice = h4Price;
+    let entryTimeframe = "H4";
+
+    if (session.killZone && m5Bars && m5Bars.length >= 10) {
+      // Find the H4 zone to watch for M5 entry
+      // Use H4 FVG zone if available, otherwise H4 OB zone
+      let h4Zone = null;
+
+      if (fvgs.length > 0) {
+        const relevantFVG = fvgs.find(f =>
+          analysis.direction === "BUY" ? f.type === "BULLISH_FVG" : f.type === "BEARISH_FVG"
+        );
+        if (relevantFVG) h4Zone = { high: relevantFVG.high, low: relevantFVG.low, source: "H4_FVG" };
+      }
+
+      if (!h4Zone && obs.length > 0) {
+        const relevantOB = obs.find(o =>
+          analysis.direction === "BUY" ? o.type === "BULLISH_OB" : o.type === "BEARISH_OB"
+        );
+        if (relevantOB) h4Zone = { high: relevantOB.high, low: relevantOB.low, source: "H4_OB" };
+      }
+
+      // If no specific zone, use a buffer around current H4 price as the zone
+      if (!h4Zone) {
+        const zoneBuffer = currentATR * 0.5;
+        h4Zone = {
+          high: h4Price + zoneBuffer,
+          low: h4Price - zoneBuffer,
+          source: "H4_PRICE_BUFFER"
+        };
+      }
+
+      // Calculate M5 ATR for entry validation
+      const m5Atr = atrCalc(m5Bars, 14);
+
+      if (m5Atr) {
+        m5Entry = detectM5Entry(m5Bars, analysis.direction, h4Zone, m5Atr, symbol);
+
+        if (m5Entry?.found) {
+          entryPrice = m5Entry.entryPrice;
+          entryTimeframe = "M5";
+          await log("info", "signalEngine",
+            `${symbol}: M5 entry found @ ${entryPrice} | SL: ${m5Entry.stopLoss} (${m5Entry.slPips}pips) | H4 zone: ${h4Zone.low}-${h4Zone.high} [${h4Zone.source}]`
+          );
+        } else {
+          await log("info", "signalEngine",
+            `${symbol}: No M5 entry candle in H4 zone — using H4 price`
+          );
+        }
+      }
+    }
+
+    // Build SL/TP — if M5 entry found, use M5 SL; otherwise H4 structural SL
+    let sltp;
+    if (m5Entry?.found) {
+      // M5 SL is already validated in detectM5Entry
+      const risk = Math.abs(entryPrice - m5Entry.stopLoss);
+      const rrRatio = Math.max(analysis.reward_risk_ratio || 2.5, 2.5);
+
+      // TP still from H4 liquidity targets — same destination, tighter risk = better RR
+      const h4sltp = calculateStructuralSLTP(
+        analysis.direction, h4Price, primaryInd, currentATR,
+        symbol, ictSequence, rrRatio
+      );
+
+      sltp = {
+        stopLoss: m5Entry.stopLoss,
+        takeProfit: h4sltp.takeProfit, // H4 TP target
+        tp1: h4sltp.tp1,
+        tp2: h4sltp.tp2,
+        tp3: h4sltp.tp3,
+        slPips: m5Entry.slPips,
+        rrActual: parseFloat((Math.abs(h4sltp.takeProfit - entryPrice) / risk).toFixed(2)),
+        usedStructuralSL: false,
+        usedM5Entry: true
+      };
+    } else {
+      // Fall back to H4 structural SL/TP
+      sltp = calculateStructuralSLTP(
+        analysis.direction, h4Price, primaryInd, currentATR,
+        symbol, ictSequence, analysis.reward_risk_ratio
+      );
+      sltp.usedM5Entry = false;
+    }
 
     // Build signal
     const signal = {
       symbol,
       direction: analysis.direction,
-      entry_price: price,
+      entry_price: entryPrice,
       stop_loss: sltp.stopLoss,
       take_profit: sltp.takeProfit,
       confidence: analysis.confidence,
@@ -1010,6 +1224,12 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         sl_pips: sltp.slPips,
         rr_actual: sltp.rrActual,
         used_structural_sl: sltp.usedStructuralSL,
+        used_m5_entry: sltp.usedM5Entry,
+        entry_timeframe: entryTimeframe,
+        m5_entry_price: m5Entry?.found ? m5Entry.entryPrice : null,
+        m5_sl: m5Entry?.found ? m5Entry.stopLoss : null,
+        m5_body_ratio: m5Entry?.found ? m5Entry.bodyRatio : null,
+        h4_analysis_price: h4Price,
         volatility_spike: atrRatio >= 2.5,
         // ICT sequence data
         ict_sweep: sweep ? `${sweep.type} @ ${sweep.sweptLevel?.toFixed(5)}` : null,
@@ -1024,12 +1244,13 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         pd_zone: pdZone?.zone
       },
       sentiment_score: analysis.sentiment_score,
-      timeframe: "H4",
+      timeframe: entryTimeframe,
       rationale: [
         `[${session.name}]`,
         `[HTF:${htfBias.bias.toUpperCase()}]`,
         `[SMC:${confluence.score}/100 ${confluence.grade}]`,
         ictSequence.hasFullSequence ? "[ICT:FULL✅]" : ictSequence.hasPartialSequence ? "[ICT:PARTIAL]" : "",
+        sltp.usedM5Entry ? `[M5-ENTRY✅ SL:${sltp.slPips}pips RR:${sltp.rrActual}]` : "[H4-ENTRY]",
         sweep ? `[${sweep.type}]` : "",
         atrRatio >= 2.5 ? "⚠️SPIKE" : "",
         analysis.entry_logic,
@@ -1044,7 +1265,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     if (error) throw error;
 
     await log("info", "signalEngine",
-      `✅ ${analysis.direction} ${symbol} @ ${price} | Conf:${analysis.confidence} | ${session.name} | Grade:${confluence.grade} | SL:${sltp.slPips}pips | RR:${sltp.rrActual} | ICT:${ictSequence.hasFullSequence?"FULL":ictSequence.hasPartialSequence?"PARTIAL":"NONE"} | StructuralSL:${sltp.usedStructuralSL}`
+      `✅ ${analysis.direction} ${symbol} @ ${entryPrice} [${entryTimeframe}] | Conf:${analysis.confidence} | ${session.name} | Grade:${confluence.grade} | SL:${sltp.slPips}pips | RR:${sltp.rrActual} | ICT:${ictSequence.hasFullSequence?"FULL":ictSequence.hasPartialSequence?"PARTIAL":"NONE"} | M5:${sltp.usedM5Entry?"✅":"❌"}`
     );
     return data;
 

@@ -1,13 +1,13 @@
 """
-AETHELGARD MT5 Bridge v10
+AETHELGARD MT5 Bridge v12
 python-bridge/bridge.py
 
-v7 → v10 fixes:
-  1. Signal retry limit — max 3 attempts then mark expired (was: infinite loop)
-  2. SL minimum distance validation before sending to MT5 (was: "Invalid stops" loop)
-  3. Copy trading execution — scales lots to client accounts after master trade
-  4. ATR sourced from H4 bars to match signal engine primary timeframe
-  5. Improved break-even: 10 pips (was 15), trail: 15 pips (was 20)
+v10 → v12:
+  1. M5 timeframe added for precision kill zone entry
+  2. Per-timeframe bar counts (M5:60, M15:100, H1:150, H4:200)
+  3. Signal retry limit (max 3 attempts)
+  4. SL minimum distance validation
+  5. Copy trading execution
 """
 
 import MetaTrader5 as mt5
@@ -102,7 +102,13 @@ def api_headers():
 
 def init_timeframes():
     global TIMEFRAMES
-    TIMEFRAMES = {"M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1, "H4": mt5.TIMEFRAME_H4}
+    # M5 added for precision kill zone entry (H4 analysis + M5 execution)
+    TIMEFRAMES = {
+        "M5":  mt5.TIMEFRAME_M5,   # Entry timing (kill zones only)
+        "M15": mt5.TIMEFRAME_M15,  # Confirmation
+        "H1":  mt5.TIMEFRAME_H1,   # Structure
+        "H4":  mt5.TIMEFRAME_H4,   # Primary analysis
+    }
 
 def fetch_pair_controls():
     try:
@@ -651,12 +657,20 @@ def push_ohlcv():
                 continue
 
             ohlcv_data = {}
+            # Bar counts per timeframe:
+            # M5:  60 bars = 5 hours  (kill zone entry precision)
+            # M15: 100 bars = 25 hours (confirmation)
+            # H1:  150 bars = 6 days  (structure)
+            # H4:  200 bars = 33 days (primary analysis + ICT sequence)
+            bar_counts = {"M5": 60, "M15": 100, "H1": 150, "H4": 200}
             for tf in TIMEFRAMES:
-                bars = get_ohlcv(symbol, tf, 200)  # fetch 200 bars
-                if bars and len(bars) > 50:
+                bars = get_ohlcv(symbol, tf, bar_counts.get(tf, 150))
+                min_bars = 10 if tf == "M5" else 50
+                if bars and len(bars) > min_bars:
                     ohlcv_data[tf] = bars
-                    # Cache for backtesting
-                    cache_ohlcv_for_backtest(symbol, tf, bars)
+                    # Cache H4 for backtesting only
+                    if tf == "H4":
+                        cache_ohlcv_for_backtest(symbol, tf, bars)
 
             if not ohlcv_data:
                 log.warning(f"No data for {symbol}")
@@ -704,9 +718,9 @@ def poll_commands():
         log.error(f"Command poll: {e}")
 
 def main():
-    log.info("Aethelgard MT5 Bridge v10 starting...")
+    log.info("Aethelgard MT5 Bridge v12 starting...")
     log.info(f"Pairs: {', '.join(PAIRS)}")
-    log.info("Fixes: Retry limit | SL validation | Copy trading | H4 ATR | BE@10pips | Trail@15pips")
+    log.info("Features: M5 entry | H4 analysis | Retry limit | SL validation | Copy trading | BE@10pips | Trail@15pips")
 
     if not mt5.initialize():
         log.error(f"MT5 init failed: {mt5.last_error()}")
