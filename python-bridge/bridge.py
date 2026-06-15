@@ -75,19 +75,19 @@ MAX_SIGNAL_ATTEMPTS = 3
 # MT5 rejects orders where SL is too close to entry ("Invalid stops")
 # These are conservative minimums in price units (not pips)
 MIN_SL_DISTANCE = {
-    "GOLD":      0.50,   # $0.50 minimum (50 cents)
+    "GOLD":      0.80,   # 80 cents minimum (was 0.50)
     "BTCUSD":  500.0,    # $500 minimum
-    "US30Cash":  5.0,    # 5 points
-    "GER40Cash": 5.0,    # 5 points
-    "EURUSD":    0.0005, # 5 pips
-    "GBPUSD":    0.0005,
-    "USDJPY":    0.05,   # 5 pips
-    "AUDUSD":    0.0005,
-    "USDCAD":    0.0005,
-    "USDCHF":    0.0005,
-    "NZDUSD":    0.0005,
-    "GBPJPY":    0.05,
-    "EURJPY":    0.05,
+    "US30Cash": 30.0,    # 30 points minimum (was 5)
+    "GER40Cash":20.0,    # 20 points minimum (was 5)
+    "EURUSD":   0.0010,  # 10 pips (was 5)
+    "GBPUSD":   0.0010,  # 10 pips
+    "AUDUSD":   0.0010,  # 10 pips
+    "USDCAD":   0.0010,  # 10 pips
+    "USDCHF":   0.0010,  # 10 pips
+    "NZDUSD":   0.0010,  # 10 pips
+    "USDJPY":   0.20,    # 20 pips (JPY pairs need much larger minimums)
+    "GBPJPY":   0.50,    # 50 pips (volatile cross — broker requires large stops)
+    "EURJPY":   0.30,    # 30 pips
 }
 
 # Track which bars already cached to avoid duplicates

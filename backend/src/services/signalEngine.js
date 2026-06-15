@@ -560,7 +560,12 @@ function detectM5Entry(m5Bars, direction, h4Zone, m5Atr, symbol) {
 
       // Minimum SL distance check
       const slPips = (m5Entry - m5SL) / pip;
-      const minPips = symbol === "GOLD" ? 15 : symbol === "BTCUSD" ? 100 : 3;
+      const minPips = symbol === "GOLD" ? 80 :
+                      symbol === "BTCUSD" ? 500 :
+                      symbol === "GBPJPY" ? 50 :
+                      symbol === "EURJPY" ? 30 :
+                      symbol === "USDJPY" ? 20 :
+                      ["US30Cash","GER40Cash"].includes(symbol) ? 30 : 10;
       if (slPips < minPips) continue;
 
       return {
@@ -585,7 +590,12 @@ function detectM5Entry(m5Bars, direction, h4Zone, m5Atr, symbol) {
       if (m5SL <= m5Entry) continue;
 
       const slPips = (m5SL - m5Entry) / pip;
-      const minPips = symbol === "GOLD" ? 15 : symbol === "BTCUSD" ? 100 : 3;
+      const minPips = symbol === "GOLD" ? 80 :
+                      symbol === "BTCUSD" ? 500 :
+                      symbol === "GBPJPY" ? 50 :
+                      symbol === "EURJPY" ? 30 :
+                      symbol === "USDJPY" ? 20 :
+                      ["US30Cash","GER40Cash"].includes(symbol) ? 30 : 10;
       if (slPips < minPips) continue;
 
       return {
@@ -857,7 +867,12 @@ async function getRecentPerformance(symbol) {
 function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSequence, analysisRR) {
   const pip = PIP_SIZES[symbol] || 0.0001;
   const atrMultiplier = ATR_SL_MULTIPLIERS[symbol] || 1.3;
-  const minSLPips = symbol === "GOLD" ? 50 : symbol === "BTCUSD" ? 500 : symbol.includes("JPY") || ["US30Cash","GER40Cash"].includes(symbol) ? 20 : 5;
+  const minSLPips = symbol === "GOLD" ? 80 :
+                    symbol === "BTCUSD" ? 500 :
+                    symbol === "GBPJPY" ? 50 :
+                    symbol === "EURJPY" ? 30 :
+                    symbol === "USDJPY" ? 20 :
+                    ["US30Cash","GER40Cash"].includes(symbol) ? 30 : 10;
 
   let stopLoss, slPips;
 
