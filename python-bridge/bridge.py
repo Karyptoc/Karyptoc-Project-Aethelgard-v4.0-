@@ -646,18 +646,22 @@ def push_ohlcv():
 
     log.info(f"Signal generation for {len(available)} pairs: {', '.join(available)}")
 
-    # ── Warm-up ping — keeps Render awake before signal cycle ─────────────────
-    # Free tier Render sleeps after ~15s inactivity. Ping first so the backend
-    # is fully awake before we start sending OHLCV data for all 13 pairs.
-    try:
-        ping_r = requests.get(f"{BACKEND_URL}/api/dashboard/overview",
-            headers=api_headers(), timeout=60)
-        if ping_r.status_code == 200:
-            log.info("Backend warm — starting signal cycle")
-        else:
-            log.warning(f"Backend ping returned {ping_r.status_code} — proceeding anyway")
-    except Exception as e:
-        log.warning(f"Backend ping failed: {e} — proceeding anyway")
+    # ── Warm-up ping — wakes Render before signal cycle ──────────────────────
+    # /ping is a public no-auth endpoint that always returns instantly
+    # This wakes Render from free-tier sleep before we start the 13-pair cycle
+    for attempt in range(3):
+        try:
+            ping_r = requests.get(f"{BACKEND_URL}/ping",
+                headers={"Content-Type": "application/json"}, timeout=60)
+            if ping_r.status_code == 200:
+                log.info(f"Backend warm (attempt {attempt+1}) — starting signal cycle")
+                break
+            else:
+                log.warning(f"Backend ping attempt {attempt+1}: status {ping_r.status_code}")
+        except Exception as e:
+            log.warning(f"Backend ping attempt {attempt+1} failed: {e}")
+            if attempt < 2:
+                time.sleep(5)  # wait 5s then retry
 
     for symbol in available:
         try:
@@ -703,6 +707,9 @@ def push_ohlcv():
                 log.warning(f"OHLCV push failed {symbol}: {r.status_code}")
 
             time.sleep(0.5)  # reduced from 2s — backend stays warm between pairs
+
+        except requests.exceptions.Timeout:
+            log.warning(f"OHLCV timeout {symbol} — Render may have slept, continuing")
         except Exception as e:
             log.error(f"OHLCV error {symbol}: {e}")
 
