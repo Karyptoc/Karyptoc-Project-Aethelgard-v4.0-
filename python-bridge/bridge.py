@@ -646,6 +646,19 @@ def push_ohlcv():
 
     log.info(f"Signal generation for {len(available)} pairs: {', '.join(available)}")
 
+    # ── Warm-up ping — keeps Render awake before signal cycle ─────────────────
+    # Free tier Render sleeps after ~15s inactivity. Ping first so the backend
+    # is fully awake before we start sending OHLCV data for all 13 pairs.
+    try:
+        ping_r = requests.get(f"{BACKEND_URL}/api/dashboard/overview",
+            headers=api_headers(), timeout=60)
+        if ping_r.status_code == 200:
+            log.info("Backend warm — starting signal cycle")
+        else:
+            log.warning(f"Backend ping returned {ping_r.status_code} — proceeding anyway")
+    except Exception as e:
+        log.warning(f"Backend ping failed: {e} — proceeding anyway")
+
     for symbol in available:
         try:
             if not is_pair_enabled(symbol):
@@ -689,7 +702,7 @@ def push_ohlcv():
             else:
                 log.warning(f"OHLCV push failed {symbol}: {r.status_code}")
 
-            time.sleep(2)
+            time.sleep(0.5)  # reduced from 2s — backend stays warm between pairs
         except Exception as e:
             log.error(f"OHLCV error {symbol}: {e}")
 
