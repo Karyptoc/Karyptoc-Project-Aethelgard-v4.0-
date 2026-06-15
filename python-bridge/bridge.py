@@ -721,8 +721,11 @@ def poll_commands():
         for cmd in r.json().get("commands", []):
             cmd_type = cmd.get("type")
             if cmd_type == "EXECUTE_TRADE":
-                result = execute_trade(cmd["account_id"], cmd["order"])
-                result["order"] = cmd["order"]
+                order = cmd["order"]
+                # Fix: inject signal_id into order so execute_trade can track retries correctly
+                order["signal_id"] = cmd.get("signal_id") or cmd.get("id", "unknown")
+                result = execute_trade(cmd["account_id"], order)
+                result["order"] = order
             elif cmd_type == "MODIFY_SL":
                 result = modify_sl(cmd["ticket"], cmd["symbol"], cmd["new_sl"], cmd.get("new_tp"))
             elif cmd_type == "PARTIAL_CLOSE":
