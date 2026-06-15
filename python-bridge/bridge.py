@@ -751,7 +751,7 @@ def main():
     schedule.every(15).minutes.do(push_ohlcv)
     schedule.every(10).seconds.do(poll_commands)
 
-    log.info("Bridge v7 running. Ctrl+C to stop.")
+    log.info("Bridge v12 running. Ctrl+C to stop.")
     try:
         while True:
             schedule.run_pending()

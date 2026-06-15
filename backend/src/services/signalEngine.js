@@ -77,17 +77,21 @@ function getSessionInfo() {
   // NY Entry:     12:30-14:00 UTC (08:30-10:00 NY)
   const inLondonEntry = utcDecimal >= 6 && utcDecimal < 8;
   const inNYEntry = utcDecimal >= 12.5 && utcDecimal < 14;
+  // ICT Asian Kill Zone: 00:00-04:00 UTC (20:00-00:00 NY / 03:00-07:00 EAT)
+  // Prime window for USDJPY, AUDUSD, NZDUSD, EURJPY
+  const inAsianKZ = utcDecimal >= 0 && utcDecimal < 4;
 
   if (inLondonEntry) return { session: "LONDON_OPEN", killZone: true, strength: 1.0, name: "★ London Entry Model 02:00-04:00 NY", entryModel: true, sessQuality: 3 };
-  if (inNYEntry) return { session: "NY_OPEN", killZone: true, strength: 1.0, name: "★ NY Entry Model 08:30-10:00 NY", entryModel: true, sessQuality: 3 };
+  if (inNYEntry)     return { session: "NY_OPEN",     killZone: true, strength: 1.0, name: "★ NY Entry Model 08:30-10:00 NY",    entryModel: true, sessQuality: 3 };
+  if (inAsianKZ)     return { session: "ASIAN",       killZone: true, strength: 0.8, name: "Asian Kill Zone 20:00-00:00 NY",     entryModel: false, sessQuality: 2 };
 
-  // Broader kill zones
-  if (utcDecimal >= 7 && utcDecimal < 9)   return { session: "LONDON_OPEN", killZone: true,  strength: 0.9, name: "London Kill Zone", entryModel: false, sessQuality: 2 };
-  if (utcDecimal >= 9 && utcDecimal < 13)  return { session: "LONDON_MAIN", killZone: false, strength: 0.75, name: "London Session", entryModel: false, sessQuality: 1 };
-  if (utcDecimal >= 13 && utcDecimal < 16) return { session: "NY_OPEN", killZone: true, strength: 0.9, name: "NY Kill Zone", entryModel: false, sessQuality: 2 };
-  if (utcDecimal >= 16 && utcDecimal < 20) return { session: "NY_MAIN", killZone: false, strength: 0.65, name: "New York Session", entryModel: false, sessQuality: 1 };
-  if (utcDecimal >= 20 && utcDecimal < 22) return { session: "NY_CLOSE", killZone: true, strength: 0.75, name: "NY Close", entryModel: false, sessQuality: 2 };
-  if (utcDecimal >= 0 && utcDecimal < 6)   return { session: "ASIAN", killZone: false, strength: 0.5, name: "Asian Session", entryModel: false, sessQuality: 1 };
+  if (utcDecimal >= 4 && utcDecimal < 6)   return { session: "ASIAN",       killZone: false, strength: 0.4, name: "Asian Session (late)",  entryModel: false, sessQuality: 1 };
+  if (utcDecimal >= 7 && utcDecimal < 9)   return { session: "LONDON_OPEN", killZone: true,  strength: 0.9, name: "London Kill Zone",       entryModel: false, sessQuality: 2 };
+  if (utcDecimal >= 9 && utcDecimal < 13)  return { session: "LONDON_MAIN", killZone: false, strength: 0.75, name: "London Session",         entryModel: false, sessQuality: 1 };
+  if (utcDecimal >= 13 && utcDecimal < 16) return { session: "NY_OPEN",     killZone: true,  strength: 0.9, name: "NY Kill Zone",           entryModel: false, sessQuality: 2 };
+  if (utcDecimal >= 16 && utcDecimal < 20) return { session: "NY_MAIN",     killZone: false, strength: 0.65, name: "New York Session",       entryModel: false, sessQuality: 1 };
+  if (utcDecimal >= 20 && utcDecimal < 22) return { session: "NY_CLOSE",    killZone: true,  strength: 0.75, name: "NY Close",               entryModel: false, sessQuality: 2 };
+  if (utcDecimal >= 22)                    return { session: "ASIAN",        killZone: false, strength: 0.3, name: "Pre-Asian (quiet)",       entryModel: false, sessQuality: 0 };
   return { session: "DEAD_ZONE", killZone: false, strength: 0.1, name: "Dead Zone", entryModel: false, sessQuality: 0 };
 }
 
