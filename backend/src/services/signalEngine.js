@@ -1,17 +1,15 @@
 /**
- * AETHELGARD SIGNAL ENGINE v12
+ * AETHELGARD SIGNAL ENGINE v13
  * backend/src/services/signalEngine.js
  *
- * v11 → v12: M5 Precision Entry (H4 analysis + M5 execution)
+ * v12b → v13: AI Mode Toggle — 3 operating modes
  * ─────────────────────────────────────────────────────────────────────────────
- * NEW: M5 bars used for entry timing inside H4 kill zone windows
- * NEW: detectM5Entry() — finds first valid M5 displacement candle inside H4 FVG/OB zone
- * NEW: M5 SL — placed below M5 entry candle low (BUY) or above high (SELL)
- *      Result: SL is 3-5x tighter than H4 structural SL
- * NEW: Entry price from M5 close (precise) not H4 close (approximate)
- * NEW: M5 entry only activates inside kill zones — no M5 noise outside windows
- * NEW: H4 analysis unchanged — still drives all bias, confluence, TP targets
- * KEPT: All v11 fixes — coverage, scoring, confidence thresholds
+ * NEW: PURE_MATH mode — zero Claude API cost, ICT math only
+ * NEW: HYBRID mode  — Claude only for high-score setups (score >= 65)
+ * NEW: AI mode      — original full Claude analysis (existing behavior)
+ * NEW: Mode readable from platform_settings table (dashboard toggle)
+ * NEW: makePureMathDecision() — full BUY/SELL logic from confluence score
+ * Cost: AI=$7.49/day | HYBRID=$1.50/day | PURE_MATH=$0.00/day
  */
 
 const Anthropic = require("@anthropic-ai/sdk");
@@ -62,6 +60,139 @@ const PAIR_PRIMARY_TF = {
   USDCAD: "H4", USDJPY: "H4", EURUSD: "H4", GBPUSD: "H4",
   USDCHF: "H4", AUDUSD: "H4", NZDUSD: "H4", GBPJPY: "H4", EURJPY: "H4",
 };
+
+// ── Trading Mode ─────────────────────────────────────────────────────────────
+// PURE_MATH: Zero API cost. ICT math score makes all decisions.
+// HYBRID:    Claude only called when confluence score >= 65 (A-grade setups).
+// AI:        Full Claude analysis on every pair (original behavior).
+
+const TRADING_MODES = { PURE_MATH: "PURE_MATH", HYBRID: "HYBRID", AI: "AI" };
+
+async function getTradingMode() {
+  try {
+    const { data } = await supabaseAdmin
+      .from("platform_settings")
+      .select("value")
+      .eq("key", "trading_mode")
+      .single();
+    const mode = (data?.value || "AI").toUpperCase();
+    return TRADING_MODES[mode] || TRADING_MODES.AI;
+  } catch {
+    return TRADING_MODES.AI; // default to AI if setting missing
+  }
+}
+
+/**
+ * PURE MATH DECISION ENGINE
+ * Makes BUY/SELL/HOLD decision entirely from ICT confluence score.
+ * Zero Claude API cost. Used in PURE_MATH mode and HYBRID mode (low scores).
+ *
+ * Decision logic:
+ * - HTF bias must agree with direction
+ * - Score >= minScore for the current session
+ * - Sweep adds conviction (but not required)
+ * - RSI must not be extreme against direction
+ */
+function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
+  const score = confluence.score;
+  const htf = htfBias.bias;
+
+  // Determine direction from HTF bias + BOS
+  let direction = "HOLD";
+
+  if (htf === "bullish") {
+    direction = "BUY";
+  } else if (htf === "bearish") {
+    direction = "SELL";
+  } else if (ind.bos) {
+    // No clear HTF — use BOS direction
+    direction = ind.bos.type.includes("BULLISH") ? "BUY" : "SELL";
+  } else {
+    return { direction: "HOLD", confidence: 0, reason: "No HTF bias or BOS" };
+  }
+
+  // RSI conflict check — don't buy overbought, don't sell oversold
+  const r = ind.rsi14;
+  if (direction === "BUY" && r > 75) {
+    return { direction: "HOLD", confidence: 0, reason: `RSI overbought: ${r}` };
+  }
+  if (direction === "SELL" && r < 25) {
+    return { direction: "HOLD", confidence: 0, reason: `RSI oversold: ${r}` };
+  }
+
+  // EMA conflict — don't go against EMA alignment
+  if (direction === "BUY" && !ind.bullish && score < 60) {
+    return { direction: "HOLD", confidence: 0, reason: "EMA bearish, score insufficient for counter-trend BUY" };
+  }
+  if (direction === "SELL" && ind.bullish && score < 60) {
+    return { direction: "HOLD", confidence: 0, reason: "EMA bullish, score insufficient for counter-trend SELL" };
+  }
+
+  // Score → confidence mapping
+  let confidence;
+  if (score >= 80) confidence = 0.82;
+  else if (score >= 70) confidence = 0.72;
+  else if (score >= 60) confidence = 0.63;
+  else if (score >= 50) confidence = 0.55;
+  else if (score >= 42) confidence = 0.50;
+  else return { direction: "HOLD", confidence: 0, reason: `Score too low: ${score}` };
+
+  // Boost for full ICT sequence
+  if (ictSequence.hasFullSequence) confidence = Math.min(confidence + 0.08, 0.88);
+  else if (ictSequence.hasPartialSequence) confidence = Math.min(confidence + 0.04, 0.80);
+
+  // Boost for entry model window
+  if (session.entryModel) confidence = Math.min(confidence + 0.05, 0.88);
+
+  // Penalty for volatility spike
+  if (ind.atr_ratio >= 2.5) confidence = Math.max(confidence - 0.15, 0.45);
+
+  // Minimum confidence gate
+  const minConf = ind.atr_ratio >= 2.5 ? 0.65 : 0.50;
+  if (confidence < minConf) {
+    return { direction: "HOLD", confidence, reason: `Confidence ${confidence} < minimum ${minConf}` };
+  }
+
+  // Build regime from available data
+  const regime = ind.atr_ratio >= 2.5 ? "HIGH_VOLATILITY" :
+    ictSequence.hasFullSequence ? "BREAKOUT" :
+    htf !== "neutral" ? (htf === "bullish" ? "TRENDING_BULL" : "TRENDING_BEAR") :
+    "RANGING";
+
+  return {
+    direction,
+    confidence: parseFloat(confidence.toFixed(2)),
+    regime,
+    regime_detail: {
+      description: `Pure math ICT score ${score}/100`,
+      strength: parseFloat((score / 100).toFixed(2)),
+      timeframe_alignment: htf !== "neutral" ? "aligned" : "mixed"
+    },
+    smc_context: {
+      structure: htf === "bullish" ? "bullish" : "bearish",
+      ict_sequence_quality: ictSequence.hasFullSequence ? "full" :
+        ictSequence.hasPartialSequence ? "partial" : "none",
+      liquidity_target: ictSequence.eqLiquidity?.eqh?.length > 0 ? "EQH target detected" :
+        ictSequence.eqLiquidity?.eql?.length > 0 ? "EQL target detected" : "Session level",
+      htf_aligned: htf !== "neutral",
+      entry_model_quality: score >= 75 ? "A" : score >= 60 ? "B" : score >= 45 ? "C" : "no_setup"
+    },
+    entry_logic: `[PURE MATH] Score:${score} HTF:${htf} ${ictSequence.sweep?.type || ""} RSI:${r} EMA:${ind.bullish ? "bull" : "bear"}`,
+    sl_reasoning: ictSequence.sweep ? `Structural SL at swept level ${ictSequence.sweep.sweptLevel?.toFixed(5)}` : "ATR-based SL",
+    stop_loss_pips: 0, // calculated by SL engine
+    reward_risk_ratio: ictSequence.hasFullSequence ? 3.0 : score >= 65 ? 2.5 : 2.0,
+    tp1_logic: ictSequence.eqLiquidity?.eqh?.length > 0 ? `EQH at ${ictSequence.eqLiquidity.eqh[0]}` : "Session level TP1",
+    tp2_logic: "2.5R from entry",
+    sentiment_score: direction === "BUY" ? parseFloat((confidence - 0.5).toFixed(2)) : parseFloat((0.5 - confidence).toFixed(2)),
+    rationale: `Pure math decision: ${direction} | Score ${score}/100 | HTF ${htf} | ${session.name} | ICT:${ictSequence.hasFullSequence ? "FULL" : ictSequence.hasPartialSequence ? "PARTIAL" : "NONE"}`,
+    invalidation: direction === "BUY" ?
+      `Below ${(ind.currentPrice * 0.998).toFixed(5)}` :
+      `Above ${(ind.currentPrice * 1.002).toFixed(5)}`,
+    timeframe_primary: "H4",
+    position_size_modifier: score >= 75 ? 1.2 : score >= 60 ? 1.0 : 0.7,
+    mode: "PURE_MATH"
+  };
+}
 
 // ── Session Detection ─────────────────────────────────────────────────────────
 
@@ -1102,7 +1233,33 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     }
 
     const perf = await getRecentPerformance(symbol);
-    const analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence);
+
+    // ── Trading mode selection ────────────────────────────────────────────────
+    const tradingMode = await getTradingMode();
+    let analysis = null;
+
+    if (tradingMode === TRADING_MODES.PURE_MATH) {
+      // Zero cost — pure ICT math decision
+      analysis = makePureMathDecision(confluence, htfBias, ictSequence, primaryInd, session);
+      if (analysis.direction !== "HOLD") {
+        await log("info", "signalEngine", `${symbol}: PURE_MATH ${analysis.direction} | Score:${confluence.score} | Conf:${analysis.confidence}`);
+      }
+
+    } else if (tradingMode === TRADING_MODES.HYBRID) {
+      // Use Claude only for high-confidence setups (score >= 65)
+      // Everything else decided by pure math
+      if (confluence.score >= 65 || ictSequence.hasFullSequence) {
+        await log("info", "signalEngine", `${symbol}: HYBRID mode — score ${confluence.score} qualifies for AI analysis`);
+        analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence);
+      } else {
+        analysis = makePureMathDecision(confluence, htfBias, ictSequence, primaryInd, session);
+        await log("info", "signalEngine", `${symbol}: HYBRID mode — score ${confluence.score} < 65, using pure math`);
+      }
+
+    } else {
+      // AI mode — full Claude analysis (original behavior)
+      analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence);
+    }
 
     if (!analysis || analysis.direction === "HOLD") {
       await log("info", "signalEngine", `${symbol}: HOLD — ${analysis?.smc_context?.entry_model_quality || "no setup"}`);
