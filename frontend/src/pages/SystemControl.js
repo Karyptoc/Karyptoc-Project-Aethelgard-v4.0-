@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import api from "../lib/api";
 
@@ -35,10 +35,13 @@ export default function SystemControl() {
     year: new Date().getFullYear()
   });
 
+  // Prevents interval re-fetch from overwriting in-progress toggle changes
+  const pendingChange = useRef(false);
+
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 4000); };
 
-  // Load settings directly from Supabase for reliability
   const loadSettings = useCallback(async () => {
+    if (pendingChange.current) return; // block re-fetch during toggle
     const { data } = await supabase
       .from("platform_settings")
       .select("key, value");
@@ -82,17 +85,20 @@ export default function SystemControl() {
     load();
     const iv = setInterval(() => {
       loadStatus();
-      loadSettings(); // Re-read settings every 30s
+      loadSettings(); // blocked by pendingChange during toggle
     }, 30000);
     return () => clearInterval(iv);
   }, [load, loadStatus, loadSettings]);
 
-  // Save setting to Supabase directly
   const saveSetting = async (key, value) => {
+    pendingChange.current = true;
+    // Optimistic update immediately
+    setSettings(s => ({ ...s, [key]: value }));
     await supabase
       .from("platform_settings")
       .upsert({ key, value }, { onConflict: "key" });
-    setSettings(s => ({ ...s, [key]: value }));
+    // Keep blocked for 3s to survive any in-flight interval poll
+    setTimeout(() => { pendingChange.current = false; }, 3000);
   };
 
   const toggleTrading = async () => {
@@ -199,7 +205,6 @@ export default function SystemControl() {
           <div className="card">
             <div className="card-header"><span className="card-title">Engine Controls</span></div>
 
-            {/* Auto-Trading Toggle */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 0", borderBottom: "1px solid var(--border)" }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>Auto-Trading</div>
@@ -218,7 +223,6 @@ export default function SystemControl() {
               </button>
             </div>
 
-            {/* Signal Interval */}
             <div style={{ padding: "14px 0" }}>
               <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Signal Interval</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -342,7 +346,7 @@ export default function SystemControl() {
         <div className="modal-overlay" onClick={() => setSelectedReport(null)}>
           <div className="modal" style={{ width: 700, maxHeight: "85vh" }} onClick={e => e.stopPropagation()}>
             <div className="modal-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>{selectedReport.period_label} — {selectedReport.clients?.full_name}</span>
+              <span>{selectedReport.period_label} – {selectedReport.clients?.full_name}</span>
               <button className="btn btn-ghost btn-xs" onClick={() => setSelectedReport(null)}>✕</button>
             </div>
             <iframe srcDoc={selectedReport.html_content}
