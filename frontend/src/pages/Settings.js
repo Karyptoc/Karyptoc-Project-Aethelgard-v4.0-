@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import api from "../lib/api";
 
 export default function Settings() {
@@ -7,14 +7,31 @@ export default function Settings() {
   const [tgForm, setTgForm] = useState(() => JSON.parse(localStorage.getItem("tg_config") || "{}"));
   const [testing, setTesting] = useState(false);
 
-  useEffect(() => {
-    api.get("/api/dashboard/settings").then(r => setSettings(r.data.settings || {}));
+  // Prevents re-fetch from overwriting in-progress toggle changes
+  const pendingChange = useRef(false);
+
+  const fetchSettings = useCallback(async () => {
+    if (pendingChange.current) return;
+    try {
+      const r = await api.get("/api/dashboard/settings");
+      setSettings(r.data.settings || {});
+    } catch (e) {
+      console.error("Failed to load settings", e);
+    }
   }, []);
 
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
   const save = async (key, value) => {
+    pendingChange.current = true;
     await api.put("/api/dashboard/settings", { key, value });
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setTimeout(() => {
+      setSaved(false);
+      pendingChange.current = false;
+    }, 2000);
   };
 
   const toggle = (key) => {
@@ -96,6 +113,42 @@ export default function Settings() {
                 value={settings["max_concurrent_trades"] || 5}
                 onChange={e => setSettings(s => ({ ...s, max_concurrent_trades: parseInt(e.target.value) }))}
                 onBlur={e => save("max_concurrent_trades", parseInt(e.target.value))} />
+            </div>
+          </div>
+
+          {/* Signal Engine Mode */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">Signal Engine Mode</span>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Controls Claude AI usage and daily API cost</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, padding: "12px 0" }}>
+              {[
+                { id: "PURE_MATH", label: "Pure Math", icon: "⚡", cost: "$0/day", costColor: "var(--bull)", badge: "FREE" },
+                { id: "HYBRID",    label: "Hybrid",    icon: "⚖️", cost: "~$1.50/day", costColor: "var(--warn)", badge: "BALANCED" },
+                { id: "AI",        label: "Full AI",   icon: "🤖", cost: "~$7.50/day", costColor: "var(--bear)", badge: "COSTLY" },
+              ].map(m => {
+                const current = ((settings["trading_mode"] || "PURE_MATH") + "").replace(/"/g,"").toUpperCase();
+                const active = current === m.id;
+                return (
+                  <div key={m.id} onClick={() => { setSettings(s => ({ ...s, trading_mode: m.id })); save("trading_mode", `"${m.id}"`); }}
+                    style={{
+                      border: `2px solid ${active ? "var(--accent)" : "var(--border)"}`,
+                      borderRadius: "var(--radius)", padding: "10px 12px", cursor: "pointer",
+                      background: active ? "var(--bg-elevated)" : "transparent", transition: "all 0.15s"
+                    }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ fontSize: 15 }}>{m.icon} <strong style={{ fontSize: 13 }}>{m.label}</strong></span>
+                      <span style={{ fontSize: 8, fontWeight: 700, color: m.costColor, border: `1px solid ${m.costColor}`, borderRadius: 3, padding: "1px 4px" }}>{m.badge}</span>
+                    </div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 700, color: m.costColor }}>{m.cost}</div>
+                    {active && <div style={{ fontSize: 10, fontWeight: 700, color: "var(--accent)", marginTop: 4 }}>● ACTIVE</div>}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+              <strong>Pure Math</strong> = zero cost, ICT math only · <strong>Hybrid</strong> = AI for score ≥65 only · <strong>Full AI</strong> = AI on every pair
             </div>
           </div>
 
