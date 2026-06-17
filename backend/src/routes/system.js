@@ -147,4 +147,20 @@ router.post("/accounts/disconnect/:id", async (req, res) => {
   }
 });
 
+// GET /api/system/signal-interval — returns current signal interval for bridge
+// This is a public bridge endpoint (uses bridge secret not user auth)
+router.get("/signal-interval", async (req, res) => {
+  try {
+    const { data } = await supabaseAdmin
+      .from("platform_settings")
+      .select("value")
+      .eq("key", "signal_interval_minutes")
+      .single();
+    const minutes = parseInt(data?.value) || 15;
+    res.json({ interval_minutes: minutes });
+  } catch (e) {
+    res.json({ interval_minutes: 15 });
+  }
+});
+
 module.exports = router;

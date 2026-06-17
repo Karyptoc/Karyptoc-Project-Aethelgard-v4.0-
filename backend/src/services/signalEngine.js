@@ -152,14 +152,14 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
     }
   }
 
-  // Score → confidence mapping (slightly lower thresholds for non-HTF sources)
-  const baseScore = directionSource === "HTF_BULL" || directionSource === "HTF_BEAR" ? score : score - 5;
+  // Score → confidence mapping — aligned with backtest min_confluence=35
+  const baseScore = directionSource === "HTF_BULL" || directionSource === "HTF_BEAR" ? score : score - 3;
   let confidence;
   if (baseScore >= 80) confidence = 0.82;
   else if (baseScore >= 70) confidence = 0.72;
-  else if (baseScore >= 60) confidence = 0.63;
-  else if (baseScore >= 50) confidence = 0.55;
-  else if (baseScore >= 38) confidence = 0.50;
+  else if (baseScore >= 55) confidence = 0.63;
+  else if (baseScore >= 45) confidence = 0.55;
+  else if (baseScore >= 35) confidence = 0.50;
   else return { direction: "HOLD", confidence: 0, reason: `Score too low: ${score} (source: ${directionSource})` };
 
   // Boosts
@@ -171,8 +171,8 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   // Volatility penalty
   if (ind.atr_ratio >= 2.5) confidence = Math.max(confidence - 0.15, 0.45);
 
-  // Minimum confidence gate — relaxed for kill zone setups
-  const minConf = ind.atr_ratio >= 2.5 ? 0.65 : session.killZone ? 0.48 : 0.50;
+  // Minimum confidence gate — low bar to match backtest behavior
+  const minConf = ind.atr_ratio >= 2.5 ? 0.60 : session.killZone ? 0.45 : 0.48;
   if (confidence < minConf) {
     return { direction: "HOLD", confidence, reason: `Confidence ${confidence.toFixed(2)} < ${minConf} (${directionSource})` };
   }
@@ -266,7 +266,7 @@ async function getDuplicateWindow() {
     const { data } = await supabaseAdmin
       .from("platform_settings").select("value")
       .eq("key", "duplicate_signal_minutes").single();
-    return parseInt(data?.value) || 20;
+    return parseInt(data?.value) || 5;
   } catch { return 20; }
 }
 
@@ -1230,20 +1230,18 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 
     // Minimum tradeable threshold — significantly lowered per pair type
     // Full ICT sequence (sweep+displacement+retest) = lowest bar (35)
-    // Partial sequence (sweep+displacement) = medium bar (38)
-    // No sequence but in kill zone = allow with lower bar (42)
-    // No sequence, no kill zone = higher bar (50)
+    // Minimum score thresholds — aligned with backtest default min_confluence=35
     let minScore;
     if (ictSequence.hasFullSequence) {
-      minScore = 35;
+      minScore = 30; // full ICT sequence = very low bar
     } else if (ictSequence.hasPartialSequence) {
-      minScore = 38;
+      minScore = 33;
     } else if (session.killZone && isPairActive) {
-      minScore = 42; // kill zone + pair active = good enough without sequence
+      minScore = 35; // matches backtest default
     } else if (session.killZone) {
-      minScore = 45;
+      minScore = 38;
     } else {
-      minScore = 50; // outside kill zone requires more confluence
+      minScore = 42; // outside kill zone still needs more
     }
 
     if (confluence.score < minScore) {

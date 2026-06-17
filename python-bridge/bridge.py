@@ -771,8 +771,21 @@ def main():
     schedule.every(SYNC_INTERVAL_SECONDS).seconds.do(sync_all)
     schedule.every(30).seconds.do(manage_open_trades)
     schedule.every(60).seconds.do(refresh_accounts)
-    schedule.every(15).minutes.do(push_ohlcv)
     schedule.every(10).seconds.do(poll_commands)
+
+    # Read signal interval from Supabase — respects dashboard setting
+    try:
+        r = requests.get(f"{BACKEND_URL}/api/system/signal-interval",
+            headers=api_headers(), timeout=10)
+        if r.status_code == 200:
+            interval_minutes = r.json().get("interval_minutes", 15)
+        else:
+            interval_minutes = 15
+    except:
+        interval_minutes = 15
+
+    log.info(f"Signal interval: every {interval_minutes} minutes (from dashboard setting)")
+    schedule.every(interval_minutes).minutes.do(push_ohlcv)
 
     log.info("Bridge v12 running. Ctrl+C to stop.")
     try:
