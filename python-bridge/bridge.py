@@ -775,7 +775,7 @@ def main():
 
     # Read signal interval from Supabase — respects dashboard setting
     try:
-        r = requests.get(f"{BACKEND_URL}/api/system/signal-interval",
+        r = requests.get(f"{BACKEND_URL}/api/bridge/signal-interval",
             headers=api_headers(), timeout=10)
         if r.status_code == 200:
             interval_minutes = r.json().get("interval_minutes", 15)

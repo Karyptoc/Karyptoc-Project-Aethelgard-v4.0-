@@ -338,4 +338,19 @@ router.post("/commands/:id/ack", async (req, res) => {
   res.json({ ok: true });
 });
 
+// GET /api/bridge/signal-interval — returns signal interval for bridge (uses bridge secret auth)
+router.get("/signal-interval", async (req, res) => {
+  try {
+    const { data } = await supabaseAdmin
+      .from("platform_settings")
+      .select("value")
+      .eq("key", "signal_interval_minutes")
+      .single();
+    const minutes = parseInt(data?.value) || 15;
+    res.json({ interval_minutes: minutes });
+  } catch (e) {
+    res.json({ interval_minutes: 15 });
+  }
+});
+
 module.exports = router;
