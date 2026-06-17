@@ -75,7 +75,7 @@ async function getTradingMode() {
       .select("value")
       .eq("key", "trading_mode")
       .single();
-    const mode = (data?.value || "AI").toUpperCase();
+    const mode = (data?.value || "AI").toString().replace(/"/g, "").toUpperCase();
     return TRADING_MODES[mode] || TRADING_MODES.AI;
   } catch {
     return TRADING_MODES.AI; // default to AI if setting missing
