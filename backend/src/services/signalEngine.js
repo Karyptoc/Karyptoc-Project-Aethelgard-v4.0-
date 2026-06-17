@@ -1244,6 +1244,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       minScore = 42; // outside kill zone still needs more
     }
 
+    await log("info", "signalEngine", `${symbol}: DBG score=${confluence.score} min=${minScore} htf=${htfBias.bias} sq=${session.sessQuality} kz=${session.killZone} active=${isPairActive}`);
     if (confluence.score < minScore) {
       await log("info", "signalEngine", `${symbol}: Score ${confluence.score} < ${minScore} — no setup`);
       return null;
