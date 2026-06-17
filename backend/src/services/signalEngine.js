@@ -1289,7 +1289,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     if (ictSequence.hasFullSequence && session.entryModel) minConf = 0.42; // perfect setup
     if (ictSequence.hasFullSequence) minConf = 0.45; // full ICT sequence
     if (ictSequence.hasPartialSequence) minConf = 0.48; // partial sequence
-    if (!ictSequence.hasFullSequence && !ictSequence.hasPartialSequence) minConf = 0.55; // no sequence needs more confidence
+    if (!ictSequence.hasFullSequence && !ictSequence.hasPartialSequence) minConf = 0.48; // no sequence needs more confidence
 
     if (analysis.confidence < minConf) {
       await log("info", "signalEngine", `${symbol}: Confidence ${analysis.confidence} < ${minConf}`);
