@@ -97,97 +97,116 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   const score = confluence.score;
   const htf = htfBias.bias;
 
-  // Determine direction from HTF bias + BOS
+  // Determine direction from multiple sources (in priority order)
   let direction = "HOLD";
+  let directionSource = "";
 
+  // 1. Clear HTF bias (strongest signal)
   if (htf === "bullish") {
-    direction = "BUY";
+    direction = "BUY"; directionSource = "HTF_BULL";
   } else if (htf === "bearish") {
-    direction = "SELL";
+    direction = "SELL"; directionSource = "HTF_BEAR";
+
+  // 2. ICT sweep direction (institutional signal)
+  } else if (ictSequence.sweep) {
+    direction = ictSequence.sweep.type === "SSL_SWEEP" ? "BUY" : "SELL";
+    directionSource = "ICT_SWEEP";
+
+  // 3. BOS direction (structure break)
   } else if (ind.bos) {
-    // No clear HTF — use BOS direction
     direction = ind.bos.type.includes("BULLISH") ? "BUY" : "SELL";
-  } else {
-    return { direction: "HOLD", confidence: 0, reason: "No HTF bias or BOS" };
+    directionSource = "BOS";
+
+  // 4. CHoCH direction
+  } else if (ind.choch) {
+    direction = ind.choch.type.includes("BULLISH") ? "BUY" : "SELL";
+    directionSource = "CHOCH";
+
+  // 5. RSI extreme as last resort (only in kill zones)
+  } else if (session.killZone) {
+    const r = ind.rsi14;
+    if (r < 35) { direction = "BUY"; directionSource = "RSI_OVERSOLD"; }
+    else if (r > 65) { direction = "SELL"; directionSource = "RSI_OVERBOUGHT"; }
   }
 
-  // RSI conflict check — don't buy overbought, don't sell oversold
+  if (direction === "HOLD") {
+    return { direction: "HOLD", confidence: 0, reason: "No directional signal — HTF neutral, no sweep/BOS/CHoCH" };
+  }
+
+  // RSI conflict check
   const r = ind.rsi14;
-  if (direction === "BUY" && r > 75) {
+  if (direction === "BUY" && r > 78) {
     return { direction: "HOLD", confidence: 0, reason: `RSI overbought: ${r}` };
   }
-  if (direction === "SELL" && r < 25) {
+  if (direction === "SELL" && r < 22) {
     return { direction: "HOLD", confidence: 0, reason: `RSI oversold: ${r}` };
   }
 
-  // EMA conflict — don't go against EMA alignment
-  if (direction === "BUY" && !ind.bullish && score < 60) {
-    return { direction: "HOLD", confidence: 0, reason: "EMA bearish, score insufficient for counter-trend BUY" };
-  }
-  if (direction === "SELL" && ind.bullish && score < 60) {
-    return { direction: "HOLD", confidence: 0, reason: "EMA bullish, score insufficient for counter-trend SELL" };
+  // EMA conflict — only block if HTF was neutral (non-HTF direction source)
+  if (directionSource !== "HTF_BULL" && directionSource !== "HTF_BEAR") {
+    if (direction === "BUY" && !ind.bullish && score < 55) {
+      return { direction: "HOLD", confidence: 0, reason: "EMA bearish + no HTF + low score" };
+    }
+    if (direction === "SELL" && ind.bullish && score < 55) {
+      return { direction: "HOLD", confidence: 0, reason: "EMA bullish + no HTF + low score" };
+    }
   }
 
-  // Score → confidence mapping
+  // Score → confidence mapping (slightly lower thresholds for non-HTF sources)
+  const baseScore = directionSource === "HTF_BULL" || directionSource === "HTF_BEAR" ? score : score - 5;
   let confidence;
-  if (score >= 80) confidence = 0.82;
-  else if (score >= 70) confidence = 0.72;
-  else if (score >= 60) confidence = 0.63;
-  else if (score >= 50) confidence = 0.55;
-  else if (score >= 42) confidence = 0.50;
-  else return { direction: "HOLD", confidence: 0, reason: `Score too low: ${score}` };
+  if (baseScore >= 80) confidence = 0.82;
+  else if (baseScore >= 70) confidence = 0.72;
+  else if (baseScore >= 60) confidence = 0.63;
+  else if (baseScore >= 50) confidence = 0.55;
+  else if (baseScore >= 38) confidence = 0.50;
+  else return { direction: "HOLD", confidence: 0, reason: `Score too low: ${score} (source: ${directionSource})` };
 
-  // Boost for full ICT sequence
+  // Boosts
   if (ictSequence.hasFullSequence) confidence = Math.min(confidence + 0.08, 0.88);
   else if (ictSequence.hasPartialSequence) confidence = Math.min(confidence + 0.04, 0.80);
-
-  // Boost for entry model window
   if (session.entryModel) confidence = Math.min(confidence + 0.05, 0.88);
+  if (session.killZone && directionSource === "ICT_SWEEP") confidence = Math.min(confidence + 0.05, 0.85);
 
-  // Penalty for volatility spike
+  // Volatility penalty
   if (ind.atr_ratio >= 2.5) confidence = Math.max(confidence - 0.15, 0.45);
 
-  // Minimum confidence gate
-  const minConf = ind.atr_ratio >= 2.5 ? 0.65 : 0.50;
+  // Minimum confidence gate — relaxed for kill zone setups
+  const minConf = ind.atr_ratio >= 2.5 ? 0.65 : session.killZone ? 0.48 : 0.50;
   if (confidence < minConf) {
-    return { direction: "HOLD", confidence, reason: `Confidence ${confidence} < minimum ${minConf}` };
+    return { direction: "HOLD", confidence, reason: `Confidence ${confidence.toFixed(2)} < ${minConf} (${directionSource})` };
   }
 
-  // Build regime from available data
   const regime = ind.atr_ratio >= 2.5 ? "HIGH_VOLATILITY" :
     ictSequence.hasFullSequence ? "BREAKOUT" :
-    htf !== "neutral" ? (htf === "bullish" ? "TRENDING_BULL" : "TRENDING_BEAR") :
-    "RANGING";
+    htf !== "neutral" ? (htf === "bullish" ? "TRENDING_BULL" : "TRENDING_BEAR") : "RANGING";
 
   return {
     direction,
     confidence: parseFloat(confidence.toFixed(2)),
     regime,
     regime_detail: {
-      description: `Pure math ICT score ${score}/100`,
+      description: `Pure math ICT score ${score}/100 via ${directionSource}`,
       strength: parseFloat((score / 100).toFixed(2)),
-      timeframe_alignment: htf !== "neutral" ? "aligned" : "mixed"
+      timeframe_alignment: htf !== "neutral" ? "aligned" : "mixed",
+      direction_source: directionSource
     },
     smc_context: {
-      structure: htf === "bullish" ? "bullish" : "bearish",
-      ict_sequence_quality: ictSequence.hasFullSequence ? "full" :
-        ictSequence.hasPartialSequence ? "partial" : "none",
-      liquidity_target: ictSequence.eqLiquidity?.eqh?.length > 0 ? "EQH target detected" :
-        ictSequence.eqLiquidity?.eql?.length > 0 ? "EQL target detected" : "Session level",
+      structure: direction === "BUY" ? "bullish" : "bearish",
+      ict_sequence_quality: ictSequence.hasFullSequence ? "full" : ictSequence.hasPartialSequence ? "partial" : "none",
+      liquidity_target: ictSequence.eqLiquidity?.eqh?.length > 0 ? "EQH target" : ictSequence.eqLiquidity?.eql?.length > 0 ? "EQL target" : "Session level",
       htf_aligned: htf !== "neutral",
       entry_model_quality: score >= 75 ? "A" : score >= 60 ? "B" : score >= 45 ? "C" : "no_setup"
     },
-    entry_logic: `[PURE MATH] Score:${score} HTF:${htf} ${ictSequence.sweep?.type || ""} RSI:${r} EMA:${ind.bullish ? "bull" : "bear"}`,
-    sl_reasoning: ictSequence.sweep ? `Structural SL at swept level ${ictSequence.sweep.sweptLevel?.toFixed(5)}` : "ATR-based SL",
-    stop_loss_pips: 0, // calculated by SL engine
+    entry_logic: `[PURE MATH/${directionSource}] Score:${score} HTF:${htf} RSI:${r} EMA:${ind.bullish ? "bull" : "bear"} ${ictSequence.sweep?.type || ""}`,
+    sl_reasoning: ictSequence.sweep ? `Structural SL at swept level` : "ATR-based SL",
+    stop_loss_pips: 0,
     reward_risk_ratio: ictSequence.hasFullSequence ? 3.0 : score >= 65 ? 2.5 : 2.0,
-    tp1_logic: ictSequence.eqLiquidity?.eqh?.length > 0 ? `EQH at ${ictSequence.eqLiquidity.eqh[0]}` : "Session level TP1",
+    tp1_logic: "Session level TP1",
     tp2_logic: "2.5R from entry",
     sentiment_score: direction === "BUY" ? parseFloat((confidence - 0.5).toFixed(2)) : parseFloat((0.5 - confidence).toFixed(2)),
-    rationale: `Pure math decision: ${direction} | Score ${score}/100 | HTF ${htf} | ${session.name} | ICT:${ictSequence.hasFullSequence ? "FULL" : ictSequence.hasPartialSequence ? "PARTIAL" : "NONE"}`,
-    invalidation: direction === "BUY" ?
-      `Below ${(ind.currentPrice * 0.998).toFixed(5)}` :
-      `Above ${(ind.currentPrice * 1.002).toFixed(5)}`,
+    rationale: `Pure math: ${direction} via ${directionSource} | Score ${score}/100 | ${session.name} | ICT:${ictSequence.hasFullSequence ? "FULL" : ictSequence.hasPartialSequence ? "PARTIAL" : "NONE"}`,
+    invalidation: direction === "BUY" ? `Below ${(ind.currentPrice * 0.998).toFixed(5)}` : `Above ${(ind.currentPrice * 1.002).toFixed(5)}`,
     timeframe_primary: "H4",
     position_size_modifier: score >= 75 ? 1.2 : score >= 60 ? 1.0 : 0.7,
     mode: "PURE_MATH"
