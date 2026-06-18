@@ -112,7 +112,7 @@ def init_timeframes():
 
 def fetch_pair_controls():
     try:
-        r = requests.get(f"{BACKEND_URL}/api/pairs/controls", headers=api_headers(), timeout=10)
+        r = requests.get(f"{BACKEND_URL}/api/pairs/controls", headers=api_headers(), timeout=30)
         if r.status_code == 200:
             data = r.json().get("controls", [])
             return {item["symbol"]: item for item in data}
@@ -172,7 +172,7 @@ def connect_from_env():
 
 def fetch_remote_accounts():
     try:
-        r = requests.get(f"{BACKEND_URL}/api/bridge/accounts", headers=api_headers(), timeout=10)
+        r = requests.get(f"{BACKEND_URL}/api/bridge/accounts", headers=api_headers(), timeout=30)
         if r.status_code == 200:
             accounts = r.json().get("accounts", [])
             for acc in accounts:
@@ -632,7 +632,7 @@ def sync_all():
                 json={"account_id": account_id, "account_info": info,
                       "positions": positions,
                       "timestamp": datetime.now(timezone.utc).isoformat()},
-                timeout=10)
+                timeout=30)
             log.info(f"Synced {acc['login']}: ${info['balance']} | P&L ${info['profit']}")
         except Exception as e:
             log.warning(f"Sync error {account_id}: {e}")
@@ -715,7 +715,7 @@ def push_ohlcv():
 
 def poll_commands():
     try:
-        r = requests.get(f"{BACKEND_URL}/api/bridge/commands", headers=api_headers(), timeout=10)
+        r = requests.get(f"{BACKEND_URL}/api/bridge/commands", headers=api_headers(), timeout=30)
         if r.status_code != 200:
             return
         for cmd in r.json().get("commands", []):
@@ -776,7 +776,7 @@ def main():
     # Read signal interval from Supabase — respects dashboard setting
     try:
         r = requests.get(f"{BACKEND_URL}/api/bridge/signal-interval",
-            headers=api_headers(), timeout=10)
+            headers=api_headers(), timeout=30)
         if r.status_code == 200:
             interval_minutes = r.json().get("interval_minutes", 15)
         else:
