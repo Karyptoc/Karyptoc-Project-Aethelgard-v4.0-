@@ -713,15 +713,69 @@ def push_ohlcv():
         except Exception as e:
             log.error(f"OHLCV error {symbol}: {e}")
 
+def get_open_trade_count():
+    """Count currently open positions in MT5 — used for concurrent trade enforcement."""
+    positions = mt5.positions_get()
+    return len(positions) if positions else 0
+
+
+def get_open_trade_count_for_symbol(symbol):
+    """Count open positions for a specific symbol."""
+    broker_symbol = SYMBOL_MAP.get(symbol, symbol)
+    positions = mt5.positions_get(symbol=broker_symbol)
+    return len(positions) if positions else 0
+
+
 def poll_commands():
     try:
         r = requests.get(f"{BACKEND_URL}/api/bridge/commands", headers=api_headers(), timeout=30)
         if r.status_code != 200:
             return
+
+        # Read max concurrent trades from backend settings
+        try:
+            s_r = requests.get(f"{BACKEND_URL}/api/bridge/settings", headers=api_headers(), timeout=10)
+            max_trades = s_r.json().get("max_concurrent_trades", 5) if s_r.status_code == 200 else 5
+        except:
+            max_trades = 5
+
         for cmd in r.json().get("commands", []):
             cmd_type = cmd.get("type")
             if cmd_type == "EXECUTE_TRADE":
                 order = cmd["order"]
+                symbol = order.get("symbol", "")
+
+                # ── Bridge-level guard 1: Global concurrent trade cap ─────────
+                # This is a second enforcement layer — backend already checks,
+                # but the bridge enforces against what MT5 actually has open,
+                # not what the DB says (DB can lag by up to 30s sync interval)
+                current_open = get_open_trade_count()
+                if current_open >= max_trades:
+                    log.warning(f"BLOCKED: Global max trades reached ({current_open}/{max_trades}) — skip {symbol}")
+                    try:
+                        requests.post(f"{BACKEND_URL}/api/bridge/commands/{cmd['id']}/ack",
+                            headers=api_headers(),
+                            json={"success": False, "error": f"Max concurrent trades {current_open}/{max_trades}"},
+                            timeout=5)
+                    except:
+                        pass
+                    continue
+
+                # ── Bridge-level guard 2: Per-pair open position cap ──────────
+                # Prevents duplicate trades on same symbol even in same poll cycle
+                MAX_OPEN_PER_PAIR = 2
+                pair_open = get_open_trade_count_for_symbol(symbol)
+                if pair_open >= MAX_OPEN_PER_PAIR:
+                    log.warning(f"BLOCKED: {symbol} already has {pair_open} open position(s) — skip signal")
+                    try:
+                        requests.post(f"{BACKEND_URL}/api/bridge/commands/{cmd['id']}/ack",
+                            headers=api_headers(),
+                            json={"success": False, "error": f"{symbol} already has {pair_open} open position(s)"},
+                            timeout=5)
+                    except:
+                        pass
+                    continue
+
                 # Fix: inject signal_id into order so execute_trade can track retries correctly
                 order["signal_id"] = cmd.get("signal_id") or cmd.get("id", "unknown")
                 result = execute_trade(cmd["account_id"], order)

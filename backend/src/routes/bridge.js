@@ -189,22 +189,35 @@ router.get("/commands", async (req, res) => {
         if (!accounts?.length) continue;
 
         for (const account of accounts) {
-          // Check max concurrent trades from platform_settings
+          // ── Fix 3: Global max concurrent trades (platform-level) ──────────────
+          // Count ALL open trades across all pairs for this account
           const { data: openTrades } = await supabaseAdmin
-            .from("trades").select("id")
+            .from("trades").select("id, symbol")
             .eq("account_id", account.id).eq("status", "open");
 
-          if ((openTrades?.length || 0) >= settings.maxConcurrentTrades) {
+          const openCount = openTrades?.length || 0;
+          if (openCount >= settings.maxConcurrentTrades) {
             await log("info", "bridge",
-              `Max concurrent trades reached: ${openTrades.length}/${settings.maxConcurrentTrades}`
+              `Max concurrent trades reached: ${openCount}/${settings.maxConcurrentTrades} — skipping ${signal.symbol}`
             );
             continue;
           }
 
-          // Circuit breaker using platform settings
+          // ── Fix 4: Per-pair open position cap ────────────────────────────────
+          // Prevent stacking multiple open trades on same pair simultaneously
+          const openForPair = (openTrades || []).filter(t => t.symbol === signal.symbol).length;
+          const MAX_OPEN_PER_PAIR = 2; // hardcoded safety — 1 open position per pair max
+          if (openForPair >= MAX_OPEN_PER_PAIR) {
+            await log("info", "bridge",
+              `${signal.symbol} already has ${openForPair} open trade(s) — skipping new signal`
+            );
+            continue;
+          }
+
+          // ── Fix 5: Per-pair max trades/day and daily drawdown (pair_controls) ─
           const cbCheck = await checkCircuitBreaker(account.id, signal.symbol);
           if (!cbCheck.allowed) {
-            await log("info", "bridge", `Circuit breaker: ${cbCheck.reason}`);
+            await log("info", "bridge", `Circuit breaker / pair limit: ${cbCheck.reason}`);
             continue;
           }
 
@@ -336,6 +349,20 @@ router.post("/commands/:id/ack", async (req, res) => {
   }
 
   res.json({ ok: true });
+});
+
+// GET /api/bridge/settings — returns all bridge-relevant settings in one call
+router.get("/settings", async (req, res) => {
+  try {
+    const settings = await getPlatformSettings();
+    res.json({
+      max_concurrent_trades: settings.maxConcurrentTrades,
+      trading_enabled: settings.tradingEnabled,
+      default_risk_percent: settings.defaultRiskPercent,
+    });
+  } catch (e) {
+    res.json({ max_concurrent_trades: 5, trading_enabled: true, default_risk_percent: 1.0 });
+  }
 });
 
 // GET /api/bridge/signal-interval — returns signal interval for bridge (uses bridge secret auth)

@@ -226,16 +226,28 @@ async function isPairEnabled(symbol) {
     if (!data.enabled) return { allowed: false, reason: `${symbol} manually halted` };
     if (data.auto_halted) return { allowed: false, reason: `${symbol} auto-halted: ${data.auto_halt_reason}` };
 
-    // Daily loss check
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
-    const { data: todayTrades } = await supabaseAdmin
-      .from("trades").select("profit")
-      .eq("symbol", symbol).eq("status", "closed")
-      .gte("close_time", todayStart.toISOString());
 
-    if (todayTrades?.length) {
-      const dailyPnL = todayTrades.reduce((s, t) => s + (t.profit || 0), 0);
+    // ── Fix 1: Max trades per day — count ALL trades (open + closed) opened today
+    // BUG WAS: check was nested inside "if (closedTrades.length)" so it was skipped
+    // entirely when all trades were still open — causing 100+ trades to fire per pair.
+    const maxTrades = data.max_trades_per_day || 5;
+    const { data: allTodayTrades } = await supabaseAdmin
+      .from("trades").select("id, profit, status")
+      .eq("symbol", symbol)
+      .gte("open_time", todayStart.toISOString());
+
+    const totalTodayCount = allTodayTrades?.length || 0;
+    if (totalTodayCount >= maxTrades) {
+      await log("info", "riskEngine", `${symbol} max trades/day reached: ${totalTodayCount}/${maxTrades}`);
+      return { allowed: false, reason: `${symbol} max ${maxTrades} trades/day reached (${totalTodayCount} opened today)` };
+    }
+
+    // ── Fix 2: Daily loss check — only closed (realised) P&L
+    const closedTodayTrades = (allTodayTrades || []).filter(t => t.status === "closed");
+    if (closedTodayTrades.length) {
+      const dailyPnL = closedTodayTrades.reduce((s, t) => s + (t.profit || 0), 0);
       const maxLoss = data.max_daily_loss_usd || 10;
       if (dailyPnL <= -maxLoss) {
         await supabaseAdmin.from("pair_controls").update({
@@ -245,17 +257,6 @@ async function isPairEnabled(symbol) {
         }).eq("symbol", symbol);
         await log("warning", "riskEngine", `${symbol} auto-halted: daily loss $${Math.abs(dailyPnL).toFixed(2)}`);
         return { allowed: false, reason: `${symbol} daily loss limit reached` };
-      }
-
-      // Max trades per day
-      const { data: todaySignals } = await supabaseAdmin
-        .from("trades").select("id")
-        .eq("symbol", symbol)
-        .gte("open_time", todayStart.toISOString());
-
-      const maxTrades = data.max_trades_per_day || 5;
-      if ((todaySignals?.length || 0) >= maxTrades) {
-        return { allowed: false, reason: `${symbol} max ${maxTrades} trades/day reached` };
       }
     }
 
