@@ -1434,22 +1434,6 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       }
     }
 
-    // ── DXY Confluence ──────────────────────────────────────────────────────
-    const dxyCheck = getDXYConflict(symbol, analysis.direction, multiTFData);
-    if (dxyCheck.conflict) { await log("info","signalEngine",`${symbol}: ${dxyCheck.reason}`); return null; }
-
-    // ── Session Bias Projection ──────────────────────────────────────────────
-    if (sessionBias.biasDirection && sessionBias.biasDirection !== analysis.direction && htfBias.bias === "neutral") {
-      await log("info","signalEngine",`${symbol}: Session bias ${sessionBias.biasDirection} conflicts ${analysis.direction} + HTF neutral — skip`);
-      return null;
-    }
-
-    // ── Midnight NY Open Array ────────────────────────────────────────────────
-    if (midnightArray) {
-      if (analysis.direction==="BUY"  && midnightArray.zone==="premium")  analysis.confidence = Math.max(analysis.confidence-0.08,0.40);
-      if (analysis.direction==="SELL" && midnightArray.zone==="discount") analysis.confidence = Math.max(analysis.confidence-0.08,0.40);
-    }
-
     // Confidence thresholds — calibrated per setup quality
     let minConf = 0.48; // base threshold slightly lower to allow more signals
     if (atrRatio >= 2.5) minConf = 0.65; // spike = must be very confident
