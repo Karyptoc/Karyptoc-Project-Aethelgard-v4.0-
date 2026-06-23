@@ -382,13 +382,24 @@ router.post("/slippage", async (req, res) => {
 router.get("/settings", async (req, res) => {
   try {
     const settings = await getPlatformSettings();
+
+    // Also read max_open_per_pair from platform_settings
+    let maxOpenPerPair = 2;
+    try {
+      const { data } = await supabaseAdmin
+        .from("platform_settings").select("value")
+        .eq("key", "max_open_per_pair").single();
+      maxOpenPerPair = parseInt(data?.value) || 2;
+    } catch {}
+
     res.json({
       max_concurrent_trades: settings.maxConcurrentTrades,
+      max_open_per_pair: maxOpenPerPair,
       trading_enabled: settings.tradingEnabled,
       default_risk_percent: settings.defaultRiskPercent,
     });
   } catch (e) {
-    res.json({ max_concurrent_trades: 5, trading_enabled: true, default_risk_percent: 1.0 });
+    res.json({ max_concurrent_trades: 15, max_open_per_pair: 2, trading_enabled: true, default_risk_percent: 1.0 });
   }
 });
 

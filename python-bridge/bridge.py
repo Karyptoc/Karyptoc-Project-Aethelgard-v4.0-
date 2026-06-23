@@ -495,34 +495,95 @@ def execute_trade(account_id, order):
         volume = max(volume, sym_info.volume_min)
         volume = round(round(volume / sym_info.volume_step) * sym_info.volume_step, 2)
 
-    order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
-    price = tick.ask if direction == "BUY" else tick.bid
+    # ── Determine execution type: MARKET, LIMIT, or STOP ────────────────────
+    # Signal engine sends order_type = MARKET / BUY_LIMIT / SELL_LIMIT / BUY_STOP / SELL_STOP
+    signal_order_type = order.get("order_type", "MARKET").upper()
+    pending_price     = order.get("pending_price")
+    market_price      = tick.ask if direction == "BUY" else tick.bid
 
-    # ── Fix 2: Validate and correct SL distance before sending ───────────────
+    mt5_action     = mt5.TRADE_ACTION_DEAL
+    mt5_order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
+    exec_price     = market_price
+    expiry         = None
+
+    if signal_order_type == "BUY_LIMIT" and pending_price:
+        if float(pending_price) < market_price:
+            mt5_action     = mt5.TRADE_ACTION_PENDING
+            mt5_order_type = mt5.ORDER_TYPE_BUY_LIMIT
+            exec_price     = float(pending_price)
+            expiry         = int((datetime.utcnow() + timedelta(hours=4)).timestamp())
+            log.info(f"{symbol}: BUY LIMIT @ {exec_price:.5f} (market={market_price:.5f}, expires 4h)")
+        else:
+            log.info(f"{symbol}: BUY_LIMIT {pending_price} >= market — falling back to MARKET")
+
+    elif signal_order_type == "SELL_LIMIT" and pending_price:
+        if float(pending_price) > market_price:
+            mt5_action     = mt5.TRADE_ACTION_PENDING
+            mt5_order_type = mt5.ORDER_TYPE_SELL_LIMIT
+            exec_price     = float(pending_price)
+            expiry         = int((datetime.utcnow() + timedelta(hours=4)).timestamp())
+            log.info(f"{symbol}: SELL LIMIT @ {exec_price:.5f} (market={market_price:.5f}, expires 4h)")
+        else:
+            log.info(f"{symbol}: SELL_LIMIT {pending_price} <= market — falling back to MARKET")
+
+    elif signal_order_type == "BUY_STOP" and pending_price:
+        if float(pending_price) > market_price:
+            mt5_action     = mt5.TRADE_ACTION_PENDING
+            mt5_order_type = mt5.ORDER_TYPE_BUY_STOP
+            exec_price     = float(pending_price)
+            expiry         = int((datetime.utcnow() + timedelta(hours=4)).timestamp())
+            log.info(f"{symbol}: BUY STOP @ {exec_price:.5f} (market={market_price:.5f}, expires 4h)")
+        else:
+            log.info(f"{symbol}: BUY_STOP {pending_price} <= market — falling back to MARKET")
+
+    elif signal_order_type == "SELL_STOP" and pending_price:
+        if float(pending_price) < market_price:
+            mt5_action     = mt5.TRADE_ACTION_PENDING
+            mt5_order_type = mt5.ORDER_TYPE_SELL_STOP
+            exec_price     = float(pending_price)
+            expiry         = int((datetime.utcnow() + timedelta(hours=4)).timestamp())
+            log.info(f"{symbol}: SELL STOP @ {exec_price:.5f} (market={market_price:.5f}, expires 4h)")
+        else:
+            log.info(f"{symbol}: SELL_STOP {pending_price} >= market — falling back to MARKET")
+
+    else:
+        log.info(f"{symbol}: MARKET {direction} @ {market_price:.5f}")
+
+    price = exec_price
+
+    # ── Validate SL distance ──────────────────────────────────────────────────
     sl_valid, sl = validate_sl_distance(symbol, direction, price, sl)
     if not sl_valid:
-        log.info(f"{symbol}: SL corrected to {sl:.5f} (was too close to entry {price:.5f})")
+        log.info(f"{symbol}: SL corrected to {sl:.5f} (was too close to {price:.5f})")
 
-    # Also validate TP is on the correct side
     if tp > 0:
         if direction == "BUY" and tp <= price:
             tp = price + abs(price - sl) * 2.0
-            log.warning(f"{symbol}: TP was below entry for BUY — corrected to {tp:.5f}")
+            log.warning(f"{symbol}: TP below entry for BUY — corrected to {tp:.5f}")
         elif direction == "SELL" and tp >= price:
             tp = price - abs(price - sl) * 2.0
-            log.warning(f"{symbol}: TP was above entry for SELL — corrected to {tp:.5f}")
+            log.warning(f"{symbol}: TP above entry for SELL — corrected to {tp:.5f}")
 
     req = {
-        "action": mt5.TRADE_ACTION_DEAL, "symbol": broker_symbol,
-        "volume": volume, "type": order_type, "price": price,
-        "sl": sl, "tp": tp, "deviation": 30, "magic": 20260101,
-        "comment": order.get("comment", "Aethelgard"),
-        "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC
+        "action":       mt5_action,
+        "symbol":       broker_symbol,
+        "volume":       volume,
+        "type":         mt5_order_type,
+        "price":        price,
+        "sl":           sl,
+        "tp":           tp,
+        "deviation":    30,
+        "magic":        20260101,
+        "comment":      order.get("comment", "Aethelgard"),
+        "type_time":    mt5.ORDER_TIME_SPECIFIED if expiry else mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
     }
+    if expiry:
+        req["expiration"] = expiry
 
     result = mt5.order_send(req)
     if result.retcode != mt5.TRADE_RETCODE_DONE:
-        log.error(f"Trade failed [{broker_symbol} {direction}]: {result.comment}")
+        log.error(f"Trade failed [{broker_symbol} {direction} {signal_order_type}]: {result.comment} (retcode:{result.retcode})")
         return {"success": False, "error": result.comment, "retcode": result.retcode}
 
     # ── Success: clear retry counter ──────────────────────────────────────────
@@ -732,12 +793,17 @@ def poll_commands():
         if r.status_code != 200:
             return
 
-        # Read max concurrent trades from backend settings
+        # Read max concurrent trades and per-pair limit from backend settings
+        max_trades     = 15   # default — overridden by Supabase platform_settings
+        max_per_pair   = 2    # default — overridden by Supabase platform_settings
         try:
             s_r = requests.get(f"{BACKEND_URL}/api/bridge/settings", headers=api_headers(), timeout=10)
-            max_trades = s_r.json().get("max_concurrent_trades", 5) if s_r.status_code == 200 else 5
+            if s_r.status_code == 200:
+                s_data       = s_r.json()
+                max_trades   = s_data.get("max_concurrent_trades", 15)
+                max_per_pair = s_data.get("max_open_per_pair", 2)
         except:
-            max_trades = 5
+            pass
 
         for cmd in r.json().get("commands", []):
             cmd_type = cmd.get("type")
@@ -746,9 +812,7 @@ def poll_commands():
                 symbol = order.get("symbol", "")
 
                 # ── Bridge-level guard 1: Global concurrent trade cap ─────────
-                # This is a second enforcement layer — backend already checks,
-                # but the bridge enforces against what MT5 actually has open,
-                # not what the DB says (DB can lag by up to 30s sync interval)
+                # Checks actual MT5 open positions (not DB — DB lags 30s)
                 current_open = get_open_trade_count()
                 if current_open >= max_trades:
                     log.warning(f"BLOCKED: Global max trades reached ({current_open}/{max_trades}) — skip {symbol}")
@@ -762,11 +826,9 @@ def poll_commands():
                     continue
 
                 # ── Bridge-level guard 2: Per-pair open position cap ──────────
-                # Prevents duplicate trades on same symbol even in same poll cycle
-                MAX_OPEN_PER_PAIR = 2
                 pair_open = get_open_trade_count_for_symbol(symbol)
-                if pair_open >= MAX_OPEN_PER_PAIR:
-                    log.warning(f"BLOCKED: {symbol} already has {pair_open} open position(s) — skip signal")
+                if pair_open >= max_per_pair:
+                    log.warning(f"BLOCKED: {symbol} already has {pair_open}/{max_per_pair} open — skip")
                     try:
                         requests.post(f"{BACKEND_URL}/api/bridge/commands/{cmd['id']}/ack",
                             headers=api_headers(),
