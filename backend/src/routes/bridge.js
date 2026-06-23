@@ -351,6 +351,33 @@ router.post("/commands/:id/ack", async (req, res) => {
   res.json({ ok: true });
 });
 
+// POST /api/bridge/slippage — slippage analytics logger
+router.post("/slippage", async (req, res) => {
+  try {
+    const { symbol, direction, signal_time, fill_time, latency_ms,
+            requested_price, fill_price, slippage_pips, order_type, ticket } = req.body;
+
+    // Upsert to slippage_log table (create if not exists via supabase)
+    const { error } = await supabaseAdmin.from("slippage_log").insert({
+      symbol, direction, signal_time, fill_time, latency_ms,
+      requested_price, fill_price, slippage_pips, order_type, ticket,
+      created_at: new Date().toISOString()
+    });
+
+    if (error) {
+      // Table might not exist yet — log warning but don't fail
+      await log("warning", "bridge", `Slippage log insert error: ${error.message}`);
+    } else {
+      if (slippage_pips > 3) {
+        await log("warning", "bridge", `HIGH SLIPPAGE ${symbol}: ${slippage_pips}p | latency ${latency_ms}ms`);
+      }
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 // GET /api/bridge/settings — returns all bridge-relevant settings in one call
 router.get("/settings", async (req, res) => {
   try {

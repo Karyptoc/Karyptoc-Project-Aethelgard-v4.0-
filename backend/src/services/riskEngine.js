@@ -35,6 +35,27 @@ const CORRELATION_GROUPS = [
   ["USDJPY", "EURJPY", "GBPJPY"],  // JPY pairs — don't stack
 ];
 
+// ── Currency Exposure Map ─────────────────────────────────────────────────────
+// Maps each pair to its base and quote currencies for net-exposure clamping
+const CURRENCY_EXPOSURE = {
+  EURUSD:   { base: "EUR", quote: "USD" },
+  GBPUSD:   { base: "GBP", quote: "USD" },
+  USDJPY:   { base: "USD", quote: "JPY" },
+  AUDUSD:   { base: "AUD", quote: "USD" },
+  USDCAD:   { base: "USD", quote: "CAD" },
+  USDCHF:   { base: "USD", quote: "CHF" },
+  NZDUSD:   { base: "NZD", quote: "USD" },
+  GBPJPY:   { base: "GBP", quote: "JPY" },
+  EURJPY:   { base: "EUR", quote: "JPY" },
+  GOLD:     { base: "XAU", quote: "USD" },
+  BTCUSD:   { base: "BTC", quote: "USD" },
+  US30Cash: { base: "US30", quote: "USD" },
+  GER40Cash:{ base: "GER40", quote: "EUR" },
+};
+
+// Max total risk % exposed to any single currency simultaneously
+const MAX_CURRENCY_EXPOSURE_PCT = 3.0; // e.g. max 3% total risk in USD pairs
+
 const MAX_SPREAD_PIPS = {
   GOLD: 150, EURUSD: 3, GBPUSD: 5, USDJPY: 3,
   US30Cash: 50, GER40Cash: 50, BTCUSD: 300,
@@ -59,6 +80,62 @@ const ATR_SL_MULTIPLIERS = {
   USDCAD: 1.2,
   NZDUSD: 1.2,
 };
+
+// ── Dynamic Spread History (rolling 24h average) ─────────────────────────────
+// Tracks spread readings per symbol to detect abnormal widening
+const _spreadHistory = {}; // { symbol: [{ spread, time }] }
+
+function recordSpread(symbol, spreadPips) {
+  if (!_spreadHistory[symbol]) _spreadHistory[symbol] = [];
+  const now = Date.now();
+  // Keep only last 24h
+  _spreadHistory[symbol] = _spreadHistory[symbol].filter(s => now - s.time < 24*60*60*1000);
+  _spreadHistory[symbol].push({ spread: spreadPips, time: now });
+}
+
+function getAverageSpread(symbol) {
+  const hist = _spreadHistory[symbol];
+  if (!hist || hist.length < 3) return null;
+  return hist.reduce((s, h) => s + h.spread, 0) / hist.length;
+}
+
+/**
+ * Dynamic spread check: records current spread and checks if it exceeds
+ * the 24h rolling average by 1.5x. If so, widens SL and scales down lot size
+ * to maintain the same dollar risk.
+ * Returns { allowed, spreadPips, avgSpread, multiplier, slAdjustPips }
+ */
+function checkDynamicSpread(symbol, currentSpreadPips) {
+  recordSpread(symbol, currentSpreadPips);
+  const avgSpread = getAverageSpread(symbol);
+  const maxAllowed = MAX_SPREAD_PIPS[symbol] || 10;
+
+  if (currentSpreadPips > maxAllowed) {
+    return { allowed: false, reason: `Spread ${currentSpreadPips.toFixed(1)}p > max ${maxAllowed}p` };
+  }
+
+  if (!avgSpread || avgSpread < 0.1) {
+    return { allowed: true, spreadPips: currentSpreadPips, multiplier: 1.0, slAdjustPips: 0 };
+  }
+
+  const ratio = currentSpreadPips / avgSpread;
+  if (ratio >= 1.5) {
+    // Spread is 1.5x+ wider than normal — widen SL by the excess, scale lot down
+    const excessPips = currentSpreadPips - avgSpread;
+    const lotMultiplier = avgSpread / currentSpreadPips; // scale lot proportionally
+    return {
+      allowed: true,
+      spreadPips: currentSpreadPips,
+      avgSpread: parseFloat(avgSpread.toFixed(2)),
+      ratio: parseFloat(ratio.toFixed(2)),
+      multiplier: parseFloat(lotMultiplier.toFixed(3)),
+      slAdjustPips: parseFloat(excessPips.toFixed(1)),
+      widened: true
+    };
+  }
+
+  return { allowed: true, spreadPips: currentSpreadPips, avgSpread: parseFloat(avgSpread.toFixed(2)), ratio: parseFloat(ratio.toFixed(2)), multiplier: 1.0, slAdjustPips: 0 };
+}
 
 // ── Read Risk % from Platform Settings ───────────────────────────────────────
 
@@ -327,6 +404,60 @@ async function checkCorrelation(symbol, accountId) {
   } catch { return { allowed: true }; }
 }
 
+// ── Currency Net Exposure Clamp ──────────────────────────────────────────────
+/**
+ * Checks if adding a new trade would breach the max total risk exposure
+ * on any single currency. Prevents tripling down on e.g. USD weakness
+ * by holding EURUSD long + GBPUSD long + USDCHF short simultaneously.
+ * @param {string} symbol - pair being considered
+ * @param {string} direction - BUY or SELL
+ * @param {string} accountId
+ * @param {number} balance - account balance for risk% calc
+ */
+async function checkCurrencyExposure(symbol, direction, accountId, balance) {
+  try {
+    const exposure = CURRENCY_EXPOSURE[symbol];
+    if (!exposure) return { allowed: true };
+
+    // Which currencies does this trade add risk to?
+    // BUY EURUSD = long EUR, short USD → adds EUR risk and USD risk
+    const currencies = [exposure.base, exposure.quote];
+
+    const { data: openTrades } = await supabaseAdmin
+      .from("trades").select("symbol, direction, volume")
+      .eq("account_id", accountId).eq("status", "open");
+
+    if (!openTrades?.length) return { allowed: true };
+
+    // Build current exposure per currency
+    const currencyRisk = {}; // { currency: total_risk_pct }
+    for (const trade of openTrades) {
+      const exp = CURRENCY_EXPOSURE[trade.symbol];
+      if (!exp) continue;
+      const riskPct = 1.0; // approximate 1% per open trade
+      const tradeCurrencies = [exp.base, exp.quote];
+      for (const c of tradeCurrencies) {
+        currencyRisk[c] = (currencyRisk[c] || 0) + riskPct;
+      }
+    }
+
+    // Check if adding this trade would breach any currency limit
+    for (const currency of currencies) {
+      const currentRisk = currencyRisk[currency] || 0;
+      if (currentRisk + 1.0 > MAX_CURRENCY_EXPOSURE_PCT) {
+        return {
+          allowed: false,
+          reason: `Currency exposure limit: ${currency} already at ${currentRisk.toFixed(1)}% (max ${MAX_CURRENCY_EXPOSURE_PCT}%)`
+        };
+      }
+    }
+
+    return { allowed: true };
+  } catch (e) {
+    return { allowed: true }; // fail open
+  }
+}
+
 // ── Weekly/Monthly Loss Limits ────────────────────────────────────────────────
 
 async function checkExtendedLossLimits(accountId) {
@@ -493,6 +624,101 @@ function calculatePartialCloseLevels(direction, entryPrice, stopLoss) {
   };
 }
 
+/**
+ * Asymmetric Partial TP — velocity-aware
+ * When price hits TP1 (1R), checks if order flow momentum is increasing.
+ * If velocity is strong (price moved to TP1 faster than expected), defer the
+ * partial close and tighten trailing stop instead of liquidating volume.
+ *
+ * @param {string} direction
+ * @param {number} entryPrice
+ * @param {number} currentPrice
+ * @param {number} stopLoss
+ * @param {number} atr - current ATR of the instrument
+ * @param {Object} recentBars - last 5 bars for velocity calc
+ * @returns {Object} { action, newSL, closePercent, reason }
+ */
+function calculateAsymmetricPartialTP(direction, entryPrice, currentPrice, stopLoss, atr, recentBars = []) {
+  const risk = Math.abs(entryPrice - stopLoss);
+  const currentR = Math.abs(currentPrice - entryPrice) / risk;
+
+  // Not yet at TP1 (1R) — no action
+  if (currentR < 1.0) return { action: "hold", reason: `At ${currentR.toFixed(2)}R — waiting for 1R` };
+
+  // Calculate velocity: how many bars did it take to reach this R level?
+  // Fast move (< 3 bars to 1R) = institutional momentum → defer partial
+  let velocityBars = recentBars.length;
+  if (recentBars.length >= 2) {
+    for (let i = recentBars.length - 1; i >= 0; i--) {
+      const bar = recentBars[i];
+      const barR = direction === "BUY"
+        ? (bar.close - entryPrice) / risk
+        : (entryPrice - bar.close) / risk;
+      if (barR < 1.0) { velocityBars = recentBars.length - i; break; }
+    }
+  }
+
+  const highVelocity = velocityBars <= 3 && recentBars.length >= 3;
+
+  if (currentR >= 3.0) {
+    // At 3R+ — always close 50%, trail the rest aggressively
+    return {
+      action: "partial_close",
+      closePercent: 50,
+      newSL: direction === "BUY"
+        ? parseFloat((currentPrice - atr * 0.5).toFixed(5))
+        : parseFloat((currentPrice + atr * 0.5).toFixed(5)),
+      reason: `3R+ reached — close 50%, trail remainder`
+    };
+  }
+
+  if (currentR >= 2.0) {
+    if (highVelocity) {
+      // Strong momentum at 2R → tighten trail, don't close yet
+      return {
+        action: "tighten_trail",
+        closePercent: 0,
+        newSL: direction === "BUY"
+          ? parseFloat((currentPrice - atr * 0.7).toFixed(5))
+          : parseFloat((currentPrice + atr * 0.7).toFixed(5)),
+        reason: `2R + high velocity (${velocityBars} bars) — tighten trail, hold for 3R`
+      };
+    }
+    return {
+      action: "partial_close",
+      closePercent: 33,
+      newSL: direction === "BUY"
+        ? parseFloat((entryPrice + risk * 0.1).toFixed(5))  // just above BE
+        : parseFloat((entryPrice - risk * 0.1).toFixed(5)),
+      reason: `2R reached — close 33%, move SL to near-BE`
+    };
+  }
+
+  if (currentR >= 1.0) {
+    if (highVelocity) {
+      // Hit 1R fast → institutional momentum, skip partial, tighten SL to BE
+      return {
+        action: "move_to_be",
+        closePercent: 0,
+        newSL: direction === "BUY"
+          ? parseFloat((entryPrice + risk * 0.05).toFixed(5))
+          : parseFloat((entryPrice - risk * 0.05).toFixed(5)),
+        reason: `1R + high velocity (${velocityBars} bars) — defer partial, SL to BE, target 2R+`
+      };
+    }
+    return {
+      action: "partial_close",
+      closePercent: 25,
+      newSL: direction === "BUY"
+        ? parseFloat((entryPrice).toFixed(5))  // SL to exact BE
+        : parseFloat((entryPrice).toFixed(5)),
+      reason: `1R reached — close 25%, SL to BE`
+    };
+  }
+
+  return { action: "hold", reason: `At ${currentR.toFixed(2)}R` };
+}
+
 // ── ATR Helpers ───────────────────────────────────────────────────────────────
 
 function calculateATR(bars, period = 14) {
@@ -532,16 +758,21 @@ module.exports = {
   isPairEnabled,
   getEquityCurveMultiplier,
   checkSpread,
+  checkDynamicSpread,
+  recordSpread,
   checkCorrelation,
+  checkCurrencyExposure,
   checkExtendedLossLimits,
   checkCircuitBreaker,
   calculateTrailingStop,
   calculateBreakEven,
   calculatePartialCloseLevels,
+  calculateAsymmetricPartialTP,
   calculateATR,
   calculateStopLoss,
   calculateTakeProfit,
   getRiskPercent,
   ATR_SL_MULTIPLIERS,
   PIP_SIZES,
+  CURRENCY_EXPOSURE,
 };

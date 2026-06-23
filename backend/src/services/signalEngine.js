@@ -18,6 +18,9 @@ const {
   calculateATRStopLoss,
   checkVolatilitySpike,
   isPairEnabled,
+  checkDynamicSpread,
+  recordSpread,
+  checkCurrencyExposure,
   ATR_SL_MULTIPLIERS,
   PIP_SIZES: BASE_PIP_SIZES,
   getRiskPercent
@@ -66,7 +69,10 @@ const PAIR_PRIMARY_TF = {
 // HYBRID:    Claude only called when confluence score >= 65 (A-grade setups).
 // AI:        Full Claude analysis on every pair (original behavior).
 
-const TRADING_MODES = { PURE_MATH: "PURE_MATH", HYBRID: "HYBRID", AI: "AI" };
+const TRADING_MODES = { PURE_MATH: "PURE_MATH", HYBRID: "HYBRID", AI: "AI", SCALP: "SCALP" };
+const SCALP_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "US30Cash", "GER40Cash"];
+const DXY_INVERSE_PAIRS = ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "GOLD"];
+const DXY_DIRECT_PAIRS  = ["USDCAD", "USDCHF", "USDJPY"];
 
 async function getTradingMode() {
   try {
@@ -75,11 +81,9 @@ async function getTradingMode() {
       .select("value")
       .eq("key", "trading_mode")
       .single();
-    const mode = (data?.value || "AI").toString().replace(/"/g, "").toUpperCase();
-    return TRADING_MODES[mode] || TRADING_MODES.AI;
-  } catch {
-    return TRADING_MODES.AI; // default to AI if setting missing
-  }
+    const mode = (data?.value || "PURE_MATH").toString().replace(/"/g,"").toUpperCase();
+    return TRADING_MODES[mode] || TRADING_MODES.PURE_MATH;
+  } catch { return TRADING_MODES.PURE_MATH; }
 }
 
 /**
@@ -251,12 +255,22 @@ function isPairActiveInSession(symbol, session) {
 
 function isNewsBlackout() {
   const now = new Date();
-  const utcDecimal = now.getUTCHours() + now.getUTCMinutes() / 60;
-  const day = now.getUTCDay();
-  if (day === 5 && utcDecimal >= 12 && utcDecimal < 14) return { blocked: true, reason: "Friday NFP window" };
-  if (day === 3 && utcDecimal >= 17.5 && utcDecimal < 20) return { blocked: true, reason: "FOMC window" };
-  if (day === 4 && utcDecimal >= 12 && utcDecimal < 13.5) return { blocked: true, reason: "ECB window" };
-  return { blocked: false };
+  const u = now.getUTCHours() + now.getUTCMinutes() / 60;
+  const d = now.getUTCDay();
+  const B=0.25;
+  if (d===5 && u>=(12.5-B) && u<(12.5+B)) return { blocked:true, reason:"NFP (US Jobs)" };
+  if ((d===2||d===3) && u>=(12.5-B) && u<(12.5+B)) return { blocked:true, reason:"US CPI" };
+  if (d===3 && u>=(18.0-0.5) && u<(18.0+0.5)) return { blocked:true, reason:"FOMC rate decision" };
+  if (d===3 && u>=17.5 && u<20.0) return { blocked:true, reason:"FOMC window" };
+  if ((d===2||d===4) && u>=(12.5-B) && u<(12.5+B)) return { blocked:true, reason:"US data 12:30 UTC" };
+  if (d===4 && u>=(12.25-B) && u<13.5) return { blocked:true, reason:"ECB decision+presser" };
+  if (d===4 && u>=(12.0-B) && u<(12.0+B)) return { blocked:true, reason:"BOE rate decision" };
+  if (d===3 && u>=(7.0-B) && u<(7.0+B)) return { blocked:true, reason:"UK CPI" };
+  if ((d===4||d===5) && u>=(3.0-B) && u<(3.0+B)) return { blocked:true, reason:"BOJ rate decision" };
+  if (d===2 && u>=(3.5-B) && u<(3.5+B)) return { blocked:true, reason:"RBA rate decision" };
+  if ((d===4||d===5) && u>=(12.5-B) && u<(12.5+B)) return { blocked:true, reason:"US GDP/major data" };
+  if (d===5 && u>=20.0) return { blocked:true, reason:"Pre-weekend" };
+  return { blocked:false };
 }
 
 // ── Duplicate Prevention ──────────────────────────────────────────────────────
@@ -779,16 +793,109 @@ function getPremiumDiscount(bars, lookback = 20) {
   return { zone, pct: parseFloat(pct.toFixed(2)), rangeHigh: high, rangeLow: low };
 }
 
-function getHTFBias(h4Bars) {
-  if (!h4Bars || h4Bars.length < 20) return { bias: "neutral", strength: 0.5 };
-  const closes = h4Bars.map(b=>b.close);
-  const e20 = ema(closes, 20);
-  const e50 = ema(closes, Math.min(50, closes.length-1));
+function getHTFBias(h4Bars, d1Bars = null, w1Bars = null) {
+  const getBias = (bars) => {
+    if (!bars || bars.length < 20) return "neutral";
+    const closes = bars.map(b => b.close);
+    const e20 = ema(closes, 20), e50 = ema(closes, Math.min(50, closes.length - 1));
+    const price = closes[closes.length - 1];
+    if (price > e20 && e20 > e50) return "bullish";
+    if (price < e20 && e20 < e50) return "bearish";
+    return price > e20 ? "bullish" : "bearish";
+  };
+  const h4Bias = getBias(h4Bars), d1Bias = d1Bars ? getBias(d1Bars) : null, w1Bias = w1Bars ? getBias(w1Bars) : null;
+  const biases = [h4Bias, d1Bias, w1Bias].filter(Boolean);
+  const bullCount = biases.filter(b => b === "bullish").length, bearCount = biases.filter(b => b === "bearish").length;
+  let bias, strength;
+  if (bullCount === biases.length)      { bias = "bullish"; strength = biases.length >= 3 ? 0.95 : biases.length === 2 ? 0.80 : 0.65; }
+  else if (bearCount === biases.length) { bias = "bearish"; strength = biases.length >= 3 ? 0.95 : biases.length === 2 ? 0.80 : 0.65; }
+  else if (bullCount > bearCount)       { bias = "bullish"; strength = 0.60; }
+  else if (bearCount > bullCount)       { bias = "bearish"; strength = 0.60; }
+  else                                  { bias = "neutral"; strength = 0.40; }
+  return { bias, strength, alignment: biases.length, h4: h4Bias, d1: d1Bias || "n/a", w1: w1Bias || "n/a",
+           fullAlignment: bias !== "neutral" && (bullCount === biases.length || bearCount === biases.length) };
+}
+
+function getADRStatus(h4Bars, d1Bars, symbol) {
+  if (!d1Bars || d1Bars.length < 10) return { adr: 0, consumed: 0, consumedPct: 0, exhausted: false };
+  const pip = PIP_SIZES[symbol] || 0.0001;
+  const last14 = d1Bars.slice(-15, -1);
+  const adrPips = last14.length ? last14.reduce((s,b) => s+(b.high-b.low)/pip, 0)/last14.length : 0;
+  const todayBars = h4Bars ? h4Bars.slice(-6) : [];
+  const todayHigh = todayBars.length ? Math.max(...todayBars.map(b=>b.high)) : 0;
+  const todayLow  = todayBars.length ? Math.min(...todayBars.map(b=>b.low))  : 0;
+  const consumed = todayBars.length ? (todayHigh - todayLow)/pip : 0;
+  const consumedPct = adrPips > 0 ? (consumed/adrPips)*100 : 0;
+  return { adr: parseFloat(adrPips.toFixed(1)), consumed: parseFloat(consumed.toFixed(1)),
+           consumedPct: parseFloat(consumedPct.toFixed(1)), exhausted: consumedPct >= 80, todayHigh, todayLow };
+}
+
+function getSessionBiasProjection(h4Bars, currentSession) {
+  if (!h4Bars || h4Bars.length < 12) return { biasDirection: null, targetLevel: null };
+  const londonBars = h4Bars.filter(b => { const h = new Date(b.time||0).getUTCHours(); return h>=6 && h<13; });
+  if (!londonBars.length) return { biasDirection: null, targetLevel: null };
+  const londonHigh = Math.max(...londonBars.map(b=>b.high)), londonLow = Math.min(...londonBars.map(b=>b.low));
+  const londonBullish = (londonBars[londonBars.length-1]?.close||0) > (londonBars[0]?.open||0);
+  if (currentSession === "NY_OPEN" || currentSession === "NY_MAIN") {
+    return { biasDirection: londonBullish ? "SELL" : "BUY", targetLevel: londonBullish ? londonLow : londonHigh,
+             londonHigh, londonLow, londonBullish };
+  }
+  return { biasDirection: null, targetLevel: null, londonHigh, londonLow };
+}
+
+function getMidnightOpenArray(h4Bars) {
+  if (!h4Bars || h4Bars.length < 2) return null;
+  const recent = h4Bars.slice(-6);
+  const mb = recent.find(b => { const h = new Date(b.time||0).getUTCHours(); return h>=4 && h<=6; }) || recent[0];
+  if (!mb) return null;
+  const currentPrice = h4Bars[h4Bars.length-1].close;
+  return { level: parseFloat(mb.open.toFixed(5)), priceIsAbove: currentPrice > mb.open,
+           zone: currentPrice > mb.open ? "premium" : "discount" };
+}
+
+function getDXYConflict(symbol, direction, multiTFData) {
+  const isInverse = DXY_INVERSE_PAIRS.includes(symbol), isDirect = DXY_DIRECT_PAIRS.includes(symbol);
+  if (!isInverse && !isDirect) return { conflict: false };
+  const usdchfBars = multiTFData["USDCHF"]?.bars;
+  if (!usdchfBars || usdchfBars.length < 20) return { conflict: false };
+  const closes = usdchfBars.map(b=>b.close);
+  const e20 = ema(closes,20), e50 = ema(closes, Math.min(50,closes.length-1));
   const price = closes[closes.length-1];
-  const r = rsi(closes, 14);
-  if (price > e20 && e20 > e50) return { bias: "bullish", strength: r > 50 ? 0.9 : 0.65 };
-  if (price < e20 && e20 < e50) return { bias: "bearish", strength: r < 50 ? 0.9 : 0.65 };
-  return { bias: price > e20 ? "bullish" : "bearish", strength: 0.5 };
+  const dxyBull = price>e20 && e20>e50, dxyBear = price<e20 && e20<e50;
+  if (dxyBull && isInverse && direction==="BUY")  return { conflict:true, reason:`DXY bullish blocks ${symbol} BUY` };
+  if (dxyBear && isInverse && direction==="SELL") return { conflict:true, reason:`DXY bearish blocks ${symbol} SELL` };
+  if (dxyBull && isDirect  && direction==="SELL") return { conflict:true, reason:`DXY bullish blocks ${symbol} SELL` };
+  if (dxyBear && isDirect  && direction==="BUY")  return { conflict:true, reason:`DXY bearish blocks ${symbol} BUY` };
+  return { conflict: false };
+}
+
+function makeScalpDecision(symbol, m5Bars, m5Atr, session, htfBias) {
+  if (!SCALP_PAIRS.includes(symbol)) return { direction:"HOLD", confidence:0, reason:`${symbol} not in scalp list` };
+  if (!session.killZone) return { direction:"HOLD", confidence:0, reason:"Scalp requires kill zone" };
+  if (!m5Bars || m5Bars.length < 20 || !m5Atr) return { direction:"HOLD", confidence:0, reason:"No M5 data" };
+  const closes = m5Bars.map(b=>b.close), len = closes.length;
+  const price = closes[len-1], e8 = ema(closes,8), e21 = ema(closes,21), r = rsi(closes,14);
+  const m5Sweep = detectLiquiditySweep(m5Bars,8), m5Disp = detectDisplacement(m5Bars,m5Atr);
+  let direction="HOLD", confidence=0;
+  if (e8>e21 && price>e8 && r>45 && r<70)      { direction="BUY";  confidence=0.55; }
+  else if (e8<e21 && price<e8 && r<55 && r>30) { direction="SELL"; confidence=0.55; }
+  if (direction==="HOLD") return { direction:"HOLD", confidence:0, reason:`M5 no direction RSI:${r}` };
+  if (htfBias.bias!=="neutral" && htfBias.bias!==(direction==="BUY"?"bullish":"bearish"))
+    return { direction:"HOLD", confidence:0, reason:`HTF ${htfBias.bias} conflicts M5 ${direction}` };
+  if (m5Sweep && m5Sweep.direction===direction) confidence+=0.12;
+  if (m5Disp  && m5Disp.direction ===direction) confidence+=0.08;
+  if (session.entryModel) confidence+=0.05;
+  if (htfBias.bias!=="neutral") confidence+=0.05;
+  confidence = Math.min(confidence,0.82);
+  if (confidence<0.58) return { direction:"HOLD", confidence, reason:`Scalp conf ${confidence.toFixed(2)} low` };
+  const sl = direction==="BUY" ? parseFloat((price-m5Atr*0.5).toFixed(5)) : parseFloat((price+m5Atr*0.5).toFixed(5));
+  return { direction, confidence:parseFloat(confidence.toFixed(2)), regime:"SCALP",
+    entry_logic:`[SCALP/M5] RSI:${r} ${m5Sweep?m5Sweep.type:""} ${m5Disp?"DISP":""}`,
+    sl_reasoning:"M5 ATR×0.5", stop_loss_pips:0, reward_risk_ratio:1.2,
+    sentiment_score:direction==="BUY"?0.3:-0.3,
+    rationale:`Scalp ${direction} | M5 aligned | ${session.name} | HTF:${htfBias.bias}`,
+    invalidation:direction==="BUY"?`Below ${sl}`:`Above ${sl}`,
+    timeframe_primary:"M5", position_size_modifier:0.6, mode:"SCALP", m5_sl:sl };
 }
 
 /**
@@ -1141,7 +1248,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 
     // Build multi-timeframe data
     const multiTFData = {};
-    let h1Bars = null, h4Bars = null, m15Bars = null, m5Bars = null;
+    let h1Bars = null, h4Bars = null, m15Bars = null, m5Bars = null, d1Bars = null, w1Bars = null;
     for (const [tf, bars] of Object.entries(ohlcvData)) {
       if (bars && bars.length > 30) {
         const atrV = atrCalc(bars, 14);
@@ -1156,12 +1263,23 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
           if (tf === "H4")  h4Bars  = bars;
           if (tf === "M15") m15Bars = bars;
           if (tf === "M5")  m5Bars  = bars;
+          if (tf === "D1")  d1Bars  = bars;
+          if (tf === "W1")  w1Bars  = bars;
+          if (tf === "USDCHF") multiTFData[tf].bars = bars; // keep for DXY proxy
         }
       }
     }
     if (!Object.keys(multiTFData).length) return null;
 
-    const htfBias = getHTFBias(h4Bars || h1Bars);
+    const htfBias = getHTFBias(h4Bars || h1Bars, d1Bars, w1Bars);
+
+    const adrStatus = getADRStatus(h4Bars, d1Bars, symbol);
+    if (adrStatus.exhausted) {
+      await log("info", "signalEngine", `${symbol}: ADR exhausted ${adrStatus.consumedPct.toFixed(0)}% — skipping`);
+      return null;
+    }
+    const sessionBias = getSessionBiasProjection(h4Bars, session.session);
+    const midnightArray = h4Bars ? getMidnightOpenArray(h4Bars) : null;
     const primaryTF = PAIR_PRIMARY_TF[symbol] || "H4";
 
     // Fix: explicitly pick primary bars based on primaryTF — don't fallback to m15Bars
@@ -1256,7 +1374,13 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     const tradingMode = await getTradingMode();
     let analysis = null;
 
-    if (tradingMode === TRADING_MODES.PURE_MATH) {
+    if (tradingMode === TRADING_MODES.SCALP) {
+      const m5Atr = m5Bars ? atrCalc(m5Bars, 14) : null;
+      analysis = makeScalpDecision(symbol, m5Bars, m5Atr, session, htfBias);
+      if (analysis.direction !== "HOLD") {
+        await log("info", "signalEngine", `${symbol}: SCALP ${analysis.direction} | Conf:${analysis.confidence} | ${session.name}`);
+      }
+    } else if (tradingMode === TRADING_MODES.PURE_MATH) {
       // Zero cost — pure ICT math decision
       analysis = makePureMathDecision(confluence, htfBias, ictSequence, primaryInd, session);
       if (analysis.direction !== "HOLD") {
@@ -1282,6 +1406,48 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     if (!analysis || analysis.direction === "HOLD") {
       await log("info", "signalEngine", `${symbol}: HOLD — ${analysis?.smc_context?.entry_model_quality || "no setup"}`);
       return null;
+    }
+
+    // ── DXY Confluence Check ──────────────────────────────────────────────────
+    const dxyCheck = getDXYConflict(symbol, analysis.direction, multiTFData);
+    if (dxyCheck.conflict) {
+      await log("info", "signalEngine", `${symbol}: DXY conflict — ${dxyCheck.reason}`);
+      return null;
+    }
+
+    // ── Session Bias Projection Filter ────────────────────────────────────────
+    // If London→NY bias conflicts AND there is no HTF support, skip
+    if (sessionBias.biasDirection && sessionBias.biasDirection !== analysis.direction && htfBias.bias === "neutral") {
+      await log("info", "signalEngine", `${symbol}: Session bias ${sessionBias.biasDirection} conflicts with ${analysis.direction} + HTF neutral — skipping`);
+      return null;
+    }
+
+    // ── Midnight NY Open Array Filter ─────────────────────────────────────────
+    if (midnightArray) {
+      if (analysis.direction === "BUY" && midnightArray.zone === "premium") {
+        analysis.confidence = Math.max(analysis.confidence - 0.08, 0.40);
+        await log("info", "signalEngine", `${symbol}: BUY in premium (above midnight open) — conf reduced to ${analysis.confidence}`);
+      }
+      if (analysis.direction === "SELL" && midnightArray.zone === "discount") {
+        analysis.confidence = Math.max(analysis.confidence - 0.08, 0.40);
+        await log("info", "signalEngine", `${symbol}: SELL in discount (below midnight open) — conf reduced to ${analysis.confidence}`);
+      }
+    }
+
+    // ── DXY Confluence ──────────────────────────────────────────────────────
+    const dxyCheck = getDXYConflict(symbol, analysis.direction, multiTFData);
+    if (dxyCheck.conflict) { await log("info","signalEngine",`${symbol}: ${dxyCheck.reason}`); return null; }
+
+    // ── Session Bias Projection ──────────────────────────────────────────────
+    if (sessionBias.biasDirection && sessionBias.biasDirection !== analysis.direction && htfBias.bias === "neutral") {
+      await log("info","signalEngine",`${symbol}: Session bias ${sessionBias.biasDirection} conflicts ${analysis.direction} + HTF neutral — skip`);
+      return null;
+    }
+
+    // ── Midnight NY Open Array ────────────────────────────────────────────────
+    if (midnightArray) {
+      if (analysis.direction==="BUY"  && midnightArray.zone==="premium")  analysis.confidence = Math.max(analysis.confidence-0.08,0.40);
+      if (analysis.direction==="SELL" && midnightArray.zone==="discount") analysis.confidence = Math.max(analysis.confidence-0.08,0.40);
     }
 
     // Confidence thresholds — calibrated per setup quality
@@ -1389,13 +1555,43 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       sltp.usedM5Entry = false;
     }
 
+    // ── Pending Order Type Selection ─────────────────────────────────────────
+    // Retest of FVG/OB → limit order (price must come to us).
+    // Breakout/sweep momentum → market order.
+    // Scalp mode → always market (time-critical).
+    let orderType = "MARKET";
+    let pendingOrderPrice = null;
+
+    if (tradingMode !== TRADING_MODES.SCALP && retest) {
+      if (analysis.direction === "BUY" && retest.type?.includes("BULLISH")) {
+        orderType = "BUY_LIMIT";
+        pendingOrderPrice = parseFloat(retest.low.toFixed(5));
+      } else if (analysis.direction === "SELL" && retest.type?.includes("BEARISH")) {
+        orderType = "SELL_LIMIT";
+        pendingOrderPrice = parseFloat(retest.high.toFixed(5));
+      }
+    } else if (tradingMode !== TRADING_MODES.SCALP && ictSequence.sweep && !retest) {
+      // Sweep detected but no retest yet — use limit slightly inside current price
+      if (analysis.direction === "BUY") {
+        orderType = "BUY_LIMIT";
+        pendingOrderPrice = parseFloat((entryPrice * 0.9998).toFixed(5));
+      } else {
+        orderType = "SELL_LIMIT";
+        pendingOrderPrice = parseFloat((entryPrice * 1.0002).toFixed(5));
+      }
+    }
+
+    await log("info", "signalEngine", `${symbol}: Order type → ${orderType}${pendingOrderPrice ? ` @ ${pendingOrderPrice}` : ""}`);
+
     // Build signal
     const signal = {
       symbol,
       direction: analysis.direction,
-      entry_price: entryPrice,
+      entry_price: pendingOrderPrice || entryPrice,
       stop_loss: sltp.stopLoss,
       take_profit: sltp.takeProfit,
+      order_type: orderType,
+      pending_price: pendingOrderPrice,
       confidence: analysis.confidence,
       regime: analysis.regime,
       regime_detail: {
@@ -1425,6 +1621,20 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         m5_body_ratio: m5Entry?.found ? m5Entry.bodyRatio : null,
         h4_analysis_price: h4Price,
         volatility_spike: atrRatio >= 2.5,
+        // Forecasting metadata
+        htf_alignment: htfBias.alignment,
+        htf_w1: htfBias.w1,
+        htf_d1: htfBias.d1,
+        htf_h4: htfBias.h4,
+        htf_full_alignment: htfBias.fullAlignment,
+        adr_pips: adrStatus.adr,
+        adr_consumed_pct: adrStatus.consumedPct,
+        session_bias_direction: sessionBias.biasDirection,
+        session_bias_target: sessionBias.targetLevel,
+        midnight_array_zone: midnightArray?.zone,
+        midnight_array_level: midnightArray?.level,
+        order_type: orderType,
+        pending_price: pendingOrderPrice,
         // ICT sequence data
         ict_sweep: sweep ? `${sweep.type} @ ${sweep.sweptLevel?.toFixed(5)}` : null,
         ict_displacement: displacement ? `${displacement.atrRatio}x ATR` : null,
