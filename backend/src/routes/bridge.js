@@ -272,7 +272,9 @@ router.get("/commands", async (req, res) => {
               volume: sizing.lotSize,
               stop_loss: signal.stop_loss,
               take_profit: signal.take_profit,
-              comment: `AE_${signal.id.substr(0, 8)}`
+              comment: `AE_${signal.id.substr(0, 8)}`,
+              order_type: signal.order_type || "MARKET",
+              pending_price: signal.pending_price || null
             }
           });
         }

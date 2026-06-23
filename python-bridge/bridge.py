@@ -656,8 +656,11 @@ def manage_open_trades():
             if not atr_val:
                 continue
 
-            if profit_pips >= 10:
-                be = open_price + pip * 3 if direction == "BUY" else open_price - pip * 3
+            # ── Break-even: trigger at 20 pips (was 10) ──────────────────────
+            # Previous 10-pip trigger was closing winners too early before
+            # they reached their TP. 20 pips gives trades room to develop.
+            if profit_pips >= 20:
+                be = open_price + pip * 5 if direction == "BUY" else open_price - pip * 5
                 needs_update = (direction == "BUY" and be > (current_sl or 0)) or \
                                (direction == "SELL" and (current_sl == 0 or be < current_sl))
                 if needs_update:
@@ -665,8 +668,12 @@ def manage_open_trades():
                     if res["success"]:
                         log.info(f"Break-even: #{pos.ticket} {orig} SL->{be:.5f} (profit: {profit_pips:.1f}pips)")
 
-            if profit_pips >= 15:
-                trail = atr_val * 1.5
+            # ── Trailing stop: trigger at 30 pips (was 15), trail at 2.0x ATR ─
+            # Previous 15-pip trigger with 1.5x ATR trail was pulling SL too
+            # close too soon, getting stopped out before TP was reached.
+            # 30 pips + 2.0x ATR gives the trade more room to run.
+            if profit_pips >= 30:
+                trail = atr_val * 2.0
                 if direction == "BUY":
                     new_sl = price - trail
                     if new_sl > (current_sl or 0):
@@ -859,7 +866,7 @@ def poll_commands():
 def main():
     log.info("Aethelgard MT5 Bridge v12 starting...")
     log.info(f"Pairs: {', '.join(PAIRS)}")
-    log.info("Features: M5 entry | H4 analysis | Retry limit | SL validation | Copy trading | BE@10pips | Trail@15pips")
+    log.info("Features: M5 entry | H4/D1/W1 analysis | Retry limit | SL validation | Copy trading | BE@20pips | Trail@30pips | Pending orders")
 
     if not mt5.initialize():
         log.error(f"MT5 init failed: {mt5.last_error()}")
