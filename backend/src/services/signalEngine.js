@@ -287,9 +287,28 @@ async function getDuplicateWindow() {
 async function hasRecentSignal(symbol, minutes = 20) {
   const cutoff = new Date(Date.now() - minutes * 60 * 1000).toISOString();
   const { data } = await supabaseAdmin
-    .from("signals").select("id, direction, created_at")
+    .from("signals").select("id, direction, created_at, pending_price, order_type")
     .eq("symbol", symbol).gte("created_at", cutoff)
     .order("created_at", { ascending: false }).limit(1);
+  return data?.length > 0 ? data[0] : null;
+}
+
+/**
+ * Check if an identical pending order (same symbol + same pending_price) already
+ * exists in the signals table with status pending or active.
+ * Prevents the engine from generating the same SELL LIMIT @ 63588 every 5 minutes.
+ */
+async function hasSamePendingSignal(symbol, pendingPrice) {
+  if (!pendingPrice) return false;
+  const tolerance = pendingPrice * 0.001; // 0.1% price tolerance
+  const { data } = await supabaseAdmin
+    .from("signals")
+    .select("id, pending_price, status, created_at")
+    .eq("symbol", symbol)
+    .in("status", ["pending", "active"])
+    .gte("pending_price", pendingPrice - tolerance)
+    .lte("pending_price", pendingPrice + tolerance)
+    .limit(1);
   return data?.length > 0 ? data[0] : null;
 }
 
@@ -1566,6 +1585,19 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     }
 
     await log("info", "signalEngine", `${symbol}: Order type → ${orderType}${pendingOrderPrice ? ` @ ${pendingOrderPrice}` : ""}`);
+
+    // ── Block duplicate pending orders at same price ───────────────────────────
+    // Prevents the engine generating SELL LIMIT @ 63588 every 5 min indefinitely
+    // when price hasn't reached the zone yet.
+    if (pendingOrderPrice && orderType !== "MARKET") {
+      const samePending = await hasSamePendingSignal(symbol, pendingOrderPrice);
+      if (samePending) {
+        await log("info", "signalEngine",
+          `${symbol}: Pending order @ ${pendingOrderPrice} already active (${samePending.id.substr(0,8)}) — skipping duplicate`
+        );
+        return null;
+      }
+    }
 
     // Build signal
     const signal = {
