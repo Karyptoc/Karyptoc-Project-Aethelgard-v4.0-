@@ -66,19 +66,21 @@ const MAX_SPREAD_PIPS = {
 // ATR multiplier for SL calculation per instrument
 // Higher = wider SL (more room to breathe), lower = tighter
 const ATR_SL_MULTIPLIERS = {
-  GOLD: 1.8,      // Gold needs room — high volatility
-  BTCUSD: 2.0,    // Crypto very volatile
-  US30Cash: 1.5,  // Indices moderate
-  GER40Cash: 1.5,
-  GBPJPY: 1.8,    // Cross pairs need room
-  EURJPY: 1.6,
-  USDJPY: 1.2,    // Tighter on JPY majors
-  EURUSD: 1.2,
-  GBPUSD: 1.3,
-  USDCHF: 1.2,
-  AUDUSD: 1.2,
-  USDCAD: 1.2,
-  NZDUSD: 1.2,
+  // Tightened for kill zone entries — SL sits just beyond the swept level
+  // or nearest structural point, not a wide ATR band.
+  GOLD:     1.0,  // was 1.8 — H4 ATR on GOLD ~$15, so 1.0x = ~$15 SL
+  BTCUSD:   1.0,  // was 2.0 — H4 ATR on BTC ~$600, so 1.0x = ~$600 SL
+  US30Cash: 0.8,  // was 1.5 — H4 ATR ~250pts, 0.8x = ~200pt SL
+  GER40Cash:0.8,  // was 1.5
+  GBPJPY:   1.0,  // was 1.8
+  EURJPY:   1.0,  // was 1.6
+  USDJPY:   0.8,  // was 1.2
+  EURUSD:   0.8,  // was 1.2
+  GBPUSD:   0.8,  // was 1.3
+  USDCHF:   0.8,  // was 1.2
+  AUDUSD:   0.8,  // was 1.2
+  USDCAD:   0.8,  // was 1.2
+  NZDUSD:   0.8,  // was 1.2
 };
 
 // ── Dynamic Spread History (rolling 24h average) ─────────────────────────────

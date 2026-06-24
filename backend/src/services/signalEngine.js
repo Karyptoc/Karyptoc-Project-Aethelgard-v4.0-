@@ -1143,12 +1143,14 @@ async function getRecentPerformance(symbol) {
 function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSequence, analysisRR) {
   const pip = PIP_SIZES[symbol] || 0.0001;
   const atrMultiplier = ATR_SL_MULTIPLIERS[symbol] || 1.3;
-  const minSLPips = symbol === "GOLD" ? 80 :
-                    symbol === "BTCUSD" ? 500 :
-                    symbol === "GBPJPY" ? 50 :
-                    symbol === "EURJPY" ? 30 :
-                    symbol === "USDJPY" ? 20 :
-                    ["US30Cash","GER40Cash"].includes(symbol) ? 30 : 10;
+  // Minimum SL distances (broker requirement floors, not targets)
+  // These are the MINIMUM — actual SL should be tighter at structural level
+  const minSLPips = symbol === "GOLD" ? 50 :       // was 80 — still above broker min
+                    symbol === "BTCUSD" ? 300 :     // was 500
+                    symbol === "GBPJPY" ? 30 :      // was 50
+                    symbol === "EURJPY" ? 20 :      // was 30
+                    symbol === "USDJPY" ? 15 :      // was 20
+                    ["US30Cash","GER40Cash"].includes(symbol) ? 20 : 8; // was 30/10
 
   let stopLoss, slPips;
 
@@ -1184,8 +1186,10 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
     }
   }
 
-  // Hard cap at 2.5x ATR
-  const maxSLPips = (atrVal * 2.5) / pip;
+  // Hard cap at 1.5x ATR — prevents wide SL from ATR-based fallback
+  // Kill zone entries should be tight. If SL is wider than 1.5x ATR, something
+  // is wrong with the structural anchor — cap it hard.
+  const maxSLPips = (atrVal * 1.5) / pip;
   if (slPips > maxSLPips) {
     stopLoss = direction === "BUY"
       ? price - maxSLPips * pip
@@ -1213,20 +1217,25 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
     }
   }
 
-  // Ensure TP1 is at least 1.5R
+  // TP targets — tighter and more realistic for kill zone trading
+  // TP1 = 1.5R (first partial target — realistic within session)
+  // TP2 = 2.0R (main target — the trade we set and trail toward)
+  // TP3 = 2.5R (stretch target — only if momentum is very strong)
+  // Removed 4.0R TP3 — too wide, price rarely reaches it in same session
+
   if (!tp1 || Math.abs(tp1 - price) < risk * 1.5) {
     tp1 = direction === "BUY"
-      ? parseFloat((price + risk * Math.max(rrRatio, 1.5)).toFixed(5))
-      : parseFloat((price - risk * Math.max(rrRatio, 1.5)).toFixed(5));
+      ? parseFloat((price + risk * 1.5).toFixed(5))
+      : parseFloat((price - risk * 1.5).toFixed(5));
   }
 
   tp2 = direction === "BUY"
-    ? parseFloat((price + risk * Math.max(rrRatio, 2.5)).toFixed(5))
-    : parseFloat((price - risk * Math.max(rrRatio, 2.5)).toFixed(5));
+    ? parseFloat((price + risk * 2.0).toFixed(5))
+    : parseFloat((price - risk * 2.0).toFixed(5));
 
   tp3 = direction === "BUY"
-    ? parseFloat((price + risk * 4.0).toFixed(5))
-    : parseFloat((price - risk * 4.0).toFixed(5));
+    ? parseFloat((price + risk * 2.5).toFixed(5))
+    : parseFloat((price - risk * 2.5).toFixed(5));
 
   // Use TP2 as primary take profit for the trade
   const takeProfit = tp2;
@@ -1530,7 +1539,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     if (m5Entry?.found) {
       // M5 SL is already validated in detectM5Entry
       const risk = Math.abs(entryPrice - m5Entry.stopLoss);
-      const rrRatio = Math.max(analysis.reward_risk_ratio || 2.5, 2.5);
+      const rrRatio = Math.min(Math.max(analysis.reward_risk_ratio || 2.0, 1.5), 2.5);
 
       // TP still from H4 liquidity targets — same destination, tighter risk = better RR
       const h4sltp = calculateStructuralSLTP(
