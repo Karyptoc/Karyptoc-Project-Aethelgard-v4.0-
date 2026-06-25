@@ -1150,42 +1150,54 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
                     symbol === "USDJPY" ? 20 :
                     ["US30Cash","GER40Cash"].includes(symbol) ? 30 : 10;
 
+  // Fixed pip buffers beyond zone boundaries (precision anchoring)
+  const fixedBuffer = symbol === "GOLD" ? pip * 20 :
+                      symbol === "BTCUSD" ? pip * 300 :
+                      ["US30Cash","GER40Cash"].includes(symbol) ? pip * 20 :
+                      ["GBPJPY","EURJPY"].includes(symbol) ? pip * 3 : pip * 2;
+
   let stopLoss, slPips;
+  const session = ictSequence._session || null;
+  const retest  = ictSequence.retest;
 
-  // NEW: Use swept level as SL anchor (structural — tighter and more precise)
-  if (ictSequence.sweep?.slAnchor) {
-    const atrBuffer = atrVal * 0.3; // small buffer beyond swept level
-    if (direction === "BUY") {
-      stopLoss = ictSequence.sweep.slAnchor - atrBuffer;
-    } else {
-      stopLoss = ictSequence.sweep.slAnchor + atrBuffer;
-    }
-    slPips = Math.abs(price - stopLoss) / pip;
-
-    // Ensure minimum SL distance
-    if (slPips < minSLPips) {
-      stopLoss = direction === "BUY"
-        ? price - minSLPips * pip
-        : price + minSLPips * pip;
-      slPips = minSLPips;
-    }
-  } else {
-    // Fallback: ATR-based structural SL
-    const atrSL = calculateATRStopLoss(direction, price, ind, atrVal, symbol);
-    stopLoss = atrSL.stopLoss;
-    slPips = atrSL.slPips;
-
-    // Enforce minimum SL distance
-    if (slPips < minSLPips) {
-      stopLoss = direction === "BUY"
-        ? price - minSLPips * pip
-        : price + minSLPips * pip;
-      slPips = minSLPips;
-    }
+  // Priority 1: OB boundary — SL just beyond the order block
+  if (retest?.zone === "OB") {
+    if (direction === "BUY"  && retest.type === "BULLISH_OB") stopLoss = retest.low  - fixedBuffer;
+    if (direction === "SELL" && retest.type === "BEARISH_OB") stopLoss = retest.high + fixedBuffer;
+  }
+  // Priority 2: FVG boundary
+  if (!stopLoss && retest?.zone === "FVG") {
+    if (direction === "BUY"  && retest.type === "BULLISH_FVG") stopLoss = retest.low  - fixedBuffer;
+    if (direction === "SELL" && retest.type === "BEARISH_FVG") stopLoss = retest.high + fixedBuffer;
+  }
+  // Priority 3: Swept level (0.15x ATR buffer — tighter than before)
+  if (!stopLoss && ictSequence.sweep?.slAnchor) {
+    const sweepBuffer = atrVal * 0.15;
+    stopLoss = direction === "BUY"
+      ? ictSequence.sweep.slAnchor - sweepBuffer
+      : ictSequence.sweep.slAnchor + sweepBuffer;
+  }
+  // Priority 4: ATR fallback — tighter in kill zones
+  if (!stopLoss) {
+    const fallbackMult = session?.killZone ? 0.8 : (ATR_SL_MULTIPLIERS[symbol] || 1.0);
+    stopLoss = direction === "BUY"
+      ? price - atrVal * fallbackMult
+      : price + atrVal * fallbackMult;
   }
 
-  // Hard cap at 2.5x ATR
-  const maxSLPips = (atrVal * 2.5) / pip;
+  slPips = Math.abs(price - stopLoss) / pip;
+
+  // Enforce broker minimum
+  if (slPips < minSLPips) {
+    stopLoss = direction === "BUY"
+      ? price - minSLPips * pip
+      : price + minSLPips * pip;
+    slPips = minSLPips;
+  }
+
+  // Hard cap: 1.0x ATR in kill zones, 1.5x outside
+  const maxSLMult = session?.killZone ? 1.0 : 1.5;
+  const maxSLPips = (atrVal * maxSLMult) / pip;
   if (slPips > maxSLPips) {
     stopLoss = direction === "BUY"
       ? price - maxSLPips * pip
