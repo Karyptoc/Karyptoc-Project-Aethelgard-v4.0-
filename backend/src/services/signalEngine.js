@@ -1141,81 +1141,51 @@ async function getRecentPerformance(symbol) {
 // ── SL/TP Calculation with Structural Anchor ──────────────────────────────────
 
 function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSequence, analysisRR) {
-  const session = ictSequence._session || null;
   const pip = PIP_SIZES[symbol] || 0.0001;
   const atrMultiplier = ATR_SL_MULTIPLIERS[symbol] || 1.3;
-  // Minimum SL distances (broker requirement floors, not targets)
-  // These are the MINIMUM — actual SL should be tighter at structural level
-  const minSLPips = symbol === "GOLD" ? 50 :       // was 80 — still above broker min
-                    symbol === "BTCUSD" ? 300 :     // was 500
-                    symbol === "GBPJPY" ? 30 :      // was 50
-                    symbol === "EURJPY" ? 20 :      // was 30
-                    symbol === "USDJPY" ? 15 :      // was 20
-                    ["US30Cash","GER40Cash"].includes(symbol) ? 20 : 8; // was 30/10
-
-  // ── Zone-based SL placement (priority order) ─────────────────────────────
-  // 1st: OB boundary — SL just beyond the zone that price retested
-  // 2nd: FVG boundary — SL just beyond the gap boundary
-  // 3rd: Swept level + tight buffer (0.15× ATR instead of 0.3×)
-  // 4th: ATR fallback (0.8× in kill zone, full multiplier outside)
-  // This mirrors exact ICT methodology: SL lives beyond the invalidation level
-
-  // Fixed pip buffers beyond zone boundaries (not ATR%) for precision
-  const fixedBuffer = symbol === "GOLD" ? pip * 20 :
-                      symbol === "BTCUSD" ? pip * 300 :
-                      ["US30Cash","GER40Cash"].includes(symbol) ? pip * 20 :
-                      ["GBPJPY","EURJPY"].includes(symbol) ? pip * 3 : pip * 2;
+  const minSLPips = symbol === "GOLD" ? 80 :
+                    symbol === "BTCUSD" ? 500 :
+                    symbol === "GBPJPY" ? 50 :
+                    symbol === "EURJPY" ? 30 :
+                    symbol === "USDJPY" ? 20 :
+                    ["US30Cash","GER40Cash"].includes(symbol) ? 30 : 10;
 
   let stopLoss, slPips;
-  const retest = ictSequence.retest;
 
-  // Priority 1: OB zone boundary
-  if (retest?.zone === "OB") {
-    if (direction === "BUY" && retest.type === "BULLISH_OB") {
-      stopLoss = retest.low - fixedBuffer;  // below OB low
-    } else if (direction === "SELL" && retest.type === "BEARISH_OB") {
-      stopLoss = retest.high + fixedBuffer; // above OB high
+  // NEW: Use swept level as SL anchor (structural — tighter and more precise)
+  if (ictSequence.sweep?.slAnchor) {
+    const atrBuffer = atrVal * 0.3; // small buffer beyond swept level
+    if (direction === "BUY") {
+      stopLoss = ictSequence.sweep.slAnchor - atrBuffer;
+    } else {
+      stopLoss = ictSequence.sweep.slAnchor + atrBuffer;
+    }
+    slPips = Math.abs(price - stopLoss) / pip;
+
+    // Ensure minimum SL distance
+    if (slPips < minSLPips) {
+      stopLoss = direction === "BUY"
+        ? price - minSLPips * pip
+        : price + minSLPips * pip;
+      slPips = minSLPips;
+    }
+  } else {
+    // Fallback: ATR-based structural SL
+    const atrSL = calculateATRStopLoss(direction, price, ind, atrVal, symbol);
+    stopLoss = atrSL.stopLoss;
+    slPips = atrSL.slPips;
+
+    // Enforce minimum SL distance
+    if (slPips < minSLPips) {
+      stopLoss = direction === "BUY"
+        ? price - minSLPips * pip
+        : price + minSLPips * pip;
+      slPips = minSLPips;
     }
   }
 
-  // Priority 2: FVG boundary
-  if (!stopLoss && retest?.zone === "FVG") {
-    if (direction === "BUY" && retest.type === "BULLISH_FVG") {
-      stopLoss = retest.low - fixedBuffer;  // below FVG low
-    } else if (direction === "SELL" && retest.type === "BEARISH_FVG") {
-      stopLoss = retest.high + fixedBuffer; // above FVG high
-    }
-  }
-
-  // Priority 3: Swept level (tighter buffer — 0.15× ATR not 0.3×)
-  if (!stopLoss && ictSequence.sweep?.slAnchor) {
-    const sweepBuffer = atrVal * 0.15;
-    stopLoss = direction === "BUY"
-      ? ictSequence.sweep.slAnchor - sweepBuffer
-      : ictSequence.sweep.slAnchor + sweepBuffer;
-  }
-
-  // Priority 4: ATR fallback — tighter in kill zones
-  if (!stopLoss) {
-    const fallbackMult = session?.killZone ? 0.8 : (ATR_SL_MULTIPLIERS[symbol] || 1.0);
-    stopLoss = direction === "BUY"
-      ? price - atrVal * fallbackMult
-      : price + atrVal * fallbackMult;
-  }
-
-  slPips = Math.abs(price - stopLoss) / pip;
-
-  // Enforce broker minimum SL distance
-  if (slPips < minSLPips) {
-    stopLoss = direction === "BUY"
-      ? price - minSLPips * pip
-      : price + minSLPips * pip;
-    slPips = minSLPips;
-  }
-
-  // Hard cap: 1.0× ATR in kill zones, 1.5× outside
-  const maxSLMult = session?.killZone ? 1.0 : 1.5;
-  const maxSLPips = (atrVal * maxSLMult) / pip;
+  // Hard cap at 2.5x ATR
+  const maxSLPips = (atrVal * 2.5) / pip;
   if (slPips > maxSLPips) {
     stopLoss = direction === "BUY"
       ? price - maxSLPips * pip
@@ -1243,58 +1213,35 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
     }
   }
 
-  // ── Liquidity-anchored TP targets ───────────────────────────────────────────
-  // Priority: EQH/EQL → session bias level → daily high/low → R-multiple fallback
-  // This gives concrete levels where institutional orders cluster,
-  // instead of arbitrary R-multiples that may sit in the middle of nowhere.
-
-  // TP1: Nearest EQH/EQL (equal highs/lows = liquidity pools)
-  // (already partially computed above — keep if valid, else recalculate)
   if (!tp1 || Math.abs(tp1 - price) < risk * 1.0) {
-    // Try EQH/EQL first
-    if (ictSequence.eqLiquidity) {
-      const { eqh, eql } = ictSequence.eqLiquidity;
-      if (direction === "BUY" && eqh?.length) {
-        const nearestEQH = eqh.filter(h => h > price && h > price + risk * 1.0).sort((a,b)=>a-b)[0];
-        if (nearestEQH) tp1 = nearestEQH;
-      } else if (direction === "SELL" && eql?.length) {
-        const nearestEQL = eql.filter(l => l < price && l < price - risk * 1.0).sort((a,b)=>b-a)[0];
-        if (nearestEQL) tp1 = nearestEQL;
-      }
-    }
-    // Fallback: 1.5R
-    if (!tp1) {
+    const sessionTarget = ictSequence._sessionBiasTarget;
+    const dailyHL = ictSequence._dailyHL;
+    if (sessionTarget && Math.abs(sessionTarget - price) >= risk * 1.0)
+      tp1 = sessionTarget;
+    else if (!tp1)
       tp1 = direction === "BUY"
         ? parseFloat((price + risk * 1.5).toFixed(5))
         : parseFloat((price - risk * 1.5).toFixed(5));
-    }
   }
 
-  // TP2: Session bias target level OR daily high/low
-  // session bias target = the London/NY level that is the session's likely destination
-  const sessionTarget = ictSequence._sessionBiasTarget; // passed in from generateSignal
-  const dailyHL = ictSequence._dailyHL;
-
-  if (sessionTarget && Math.abs(sessionTarget - price) >= risk * 1.5) {
-    tp2 = sessionTarget;
-  } else if (dailyHL) {
-    tp2 = direction === "BUY" ? dailyHL.high : dailyHL.low;
-    // Ensure TP2 is at least 2R away
-    if (Math.abs(tp2 - price) < risk * 2.0) {
-      tp2 = direction === "BUY"
-        ? parseFloat((price + risk * 2.0).toFixed(5))
+  const dailyHL2 = ictSequence._dailyHL;
+  if (dailyHL2) {
+    const lvl = direction === "BUY" ? dailyHL2.high : dailyHL2.low;
+    tp2 = Math.abs(lvl - price) >= risk * 2.0 ? lvl
+        : direction === "BUY" ? parseFloat((price + risk * 2.0).toFixed(5))
         : parseFloat((price - risk * 2.0).toFixed(5));
-    }
   } else {
     tp2 = direction === "BUY"
       ? parseFloat((price + risk * 2.0).toFixed(5))
       : parseFloat((price - risk * 2.0).toFixed(5));
   }
 
-  // TP3: Weekly high/low (stretch target — institutional weekly level)
   const weeklyHL = ictSequence._weeklyHL;
-  if (weeklyHL && Math.abs((direction === "BUY" ? weeklyHL.high : weeklyHL.low) - price) >= risk * 2.5) {
-    tp3 = direction === "BUY" ? weeklyHL.high : weeklyHL.low;
+  if (weeklyHL) {
+    const wlvl = direction === "BUY" ? weeklyHL.high : weeklyHL.low;
+    tp3 = Math.abs(wlvl - price) >= risk * 2.5 ? wlvl
+        : direction === "BUY" ? parseFloat((price + risk * 2.5).toFixed(5))
+        : parseFloat((price - risk * 2.5).toFixed(5));
   } else {
     tp3 = direction === "BUY"
       ? parseFloat((price + risk * 2.5).toFixed(5))
@@ -1598,12 +1545,11 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       }
     }
 
-    // Attach session/daily/weekly context to ictSequence so calculateStructuralSLTP
-    // can use them for kill-zone SL cap and liquidity-anchored TP targets
-    ictSequence._session      = session;
+    // Attach session/daily/weekly context for zone-based SL and liquidity TP
+    ictSequence._session           = session;
     ictSequence._sessionBiasTarget = sessionBias.targetLevel || null;
-    ictSequence._dailyHL      = getDailyHighLow(d1Bars);
-    ictSequence._weeklyHL     = getWeeklyHighLow(w1Bars);
+    ictSequence._dailyHL           = getDailyHighLow(d1Bars);
+    ictSequence._weeklyHL          = getWeeklyHighLow(w1Bars);
 
     // Build SL/TP — if M5 entry found, use M5 SL; otherwise H4 structural SL
     let sltp;
