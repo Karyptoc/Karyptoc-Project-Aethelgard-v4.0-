@@ -835,6 +835,18 @@ function getHTFBias(h4Bars, d1Bars = null, w1Bars = null) {
            fullAlignment: bias !== "neutral" && (bullCount === biases.length || bearCount === biases.length) };
 }
 
+function getDailyHighLow(d1Bars) {
+  if (!d1Bars || d1Bars.length < 2) return null;
+  const today = d1Bars[d1Bars.length - 1];
+  return { high: today.high, low: today.low };
+}
+
+function getWeeklyHighLow(w1Bars) {
+  if (!w1Bars || w1Bars.length < 2) return null;
+  const thisWeek = w1Bars[w1Bars.length - 1];
+  return { high: thisWeek.high, low: thisWeek.low };
+}
+
 function getADRStatus(h4Bars, d1Bars, symbol) {
   if (!d1Bars || d1Bars.length < 10) return { adr: 0, consumed: 0, consumedPct: 0, exhausted: false };
   const pip = PIP_SIZES[symbol] || 0.0001;
