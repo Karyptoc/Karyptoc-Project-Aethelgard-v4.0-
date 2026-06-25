@@ -203,13 +203,17 @@ router.get("/commands", async (req, res) => {
             continue;
           }
 
-          // ── Fix 4: Per-pair open position cap ────────────────────────────────
-          // Prevent stacking multiple open trades on same pair simultaneously
+          // ── Per-pair open position cap ────────────────────────────────────────
+          // Max 3 open trades per symbol — prevents overexposure on single instrument
+          // (e.g. 4x US30 BUY simultaneously averaging down on a losing move)
           const openForPair = (openTrades || []).filter(t => t.symbol === signal.symbol).length;
-          const MAX_OPEN_PER_PAIR = 2; // hardcoded safety — 1 open position per pair max
+          const pairSettings = await supabaseAdmin
+            .from("platform_settings").select("value")
+            .eq("key", "max_open_per_pair").single();
+          const MAX_OPEN_PER_PAIR = parseInt(pairSettings?.data?.value) || 3;
           if (openForPair >= MAX_OPEN_PER_PAIR) {
             await log("info", "bridge",
-              `${signal.symbol} already has ${openForPair} open trade(s) — skipping new signal`
+              `${signal.symbol}: ${openForPair}/${MAX_OPEN_PER_PAIR} open trades — skipping`
             );
             continue;
           }

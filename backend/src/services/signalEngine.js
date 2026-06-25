@@ -847,6 +847,65 @@ function getWeeklyHighLow(w1Bars) {
   return { high: thisWeek.high, low: thisWeek.low };
 }
 
+/**
+ * Loss-based re-entry block.
+ * If the last closed trade on this symbol+direction was a loss,
+ * block re-entry for blockMinutes minutes.
+ * Prevents revenge-entering after a stop-out.
+ */
+async function isBlockedByRecentLoss(symbol, direction, blockMinutes = 30) {
+  try {
+    const cutoff = new Date(Date.now() - blockMinutes * 60 * 1000).toISOString();
+    const { data } = await supabaseAdmin
+      .from("trades")
+      .select("id, profit, close_time, stop_loss")
+      .eq("symbol", symbol)
+      .eq("direction", direction)
+      .eq("status", "closed")
+      .gte("close_time", cutoff)
+      .order("close_time", { ascending: false })
+      .limit(1);
+
+    if (!data?.length) return { blocked: false };
+    const t = data[0];
+    if (t.profit < 0) {
+      const minsAgo = Math.round((Date.now() - new Date(t.close_time)) / 60000);
+      return { blocked: true, reason: `${direction} loss $${t.profit.toFixed(2)} ${minsAgo}min ago — blocked 30min`, lastSL: t.stop_loss };
+    }
+    return { blocked: false };
+  } catch { return { blocked: false }; }
+}
+
+/**
+ * HTF invalidation check.
+ * For SELL: if current price is above the SL of the last losing SELL trade,
+ * the bearish structure is broken — don't re-enter.
+ * For BUY: mirror logic.
+ */
+async function isHTFInvalidated(symbol, direction, currentPrice) {
+  try {
+    const { data } = await supabaseAdmin
+      .from("trades")
+      .select("stop_loss, profit, close_time")
+      .eq("symbol", symbol)
+      .eq("direction", direction)
+      .eq("status", "closed")
+      .lt("profit", 0)
+      .order("close_time", { ascending: false })
+      .limit(1);
+
+    if (!data?.length || !data[0].stop_loss) return { invalidated: false };
+    const sl = parseFloat(data[0].stop_loss);
+    if (isNaN(sl)) return { invalidated: false };
+
+    if (direction === "SELL" && currentPrice > sl)
+      return { invalidated: true, reason: `HTF broken: SELL SL was ${sl.toFixed(5)}, price ${currentPrice.toFixed(5)} is above it` };
+    if (direction === "BUY" && currentPrice < sl)
+      return { invalidated: true, reason: `HTF broken: BUY SL was ${sl.toFixed(5)}, price ${currentPrice.toFixed(5)} is below it` };
+    return { invalidated: false };
+  } catch { return { invalidated: false }; }
+}
+
 function getADRStatus(h4Bars, d1Bars, symbol) {
   if (!d1Bars || d1Bars.length < 10) return { adr: 0, consumed: 0, consumedPct: 0, exhausted: false };
   const pip = PIP_SIZES[symbol] || 0.0001;
@@ -1305,6 +1364,11 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       return null;
     }
 
+    // ── Loss-based re-entry block (30 min after any losing trade) ─────────────
+    // We don't know the direction yet, so we defer this check to after analysis.
+    // Stored in a closure to call after direction is determined.
+    // (actual call is below after analysis determines direction)
+
     const isPairActive = isPairActiveInSession(symbol, session.session);
     const sessionThreshold = (session.sessQuality >= 2) ? 0.2 : 0.4;
     if (!isPairActive && session.strength < sessionThreshold) return null;
@@ -1469,6 +1533,29 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     if (!analysis || analysis.direction === "HOLD") {
       await log("info", "signalEngine", `${symbol}: HOLD — ${analysis?.smc_context?.entry_model_quality || "no setup"}`);
       return null;
+    }
+
+    // ── Loss-based re-entry block (30 min cooldown after any loss) ────────────
+    // Prevents the system from entering the same direction repeatedly after being
+    // stopped out. E.g. GOLD SELL stopped → no new GOLD SELL for 30 minutes.
+    const lossBlock = await isBlockedByRecentLoss(symbol, analysis.direction, 30);
+    if (lossBlock.blocked) {
+      await log("info", "signalEngine", `${symbol}: ${lossBlock.reason}`);
+      return null;
+    }
+
+    // ── HTF Invalidation Check ────────────────────────────────────────────────
+    // If current price has broken above/below the last losing trade's SL,
+    // the structural setup is invalidated — don't re-enter until new structure forms.
+    const currentPrice = (h4Bars || []).length > 0
+      ? h4Bars[h4Bars.length - 1].close
+      : null;
+    if (currentPrice) {
+      const htfInvalid = await isHTFInvalidated(symbol, analysis.direction, currentPrice);
+      if (htfInvalid.invalidated) {
+        await log("info", "signalEngine", `${symbol}: ${htfInvalid.reason}`);
+        return null;
+      }
     }
 
     // ── DXY Confluence Check ──────────────────────────────────────────────────
