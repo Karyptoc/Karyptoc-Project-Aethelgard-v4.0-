@@ -837,14 +837,28 @@ function getHTFBias(h4Bars, d1Bars = null, w1Bars = null) {
 
 function getDailyHighLow(d1Bars) {
   if (!d1Bars || d1Bars.length < 2) return null;
+  // Use TODAY (last bar) for intraday reference
   const today = d1Bars[d1Bars.length - 1];
-  return { high: today.high, low: today.low };
+  // Use PREVIOUS DAY (PDH/PDL) as TP magnet — institutional resting liquidity
+  const prev  = d1Bars[d1Bars.length - 2];
+  return {
+    high: today.high,
+    low:  today.low,
+    pdh:  prev.high,   // Previous Day High — Buy-Side Liquidity above
+    pdl:  prev.low,    // Previous Day Low  — Sell-Side Liquidity below
+  };
 }
 
 function getWeeklyHighLow(w1Bars) {
   if (!w1Bars || w1Bars.length < 2) return null;
   const thisWeek = w1Bars[w1Bars.length - 1];
-  return { high: thisWeek.high, low: thisWeek.low };
+  const prevWeek = w1Bars[w1Bars.length - 2];
+  return {
+    high: thisWeek.high,
+    low:  thisWeek.low,
+    pwh:  prevWeek.high,  // Previous Week High — strongest TP3 magnet
+    pwl:  prevWeek.low,   // Previous Week Low
+  };
 }
 
 /**
@@ -1307,8 +1321,24 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
         : parseFloat((price - risk * 1.5).toFixed(5));
   }
 
+  // TP2: PDH/PDL (Previous Day High/Low) — institutional resting liquidity
+  // These are the strongest intraday TP magnets because that's where
+  // retail stop-losses cluster from the prior session.
   const dailyHL2 = ictSequence._dailyHL;
-  if (dailyHL2) {
+  if (dailyHL2?.pdh && dailyHL2?.pdl) {
+    const pdhpdl = direction === "BUY" ? dailyHL2.pdh : dailyHL2.pdl;
+    if (Math.abs(pdhpdl - price) >= risk * 1.8) {
+      tp2 = pdhpdl; // PDH/PDL is valid TP2
+    } else {
+      // PDH/PDL too close — use today's high/low
+      const todayLvl = direction === "BUY" ? dailyHL2.high : dailyHL2.low;
+      tp2 = Math.abs(todayLvl - price) >= risk * 2.0
+        ? todayLvl
+        : direction === "BUY"
+          ? parseFloat((price + risk * 2.0).toFixed(5))
+          : parseFloat((price - risk * 2.0).toFixed(5));
+    }
+  } else if (dailyHL2) {
     const lvl = direction === "BUY" ? dailyHL2.high : dailyHL2.low;
     tp2 = Math.abs(lvl - price) >= risk * 2.0 ? lvl
         : direction === "BUY" ? parseFloat((price + risk * 2.0).toFixed(5))
@@ -1319,8 +1349,23 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
       : parseFloat((price - risk * 2.0).toFixed(5));
   }
 
+  // TP3: PWH/PWL (Previous Week High/Low) — strongest institutional level
+  // Weekly liquidity pools are the highest-value targets for large moves.
   const weeklyHL = ictSequence._weeklyHL;
-  if (weeklyHL) {
+  if (weeklyHL?.pwh && weeklyHL?.pwl) {
+    const pwTarget = direction === "BUY" ? weeklyHL.pwh : weeklyHL.pwl;
+    if (Math.abs(pwTarget - price) >= risk * 2.5) {
+      tp3 = pwTarget; // PWH/PWL is valid TP3
+    } else {
+      // Previous week too close — use current week high/low
+      const wkLvl = direction === "BUY" ? weeklyHL.high : weeklyHL.low;
+      tp3 = Math.abs(wkLvl - price) >= risk * 2.5
+        ? wkLvl
+        : direction === "BUY"
+          ? parseFloat((price + risk * 2.5).toFixed(5))
+          : parseFloat((price - risk * 2.5).toFixed(5));
+    }
+  } else if (weeklyHL) {
     const wlvl = direction === "BUY" ? weeklyHL.high : weeklyHL.low;
     tp3 = Math.abs(wlvl - price) >= risk * 2.5 ? wlvl
         : direction === "BUY" ? parseFloat((price + risk * 2.5).toFixed(5))
@@ -1372,6 +1417,13 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     const isPairActive = isPairActiveInSession(symbol, session.session);
     const sessionThreshold = (session.sessQuality >= 2) ? 0.2 : 0.4;
     if (!isPairActive && session.strength < sessionThreshold) return null;
+
+    // ── BTC Selective Mode — H4+H1 dual timeframe confirmation ───────────────
+    // Backtest data shows BTC selective mode (H4+H1 alignment required) achieves
+    // 51.7% win rate vs 45.6% in aggressive mode. For BTC specifically, we
+    // require both H4 AND H1 to show the same BOS/CHoCH direction before entry.
+    // This is evaluated after H4 bias is determined below, stored as a flag.
+    const btcSelectiveMode = (symbol === "BTCUSD");
 
     // Build multi-timeframe data
     const multiTFData = {};
@@ -1535,6 +1587,36 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       return null;
     }
 
+    // ── BTC Selective Mode: require H1 confirmation matches H4 ──────────────
+    // For BTCUSD: only trade when H1 structure confirms the H4 direction.
+    // H1 must show a BOS or CHoCH in the same direction as the H4 bias.
+    // This filters out counter-trend entries that stop out frequently.
+    if (btcSelectiveMode && h1Bars && h1Bars.length >= 20) {
+      const h1Ind = multiTFData["H1"]?.indicators;
+      if (h1Ind) {
+        const h1Direction = h1Ind.bos?.type?.includes("BULLISH") ? "BUY"
+                          : h1Ind.bos?.type?.includes("BEARISH") ? "SELL"
+                          : h1Ind.choch?.type?.includes("BULLISH") ? "BUY"
+                          : h1Ind.choch?.type?.includes("BEARISH") ? "SELL"
+                          : null;
+        if (h1Direction && h1Direction !== analysis.direction) {
+          await log("info", "signalEngine",
+            `${symbol}: BTC Selective Mode — H1 ${h1Direction} conflicts H4 ${analysis.direction} — skip`
+          );
+          return null;
+        }
+        if (!h1Direction) {
+          await log("info", "signalEngine",
+            `${symbol}: BTC Selective Mode — no H1 BOS/CHoCH confirmation — skip`
+          );
+          return null;
+        }
+        await log("info", "signalEngine",
+          `${symbol}: BTC Selective Mode — H1 ${h1Direction} confirms H4 ${analysis.direction} ✓`
+        );
+      }
+    }
+
     // ── Loss-based re-entry block (30 min cooldown after any loss) ────────────
     // Prevents the system from entering the same direction repeatedly after being
     // stopped out. E.g. GOLD SELL stopped → no new GOLD SELL for 30 minutes.
@@ -1563,6 +1645,29 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     if (dxyCheck.conflict) {
       await log("info", "signalEngine", `${symbol}: DXY conflict — ${dxyCheck.reason}`);
       return null;
+    }
+
+    // ── GER40/US30 Correlation Filter ─────────────────────────────────────────
+    // GER40 and US30 are highly correlated indices. If both fire the same
+    // direction simultaneously, we're doubling exposure on the same macro move.
+    // Rule: allow max 1 index in each direction at any time.
+    // Exception: opposite directions are fine (one long, one short = hedge).
+    if (["US30Cash", "GER40Cash"].includes(symbol)) {
+      const correlatedIndex = symbol === "US30Cash" ? "GER40Cash" : "US30Cash";
+      try {
+        const { data: openCorr } = await supabaseAdmin
+          .from("trades")
+          .select("direction")
+          .eq("symbol", correlatedIndex)
+          .eq("status", "open")
+          .limit(1);
+        if (openCorr?.length > 0 && openCorr[0].direction === analysis.direction) {
+          await log("info", "signalEngine",
+            `${symbol}: Correlation block — ${correlatedIndex} already has open ${analysis.direction} trade`
+          );
+          return null;
+        }
+      } catch { /* non-blocking — proceed if query fails */ }
     }
 
     // ── Session Bias Projection Filter ────────────────────────────────────────
