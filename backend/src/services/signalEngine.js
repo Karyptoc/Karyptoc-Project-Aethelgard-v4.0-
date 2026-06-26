@@ -1290,6 +1290,29 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
     slPips = maxSLPips;
   }
 
+  // ── Absolute pip cap per instrument (final safety floor) ─────────────────
+  // Derived from ICT Venom model intraday ranges:
+  // US30: 1,000pt daily range → SL should be ≤60pts (6% of range)
+  // GER40: 400pt daily range → SL ≤80pts
+  // GOLD: 100pt daily range → SL ≤50pts
+  // Forex/JPY: normal ATR already tight, cap at 30 pips
+  const absoluteSLCap = {
+    US30Cash: 60,   GER40Cash: 80,
+    GOLD: 50,       BTCUSD: 500,
+    GBPJPY: 60,     EURJPY: 50,
+    USDJPY: 30,     EURUSD: 30,
+    GBPUSD: 30,     AUDUSD: 30,
+    USDCAD: 30,     USDCHF: 30,
+    NZDUSD: 30,
+  };
+  const absCap = absoluteSLCap[symbol];
+  if (absCap && slPips > absCap) {
+    stopLoss = direction === "BUY"
+      ? price - absCap * pip
+      : price + absCap * pip;
+    slPips = absCap;
+  }
+
   stopLoss = parseFloat(stopLoss.toFixed(5));
   const risk = Math.abs(price - stopLoss);
 
@@ -1321,16 +1344,42 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
         : parseFloat((price - risk * 1.5).toFixed(5));
   }
 
-  // TP2: PDH/PDL (Previous Day High/Low) — institutional resting liquidity
-  // These are the strongest intraday TP magnets because that's where
-  // retail stop-losses cluster from the prior session.
+  // TP2 logic — instrument-specific:
+  // INDICES (US30/GER40): PDH/PDL is 300-500pts away — unreachable intraday.
+  //   Use session high/low as TP2 (intraday target within reach).
+  // GOLD/FOREX: PDH/PDL is 50-150pts — realistic intraday target.
+  const isIndex = ["US30Cash", "GER40Cash"].includes(symbol);
   const dailyHL2 = ictSequence._dailyHL;
-  if (dailyHL2?.pdh && dailyHL2?.pdl) {
+  const sessionTarget2 = ictSequence._sessionBiasTarget;
+
+  if (isIndex) {
+    // Indices: use session bias target or session range high/low (intraday)
+    if (sessionTarget2 && Math.abs(sessionTarget2 - price) >= risk * 1.5
+                       && Math.abs(sessionTarget2 - price) <= risk * 4.0) {
+      tp2 = sessionTarget2;
+    } else {
+      // Use today's high/low capped at 3R max (achievable intraday)
+      const todayLvl = dailyHL2
+        ? (direction === "BUY" ? dailyHL2.high : dailyHL2.low)
+        : null;
+      const maxTP2 = direction === "BUY"
+        ? parseFloat((price + risk * 3.0).toFixed(5))
+        : parseFloat((price - risk * 3.0).toFixed(5));
+      if (todayLvl && Math.abs(todayLvl - price) >= risk * 1.8
+                   && Math.abs(todayLvl - price) <= risk * 3.0) {
+        tp2 = todayLvl;
+      } else {
+        tp2 = direction === "BUY"
+          ? parseFloat((price + risk * 2.0).toFixed(5))
+          : parseFloat((price - risk * 2.0).toFixed(5));
+      }
+    }
+  } else if (dailyHL2?.pdh && dailyHL2?.pdl) {
+    // GOLD/FOREX: PDH/PDL is reachable intraday
     const pdhpdl = direction === "BUY" ? dailyHL2.pdh : dailyHL2.pdl;
     if (Math.abs(pdhpdl - price) >= risk * 1.8) {
-      tp2 = pdhpdl; // PDH/PDL is valid TP2
+      tp2 = pdhpdl;
     } else {
-      // PDH/PDL too close — use today's high/low
       const todayLvl = direction === "BUY" ? dailyHL2.high : dailyHL2.low;
       tp2 = Math.abs(todayLvl - price) >= risk * 2.0
         ? todayLvl
@@ -1338,11 +1387,6 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
           ? parseFloat((price + risk * 2.0).toFixed(5))
           : parseFloat((price - risk * 2.0).toFixed(5));
     }
-  } else if (dailyHL2) {
-    const lvl = direction === "BUY" ? dailyHL2.high : dailyHL2.low;
-    tp2 = Math.abs(lvl - price) >= risk * 2.0 ? lvl
-        : direction === "BUY" ? parseFloat((price + risk * 2.0).toFixed(5))
-        : parseFloat((price - risk * 2.0).toFixed(5));
   } else {
     tp2 = direction === "BUY"
       ? parseFloat((price + risk * 2.0).toFixed(5))
@@ -1525,20 +1569,37 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     primaryInd.direction = retestDirection;
     const confluence = scoreConfluence(primaryInd, session, htfBias, isPairActive, ictSequence);
 
-    // Minimum tradeable threshold — significantly lowered per pair type
-    // Full ICT sequence (sweep+displacement+retest) = lowest bar (35)
-    // Minimum score thresholds — aligned with backtest default min_confluence=35
+    // Minimum score thresholds — indices require higher conviction
+    // US30/GER40 historical win rate is lower so we demand more confluence.
+    // GOLD/Forex: standard thresholds apply.
+    const isIndexPair = ["US30Cash", "GER40Cash"].includes(symbol);
     let minScore;
-    if (ictSequence.hasFullSequence) {
-      minScore = 30; // full ICT sequence = very low bar
-    } else if (ictSequence.hasPartialSequence) {
-      minScore = 33;
-    } else if (session.killZone && isPairActive) {
-      minScore = 35; // matches backtest default
-    } else if (session.killZone) {
-      minScore = 38;
+    if (isIndexPair) {
+      // Indices: raise all thresholds by ~15 points — filters low-quality entries
+      if (ictSequence.hasFullSequence) {
+        minScore = 48; // full sequence still needs good score for indices
+      } else if (ictSequence.hasPartialSequence) {
+        minScore = 52;
+      } else if (session.killZone && isPairActive) {
+        minScore = 55;
+      } else if (session.killZone) {
+        minScore = 60;
+      } else {
+        minScore = 65; // outside kill zone = very high bar for indices
+      }
     } else {
-      minScore = 42; // outside kill zone still needs more
+      // GOLD / Forex: standard thresholds
+      if (ictSequence.hasFullSequence) {
+        minScore = 30; // full ICT sequence = lower bar
+      } else if (ictSequence.hasPartialSequence) {
+        minScore = 33;
+      } else if (session.killZone && isPairActive) {
+        minScore = 35;
+      } else if (session.killZone) {
+        minScore = 38;
+      } else {
+        minScore = 42;
+      }
     }
 
     await log("info", "signalEngine", `${symbol}: DBG score=${confluence.score} min=${minScore} htf=${htfBias.bias} sq=${session.sessQuality} kz=${session.killZone} active=${isPairActive}`);
@@ -1615,6 +1676,15 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
           `${symbol}: BTC Selective Mode — H1 ${h1Direction} confirms H4 ${analysis.direction} ✓`
         );
       }
+    }
+
+    // ── Index-specific confidence floor ─────────────────────────────────────────
+    // US30/GER40 require minimum 0.65 confidence — their lower structural
+    // clarity means anything below this is a coin flip entry.
+    if (["US30Cash", "GER40Cash"].includes(symbol) && analysis.confidence < 0.65) {
+      await log("info", "signalEngine",
+        `${symbol}: Index confidence ${analysis.confidence} < 0.65 minimum — skip`);
+      return null;
     }
 
     // ── Loss-based re-entry block (30 min cooldown after any loss) ────────────
@@ -1772,7 +1842,11 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     if (m5Entry?.found) {
       // M5 SL is already validated in detectM5Entry
       const risk = Math.abs(entryPrice - m5Entry.stopLoss);
-      const rrRatio = Math.min(Math.max(analysis.reward_risk_ratio || 2.0, 1.5), 2.5);
+      // Indices need at least 2.0R to compensate for lower win rate
+      const isIndexSignal = ["US30Cash", "GER40Cash"].includes(symbol);
+      const rrRatio = isIndexSignal
+        ? Math.min(Math.max(analysis.reward_risk_ratio || 2.0, 2.0), 3.0)
+        : Math.min(Math.max(analysis.reward_risk_ratio || 2.0, 1.5), 2.5);
 
       // TP still from H4 liquidity targets — same destination, tighter risk = better RR
       const h4sltp = calculateStructuralSLTP(
