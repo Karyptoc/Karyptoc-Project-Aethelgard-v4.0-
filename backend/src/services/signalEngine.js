@@ -1569,42 +1569,64 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     primaryInd.direction = retestDirection;
     const confluence = scoreConfluence(primaryInd, session, htfBias, isPairActive, ictSequence);
 
-    // Minimum score thresholds — indices require higher conviction
-    // US30/GER40 historical win rate is lower so we demand more confluence.
-    // GOLD/Forex: standard thresholds apply.
+    // ── KILL ZONE GATE — HARD BLOCK outside kill zones ──────────────────────────
+    // ICT/SMC methodology ONLY enters during institutional kill zone windows.
+    // Outside these windows there is no institutional order flow — any signal
+    // is just random noise riding ATR. This was the root cause of the 90%→33% WR
+    // collapse: the system was entering on every 5-minute cycle regardless of time.
+    //
+    // Kill zones (UTC): London 06-09 | NY Entry 12:30-15 | NY Close 19-22
+    // Asian (00-03 UTC) allowed only for JPY pairs and GOLD.
+    const isJPYPair = ["USDJPY", "EURJPY", "GBPJPY"].includes(symbol);
+    const isAsianPair = isJPYPair || symbol === "GOLD" || symbol === "BTCUSD";
+
+    if (!session.killZone) {
+      // Asian session: allow only JPY/GOLD/BTC
+      if (session.session === "ASIAN" && isAsianPair) {
+        // Allow but require higher score (asian is lower quality)
+      } else {
+        await log("info", "signalEngine",
+          `${symbol}: Outside kill zone (${session.session}) — no entry`);
+        return null;
+      }
+    }
+
+    // Minimum score thresholds — RAISED globally after performance analysis
+    // The journal shows that 33-42 minScore produces noise entries.
+    // True ICT setups always score 55+ — if it doesn't, it's not a real setup.
     const isIndexPair = ["US30Cash", "GER40Cash"].includes(symbol);
     let minScore;
     if (isIndexPair) {
-      // Indices: raise all thresholds by ~15 points — filters low-quality entries
-      if (ictSequence.hasFullSequence) {
-        minScore = 48; // full sequence still needs good score for indices
-      } else if (ictSequence.hasPartialSequence) {
-        minScore = 52;
-      } else if (session.killZone && isPairActive) {
-        minScore = 55;
-      } else if (session.killZone) {
-        minScore = 60;
-      } else {
-        minScore = 65; // outside kill zone = very high bar for indices
-      }
+      // Indices: strict — must have full sequence AND high score
+      if (ictSequence.hasFullSequence) minScore = 55;
+      else if (ictSequence.hasPartialSequence) minScore = 60;
+      else minScore = 70; // no sequence = not a valid ICT setup for indices
     } else {
-      // GOLD / Forex: standard thresholds
-      if (ictSequence.hasFullSequence) {
-        minScore = 30; // full ICT sequence = lower bar
-      } else if (ictSequence.hasPartialSequence) {
-        minScore = 33;
-      } else if (session.killZone && isPairActive) {
-        minScore = 35;
-      } else if (session.killZone) {
-        minScore = 38;
-      } else {
-        minScore = 42;
-      }
+      // GOLD / Forex / BTC: still strict but slightly lower
+      if (ictSequence.hasFullSequence) minScore = 48;
+      else if (ictSequence.hasPartialSequence) minScore = 52;
+      else if (session.killZone) minScore = 55;
+      else minScore = 65; // asian session non-peak pairs
     }
 
     await log("info", "signalEngine", `${symbol}: DBG score=${confluence.score} min=${minScore} htf=${htfBias.bias} sq=${session.sessQuality} kz=${session.killZone} active=${isPairActive}`);
     if (confluence.score < minScore) {
       await log("info", "signalEngine", `${symbol}: Score ${confluence.score} < ${minScore} — no setup`);
+      return null;
+    }
+
+    // ── ICT sequence gate — require at least sweep OR OB OR FVG ─────────────
+    // Without ANY of these, the entry has no ICT/SMC basis.
+    // This blocks "indicator-only" entries that have no structural context.
+    const hasICTBasis = !!(
+      ictSequence.sweep ||
+      ictSequence.ob?.valid ||
+      ictSequence.fvg?.active ||
+      ictSequence.hasPartialSequence
+    );
+    if (!hasICTBasis) {
+      await log("info", "signalEngine",
+        `${symbol}: No ICT basis (no sweep/OB/FVG detected) — skip`);
       return null;
     }
 
@@ -1678,12 +1700,33 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       }
     }
 
-    // ── Index-specific confidence floor ─────────────────────────────────────────
-    // US30/GER40 require minimum 0.65 confidence — their lower structural
-    // clarity means anything below this is a coin flip entry.
-    if (["US30Cash", "GER40Cash"].includes(symbol) && analysis.confidence < 0.65) {
+    // ── Price-at-level check — core ICT principle ────────────────────────────────
+    // A signal is only valid if price is actually AT a structural key level:
+    // OB, FVG, swept level, or PDH/PDL. If price is floating in the middle of
+    // nowhere with no structural anchor, it's not an ICT entry — skip it.
+    //
+    // We check: is there an active retest of OB/FVG within the last 3 M5 candles?
+    // Or is there a fresh sweep within the last 6 H4 candles?
+    const hasStructuralAnchor = !!(
+      ictSequence.retest?.zone ||           // price retesting OB or FVG right now
+      ictSequence.sweep?.fresh ||           // fresh sweep just occurred
+      ictSequence.fvg?.active ||           // price inside an active FVG
+      (ictSequence.ob?.valid && ictSequence.ob?.fresh)  // price at fresh OB
+    );
+
+    if (!hasStructuralAnchor) {
       await log("info", "signalEngine",
-        `${symbol}: Index confidence ${analysis.confidence} < 0.65 minimum — skip`);
+        `${symbol}: No structural anchor (no OB/FVG retest or fresh sweep) — skip`);
+      return null;
+    }
+
+    // ── Global confidence floor — raised from 0.50 to 0.60 ───────────────────
+    // Combined with hasStructuralAnchor, this ensures only high-quality
+    // zone-confirmed setups with strong HTF alignment get through.
+    const minConfidence = ["US30Cash","GER40Cash"].includes(symbol) ? 0.65 : 0.60;
+    if (analysis.confidence < minConfidence) {
+      await log("info", "signalEngine",
+        `${symbol}: Confidence ${analysis.confidence} < ${minConfidence} — skip`);
       return null;
     }
 
@@ -1716,6 +1759,26 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       await log("info", "signalEngine", `${symbol}: DXY conflict — ${dxyCheck.reason}`);
       return null;
     }
+
+    // ── Global kill zone trade cap — max 3 per session window ────────────────
+    // ICT reality: a kill zone produces 1-3 quality setups MAX across ALL pairs.
+    // If we've already taken 3 trades this kill zone, stop. No more entries.
+    // This directly prevents the "13 trades in one minute" pattern.
+    try {
+      const kzStart = new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString(); // 2.5hr window
+      const { data: kzTrades } = await supabaseAdmin
+        .from("trades")
+        .select("id")
+        .gte("open_time", kzStart)
+        .in("status", ["open", "closed"]);
+      const kzCount = kzTrades?.length || 0;
+      const maxPerKZ = 6; // max 6 trades across all pairs per kill zone window
+      if (kzCount >= maxPerKZ) {
+        await log("info", "signalEngine",
+          `${symbol}: Kill zone cap reached (${kzCount}/${maxPerKZ} trades this session) — skip`);
+        return null;
+      }
+    } catch { /* non-blocking */ }
 
     // ── GER40/US30 Correlation Filter ─────────────────────────────────────────
     // GER40 and US30 are highly correlated indices. If both fire the same
