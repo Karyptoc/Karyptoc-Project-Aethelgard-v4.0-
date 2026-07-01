@@ -42,19 +42,20 @@ const PIP_SIZES = {
 };
 
 const PAIR_SESSIONS = {
-  GOLD:     ["LONDON_OPEN","NY_OPEN","NY_MAIN","LONDON_MAIN"],
-  EURUSD:   ["LONDON_OPEN","NY_OPEN","LONDON_MAIN","NY_MAIN"],
-  GBPUSD:   ["LONDON_OPEN","NY_OPEN","LONDON_MAIN"],
+  // Full 4-session ICT model — London Open, NY Open, London Close, NY PM
+  GOLD:     ["LONDON_OPEN","NY_OPEN","LONDON_MAIN","LONDON_CLOSE","NY_PM","NY_CLOSE"],
+  EURUSD:   ["LONDON_OPEN","NY_OPEN","LONDON_MAIN","LONDON_CLOSE"],
+  GBPUSD:   ["LONDON_OPEN","NY_OPEN","LONDON_MAIN","LONDON_CLOSE"],
   USDJPY:   ["ASIAN","LONDON_OPEN","NY_OPEN","LONDON_MAIN"],
   AUDUSD:   ["ASIAN","LONDON_OPEN","LONDON_MAIN"],
-  USDCAD:   ["NY_OPEN","NY_MAIN","LONDON_MAIN"],
+  USDCAD:   ["NY_OPEN","LONDON_CLOSE","NY_PM"],
   USDCHF:   ["LONDON_OPEN","NY_OPEN","LONDON_MAIN"],
-  NZDUSD:   ["ASIAN","LONDON_OPEN"],
-  GBPJPY:   ["LONDON_OPEN","NY_OPEN","ASIAN"],
-  EURJPY:   ["ASIAN","LONDON_OPEN","LONDON_MAIN"],
-  US30Cash: ["NY_OPEN","NY_MAIN"],
-  GER40Cash:["LONDON_OPEN","LONDON_MAIN"],
-  BTCUSD:   ["LONDON_OPEN","NY_OPEN","NY_MAIN","NY_CLOSE"],
+  NZDUSD:   ["ASIAN","LONDON_OPEN","LONDON_MAIN"],
+  GBPJPY:   ["LONDON_OPEN","NY_OPEN","ASIAN","LONDON_CLOSE"],
+  EURJPY:   ["ASIAN","LONDON_OPEN","LONDON_MAIN","LONDON_CLOSE"],
+  US30Cash: ["NY_OPEN","LONDON_CLOSE","NY_PM"],
+  GER40Cash:["LONDON_OPEN","LONDON_MAIN","LONDON_CLOSE"],
+  BTCUSD:   ["LONDON_OPEN","NY_OPEN","NY_PM","NY_CLOSE"],
 };
 
 // H4 primary — backtest proven (PF 9.56 GOLD, PF 4.54 USDCAD)
@@ -219,33 +220,85 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
 
 // ── Session Detection ─────────────────────────────────────────────────────────
 
-function getSessionInfo() {
+function getSessionInfo(symbol = "") {
   const now = new Date();
   const utcDecimal = now.getUTCHours() + now.getUTCMinutes() / 60;
   const day = now.getUTCDay();
+
+  // Weekend gate
   if (day === 0 && utcDecimal < 22) return { session: "WEEKEND", killZone: false, strength: 0, name: "Weekend", entryModel: false, sessQuality: 0 };
   if (day === 6) return { session: "WEEKEND", killZone: false, strength: 0, name: "Weekend", entryModel: false, sessQuality: 0 };
 
-  // Precision entry model windows (from Indicator 2 — tightest, highest probability)
-  // London Entry: 06:00-08:00 UTC (02:00-04:00 NY)
-  // NY Entry:     12:30-14:00 UTC (08:30-10:00 NY)
-  const inLondonEntry = utcDecimal >= 6 && utcDecimal < 8;
-  const inNYEntry = utcDecimal >= 12.5 && utcDecimal < 14;
-  // ICT Asian Kill Zone: 00:00-04:00 UTC (20:00-00:00 NY / 03:00-07:00 EAT)
-  // Prime window for USDJPY, AUDUSD, NZDUSD, EURJPY
+  // ── 4 FULL ICT KILL ZONES (Michael Huddleston methodology) ───────────────
+  //
+  // Zone 1 — London Open (BEST for GER40, GOLD, GBPUSD, EURUSD)
+  //   02:00–05:00 AM NY = 07:00–10:00 UTC = 10:00–13:00 EAT
+  //   sessQuality:3 for 06-08, sessQuality:2 for 08-10
+  //
+  // Zone 2 — NY Open / London Close (BEST for US30, GOLD continuation)
+  //   07:00–10:00 AM NY = 12:00–15:00 UTC = 15:00–18:00 EAT
+  //   sessQuality:3 for 12:30-14, sessQuality:2 for 12-12:30 and 14-15
+  //
+  // Zone 3 — London Close / NY Mid (reversal window, GOLD & GER40)
+  //   10:00–12:00 PM NY = 15:00–17:00 UTC = 18:00–20:00 EAT
+  //   sessQuality:2
+  //
+  // Zone 4 — NY Afternoon / PM Session (second trend leg)
+  //   01:30–04:00 PM NY = 18:30–21:00 UTC = 21:30–00:00 EAT
+  //   sessQuality:2
+  //
+  // Asian KZ — JPY/GOLD/BTC only
+  //   08:00 PM–00:00 AM NY = 00:00–04:00 UTC = 03:00–07:00 EAT
+  //   sessQuality:2
+
+  const isGoldOrIndex = ["GOLD","US30Cash","GER40Cash"].includes(symbol);
+  const isAsianPair   = ["USDJPY","EURJPY","GBPJPY","AUDUSD","NZDUSD","BTCUSD","GOLD"].includes(symbol);
+
+  // ── Zone 1: London Open Kill Zone ────────────────────────────────────────
+  const inLondonEntry = utcDecimal >= 6 && utcDecimal < 8;    // prime entry model
+  const inLondonKZ    = utcDecimal >= 8 && utcDecimal < 10;   // extended London KZ
+
+  // ── Zone 2: NY Open Kill Zone ─────────────────────────────────────────────
+  const inNYEntry = utcDecimal >= 12.5 && utcDecimal < 14;    // prime entry model
+  const inNYOpen  = (utcDecimal >= 12 && utcDecimal < 12.5) ||
+                    (utcDecimal >= 14 && utcDecimal < 15);     // extended NY open
+
+  // ── Zone 3: London Close / NY Mid ─────────────────────────────────────────
+  // Strong reversal window — institutional position squaring at London close
+  // GOLD often makes its session high/low in this window
+  const inLondonClose = utcDecimal >= 15 && utcDecimal < 17;
+
+  // ── Zone 4: NY Afternoon / PM Session ─────────────────────────────────────
+  // Second institutional distribution leg — strong for indices and GOLD
+  const inNYAfternoon = utcDecimal >= 18.5 && utcDecimal < 21;
+
+  // ── NY Close ──────────────────────────────────────────────────────────────
+  const inNYClose = utcDecimal >= 20 && utcDecimal < 22;
+
+  // ── Asian Kill Zone ───────────────────────────────────────────────────────
   const inAsianKZ = utcDecimal >= 0 && utcDecimal < 4;
 
-  if (inLondonEntry) return { session: "LONDON_OPEN", killZone: true, strength: 1.0, name: "★ London Entry Model 02:00-04:00 NY", entryModel: true, sessQuality: 3 };
-  if (inNYEntry)     return { session: "NY_OPEN",     killZone: true, strength: 1.0, name: "★ NY Entry Model 08:30-10:00 NY",    entryModel: true, sessQuality: 3 };
-  if (inAsianKZ)     return { session: "ASIAN",       killZone: true, strength: 0.8, name: "Asian Kill Zone 20:00-00:00 NY",     entryModel: false, sessQuality: 2 };
+  // ── London Main (09-12 UTC) — GOLD/GER40 only ────────────────────────────
+  // Price action continues to respect London structure even after open window
+  // Allow GOLD and indices to trade here with slightly lower quality
+  const inLondonMain = utcDecimal >= 10 && utcDecimal < 12 && isGoldOrIndex;
 
-  if (utcDecimal >= 4 && utcDecimal < 6)   return { session: "ASIAN",       killZone: false, strength: 0.4, name: "Asian Session (late)",  entryModel: false, sessQuality: 1 };
-  if (utcDecimal >= 7 && utcDecimal < 9)   return { session: "LONDON_OPEN", killZone: true,  strength: 0.9, name: "London Kill Zone",       entryModel: false, sessQuality: 2 };
-  if (utcDecimal >= 9 && utcDecimal < 13)  return { session: "LONDON_MAIN", killZone: false, strength: 0.75, name: "London Session",         entryModel: false, sessQuality: 1 };
-  if (utcDecimal >= 13 && utcDecimal < 16) return { session: "NY_OPEN",     killZone: true,  strength: 0.9, name: "NY Kill Zone",           entryModel: false, sessQuality: 2 };
-  if (utcDecimal >= 16 && utcDecimal < 20) return { session: "NY_MAIN",     killZone: false, strength: 0.65, name: "New York Session",       entryModel: false, sessQuality: 1 };
-  if (utcDecimal >= 20 && utcDecimal < 22) return { session: "NY_CLOSE",    killZone: true,  strength: 0.75, name: "NY Close",               entryModel: false, sessQuality: 2 };
-  if (utcDecimal >= 22)                    return { session: "ASIAN",        killZone: false, strength: 0.3, name: "Pre-Asian (quiet)",       entryModel: false, sessQuality: 0 };
+  // Return sessions — priority order (most specific first)
+  if (inLondonEntry)  return { session: "LONDON_OPEN",  killZone: true, strength: 1.0,  name: "★ London Entry 06-08 UTC (09-11 EAT)",     entryModel: true,  sessQuality: 3 };
+  if (inNYEntry)      return { session: "NY_OPEN",       killZone: true, strength: 1.0,  name: "★ NY Entry 12:30-14 UTC (15:30-17 EAT)",   entryModel: true,  sessQuality: 3 };
+  if (inLondonKZ)     return { session: "LONDON_OPEN",  killZone: true, strength: 0.9,  name: "London Kill Zone 08-10 UTC (11-13 EAT)",   entryModel: false, sessQuality: 2 };
+  if (inAsianKZ && isAsianPair) return { session: "ASIAN", killZone: true, strength: 0.8, name: "Asian Kill Zone 00-04 UTC (03-07 EAT)",  entryModel: false, sessQuality: 2 };
+  if (inNYOpen)       return { session: "NY_OPEN",       killZone: true, strength: 0.85, name: "NY Open 12-15 UTC (15-18 EAT)",            entryModel: false, sessQuality: 2 };
+  if (inLondonMain)   return { session: "LONDON_MAIN",  killZone: true, strength: 0.75, name: "London Main 10-12 UTC — GOLD/Index only",  entryModel: false, sessQuality: 2 };
+  if (inLondonClose)  return { session: "LONDON_CLOSE", killZone: true, strength: 0.85, name: "★ London Close 15-17 UTC (18-20 EAT)",      entryModel: false, sessQuality: 2 };
+  if (inNYAfternoon)  return { session: "NY_PM",        killZone: true, strength: 0.80, name: "NY Afternoon 18:30-21 UTC (21:30-00 EAT)", entryModel: false, sessQuality: 2 };
+  if (inNYClose)      return { session: "NY_CLOSE",     killZone: true, strength: 0.75, name: "NY Close 20-22 UTC (23-01 EAT)",           entryModel: false, sessQuality: 2 };
+
+  // Dead zones — no trading
+  if (utcDecimal >= 4 && utcDecimal < 6)   return { session: "ASIAN",       killZone: false, strength: 0.3, name: "Pre-London (quiet)",   entryModel: false, sessQuality: 0 };
+  if (utcDecimal >= 17 && utcDecimal < 18.5) return { session: "NY_MAIN",   killZone: false, strength: 0.5, name: "NY Mid (transition)",  entryModel: false, sessQuality: 0 };
+  if (utcDecimal >= 21 && utcDecimal < 22)  return { session: "NY_CLOSE",   killZone: false, strength: 0.3, name: "NY Close wind-down",   entryModel: false, sessQuality: 0 };
+  if (utcDecimal >= 22)                     return { session: "ASIAN",       killZone: false, strength: 0.2, name: "Pre-Asian (quiet)",    entryModel: false, sessQuality: 0 };
   return { session: "DEAD_ZONE", killZone: false, strength: 0.1, name: "Dead Zone", entryModel: false, sessQuality: 0 };
 }
 
@@ -1482,7 +1535,7 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
 
 async function generateSignalFromOHLCV(symbol, ohlcvData) {
   try {
-    const session = getSessionInfo();
+    const session = getSessionInfo(symbol);
     if (session.session === "WEEKEND" || session.session === "DEAD_ZONE") return null;
 
     const news = isNewsBlackout();
@@ -1628,14 +1681,9 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     const isAsianPair = isJPYPair || symbol === "GOLD" || symbol === "BTCUSD";
 
     if (!session.killZone) {
-      // Asian session: allow only JPY/GOLD/BTC
-      if (session.session === "ASIAN" && isAsianPair) {
-        // Allow but require higher score (asian is lower quality)
-      } else {
-        await log("info", "signalEngine",
-          `${symbol}: Outside kill zone (${session.session}) — no entry`);
-        return null;
-      }
+      await log("info", "signalEngine",
+        `${symbol}: Outside kill zone (${session.session} — ${session.name}) — no entry`);
+      return null;
     }
 
     // Minimum score thresholds — RAISED globally after performance analysis
@@ -2126,7 +2174,7 @@ async function generateSignalForPair(symbol) {
 }
 
 async function generateSignalsForAllPairs() {
-  const session = getSessionInfo();
+  const session = getSessionInfo(symbol);
   await log("info", "signalEngine",
     `Signal cycle — ${session.name} | Entry Model: ${session.entryModel} | Quality: ${session.sessQuality}/3 | Pairs: ${PAIRS.length}`
   );
