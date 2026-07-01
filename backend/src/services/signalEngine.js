@@ -433,25 +433,41 @@ function detectLiquiditySweep(bars, lookback = 15) {
   const prev = bars[len-2]; // confirmed bar
   const curr = bars[len-1]; // current bar
 
+  const prevBody = Math.abs(prev.close - prev.open);
+  const minBodyForWickCheck = prevBody > 0 ? prevBody : 1e-10;
+
   // SSL Sweep: wick below recent low, close back above → bullish setup
-  if (prev.low < recentLow && prev.close > recentLow && prev.close > prev.open) {
+  // [Pine FIX-1] Wick beyond swept level must be ≥ 0.5× body (rejects shallow fakes)
+  // ATR-adaptive lookback: scale based on recent volatility
+  const sslWick = recentLow - prev.low; // wick that dipped below SSL
+  const sslWickRatioOk = sslWick >= minBodyForWickCheck * 0.5;
+
+  if (prev.low < recentLow && prev.close > recentLow && prev.close > prev.open && sslWickRatioOk) {
     return {
       type: "SSL_SWEEP",
       direction: "BUY",
       sweptLevel: recentLow,
       sweepBar: prev,
-      slAnchor: recentLow // SL placed below swept level
+      slAnchor: recentLow,
+      sweepWick: sslWick,
+      fresh: true  // used by hasStructuralAnchor check
     };
   }
 
   // BSL Sweep: wick above recent high, close back below → bearish setup
-  if (prev.high > recentHigh && prev.close < recentHigh && prev.close < prev.open) {
+  // [Pine FIX-1] Same wick/body ratio gate
+  const bslWick = prev.high - recentHigh;
+  const bslWickRatioOk = bslWick >= minBodyForWickCheck * 0.5;
+
+  if (prev.high > recentHigh && prev.close < recentHigh && prev.close < prev.open && bslWickRatioOk) {
     return {
       type: "BSL_SWEEP",
       direction: "SELL",
       sweptLevel: recentHigh,
       sweepBar: prev,
-      slAnchor: recentHigh // SL placed above swept level
+      slAnchor: recentHigh,
+      sweepWick: bslWick,
+      fresh: true
     };
   }
 
@@ -664,12 +680,20 @@ function checkRetest(bars, fvgs, obs, direction) {
   for (const fvg of fvgs) {
     if (direction === "BUY" && fvg.type === "BULLISH_FVG") {
       if (currentPrice >= fvg.low && currentPrice <= fvg.high) {
-        return { zone: "FVG", type: "BULLISH_FVG", high: fvg.high, low: fvg.low, size: fvg.size };
+        // [Pine FIX-3] CE gate: reject if zone is >50% filled (mitigated)
+        const zoneSize = fvg.high - fvg.low;
+        const fillPct = zoneSize > 0 ? (currentPrice - fvg.low) / zoneSize : 1;
+        if (fillPct > 0.5) continue; // >50% filled — zone no longer reliable
+        return { zone: "FVG", type: "BULLISH_FVG", high: fvg.high, low: fvg.low, size: fvg.size, fillPct };
       }
     }
     if (direction === "SELL" && fvg.type === "BEARISH_FVG") {
       if (currentPrice >= fvg.low && currentPrice <= fvg.high) {
-        return { zone: "FVG", type: "BEARISH_FVG", high: fvg.high, low: fvg.low, size: fvg.size };
+        // [Pine FIX-3] CE gate: reject if zone is >50% filled (mitigated)
+        const zoneSize = fvg.high - fvg.low;
+        const fillPct = zoneSize > 0 ? (fvg.high - currentPrice) / zoneSize : 1;
+        if (fillPct > 0.5) continue; // >50% filled — zone no longer reliable
+        return { zone: "FVG", type: "BEARISH_FVG", high: fvg.high, low: fvg.low, size: fvg.size, fillPct };
       }
     }
   }
@@ -732,16 +756,32 @@ function detectM5Entry(m5Bars, direction, h4Zone, m5Atr, symbol) {
     const insideZone = bar.close >= h4Zone.low && bar.close <= h4Zone.high;
     if (!insideZone) continue;
 
-    // BUY: need bullish M5 candle inside H4 bullish FVG/OB
+    // ── [Pine FIX-4] Confirmation candle gate ─────────────────────────────────
+    // This is the #1 filter that was missing and caused premature entries.
+    // A valid confirmation candle requires:
+    //   1. Closes in the correct direction
+    //   2. Has a rejection wick on the opposite side ≥ 0.3× body
+    //      (shows the zone rejected price — institutional response)
+    //   3. Closes in the upper/lower half of the zone
+    //      (shows conviction — not just touching the zone and reversing)
+    const lowerWick = Math.min(bar.open, bar.close) - bar.low;
+    const upperWick = bar.high - Math.max(bar.open, bar.close);
+    const zoneMid   = (h4Zone.high + h4Zone.low) / 2;
+
+    // BUY: need bullish M5 confirmation candle inside H4 bullish FVG/OB
     if (direction === "BUY" && isBullish && bodySize >= minBodySize) {
+      // [Pine FIX-4] Rejection wick at BOTTOM ≥ 0.3× body (showing zone held)
+      const hasRejectionWick = lowerWick >= bodySize * 0.3;
+      // [Pine FIX-4] Close in UPPER half of zone (conviction close)
+      const closesInUpperHalf = bar.close >= zoneMid;
+      if (!hasRejectionWick || !closesInUpperHalf) continue;
+
       const slBuffer = m5Atr * 0.5;
       const m5SL = parseFloat((bar.low - slBuffer).toFixed(5));
       const m5Entry = parseFloat(bar.close.toFixed(5));
 
-      // Sanity: SL must be below entry
       if (m5SL >= m5Entry) continue;
 
-      // Minimum SL distance check
       const slPips = (m5Entry - m5SL) / pip;
       const minPips = symbol === "GOLD" ? 80 :
                       symbol === "BTCUSD" ? 500 :
@@ -758,18 +798,25 @@ function detectM5Entry(m5Bars, direction, h4Zone, m5Atr, symbol) {
         slPips: parseFloat(slPips.toFixed(1)),
         entryCandle: { open: bar.open, high: bar.high, low: bar.low, close: bar.close },
         bodyRatio: parseFloat((bodySize / m5Atr).toFixed(2)),
+        lowerWickRatio: parseFloat((lowerWick / bodySize).toFixed(2)),
+        confirmCandle: true,
         timeframe: "M5",
         barsAgo: scanBars.length - 1 - i
       };
     }
 
-    // SELL: need bearish M5 candle inside H4 bearish FVG/OB
+    // SELL: need bearish M5 confirmation candle inside H4 bearish FVG/OB
     if (direction === "SELL" && isBearish && bodySize >= minBodySize) {
+      // [Pine FIX-4] Rejection wick at TOP ≥ 0.3× body (showing zone held)
+      const hasRejectionWick = upperWick >= bodySize * 0.3;
+      // [Pine FIX-4] Close in LOWER half of zone (conviction close)
+      const closesInLowerHalf = bar.close <= zoneMid;
+      if (!hasRejectionWick || !closesInLowerHalf) continue;
+
       const slBuffer = m5Atr * 0.5;
       const m5SL = parseFloat((bar.high + slBuffer).toFixed(5));
       const m5Entry = parseFloat(bar.close.toFixed(5));
 
-      // Sanity: SL must be above entry
       if (m5SL <= m5Entry) continue;
 
       const slPips = (m5SL - m5Entry) / pip;
