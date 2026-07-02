@@ -1416,13 +1416,13 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
   if (ictSequence.eqLiquidity) {
     const { eqh, eql } = ictSequence.eqLiquidity;
     if (direction === "BUY" && eqh.length > 0) {
-      // TP1 = nearest EQH above price
-      const nearestEQH = eqh.filter(h => h > price).sort((a,b)=>a-b)[0];
-      tp1 = nearestEQH || parseFloat((price + risk * rrRatio).toFixed(5));
+      // TP1 = nearest EQH strictly ABOVE price AND at least 1R away
+      const validEQH = eqh.filter(h => h > price + risk).sort((a,b)=>a-b)[0];
+      tp1 = validEQH || parseFloat((price + risk * rrRatio).toFixed(5));
     } else if (direction === "SELL" && eql.length > 0) {
-      // TP1 = nearest EQL below price
-      const nearestEQL = eql.filter(l => l < price).sort((a,b)=>b-a)[0];
-      tp1 = nearestEQL || parseFloat((price - risk * rrRatio).toFixed(5));
+      // TP1 = nearest EQL strictly BELOW price AND at least 1R away
+      const validEQL = eql.filter(l => l < price - risk).sort((a,b)=>b-a)[0];
+      tp1 = validEQL || parseFloat((price - risk * rrRatio).toFixed(5));
     }
   }
 
@@ -1511,6 +1511,22 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
     tp3 = direction === "BUY"
       ? parseFloat((price + risk * 2.5).toFixed(5))
       : parseFloat((price - risk * 2.5).toFixed(5));
+  }
+
+  // ── Hard TP direction validation — prevents TP below entry on BUY ──────────
+  const slDistance = Math.abs(price - stopLoss);
+  const minTPDist  = slDistance * 1.2; // minimum 1.2R reward
+  if (tp1) {
+    if (direction === "BUY"  && tp1 <= price + minTPDist) tp1 = parseFloat((price + minTPDist).toFixed(5));
+    if (direction === "SELL" && tp1 >= price - minTPDist) tp1 = parseFloat((price - minTPDist).toFixed(5));
+  }
+  if (tp2) {
+    if (direction === "BUY"  && tp2 <= price + minTPDist * 1.5) tp2 = parseFloat((price + minTPDist * 1.5).toFixed(5));
+    if (direction === "SELL" && tp2 >= price - minTPDist * 1.5) tp2 = parseFloat((price - minTPDist * 1.5).toFixed(5));
+  }
+  if (tp3) {
+    if (direction === "BUY"  && tp3 <= price + minTPDist * 2.0) tp3 = parseFloat((price + minTPDist * 2.0).toFixed(5));
+    if (direction === "SELL" && tp3 >= price - minTPDist * 2.0) tp3 = parseFloat((price - minTPDist * 2.0).toFixed(5));
   }
 
   // Use TP2 as primary take profit for the trade
@@ -1866,14 +1882,13 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     // If we've already taken 3 trades this kill zone, stop. No more entries.
     // This directly prevents the "13 trades in one minute" pattern.
     try {
-      const kzStart = new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString(); // 2.5hr window
+      const kzStart = new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString();
       const { data: kzTrades } = await supabaseAdmin
         .from("trades")
-        .select("id")
-        .gte("open_time", kzStart)
-        .in("status", ["open", "closed"]);
+        .select("id, open_time")
+        .gte("open_time", kzStart);  // all trades (any status) in last 2.5hrs
       const kzCount = kzTrades?.length || 0;
-      const maxPerKZ = 6; // max 6 trades across all pairs per kill zone window
+      const maxPerKZ = 3; // REDUCED to 3 — prevents mass simultaneous firing
       if (kzCount >= maxPerKZ) {
         await log("info", "signalEngine",
           `${symbol}: Kill zone cap reached (${kzCount}/${maxPerKZ} trades this session) — skip`);
