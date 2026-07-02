@@ -1569,7 +1569,11 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 
     const isPairActive = isPairActiveInSession(symbol, session.session);
     const sessionThreshold = (session.sessQuality >= 2) ? 0.2 : 0.4;
-    if (!isPairActive && session.strength < sessionThreshold) return null;
+    if (!isPairActive && session.strength < sessionThreshold) {
+      await log("info", "signalEngine", `${symbol}: Pair not active in ${session.session} — skip`);
+      return null;
+    }
+    await log("info", "signalEngine", `${symbol}: Session OK (${session.session} sz=${session.sessQuality} active=${isPairActive}) — proceeding`);
 
     // ── BTC Selective Mode — H4+H1 dual timeframe confirmation ───────────────
     // Backtest data shows BTC selective mode (H4+H1 alignment required) achieves
@@ -1601,7 +1605,11 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         }
       }
     }
-    if (!Object.keys(multiTFData).length) return null;
+    if (!Object.keys(multiTFData).length) {
+      await log("info", "signalEngine", `${symbol}: No multiTF data returned — skip`);
+      return null;
+    }
+    await log("info", "signalEngine", `${symbol}: multiTFData keys: ${Object.keys(multiTFData).join(',')}`);
 
     const htfBias = getHTFBias(h4Bars || h1Bars, d1Bars, w1Bars);
 
