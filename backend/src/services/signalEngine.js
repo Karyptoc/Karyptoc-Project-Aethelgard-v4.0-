@@ -988,6 +988,8 @@ async function isBlockedByRecentLoss(symbol, direction, blockMinutes = 30) {
  */
 async function isHTFInvalidated(symbol, direction, currentPrice) {
   try {
+    // Only look back 48 hours — older SL levels are no longer relevant structure
+    const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     const { data } = await supabaseAdmin
       .from("trades")
       .select("stop_loss, profit, close_time")
@@ -995,6 +997,7 @@ async function isHTFInvalidated(symbol, direction, currentPrice) {
       .eq("direction", direction)
       .eq("status", "closed")
       .lt("profit", 0)
+      .gte("close_time", cutoff)
       .order("close_time", { ascending: false })
       .limit(1);
 
@@ -2177,7 +2180,7 @@ async function generateSignalForPair(symbol) {
 }
 
 async function generateSignalsForAllPairs() {
-  const session = getSessionInfo(symbol);
+  const session = getSessionInfo(); // no symbol — general session context
   await log("info", "signalEngine",
     `Signal cycle — ${session.name} | Entry Model: ${session.entryModel} | Quality: ${session.sessQuality}/3 | Pairs: ${PAIRS.length}`
   );
