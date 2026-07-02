@@ -2199,7 +2199,27 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 }
 
 async function generateSignalForPair(symbol) {
-  return generateSignalFromOHLCV(symbol, {});
+  // Fetch cached OHLCV bars from Supabase (pushed by the bridge every 5 min)
+  // Previously this passed {} causing multiTFData to always be empty → all HOLD
+  const ohlcvData = {};
+  const timeframes = ["H4", "D1", "W1", "H1"];
+  for (const tf of timeframes) {
+    try {
+      const { data } = await supabaseAdmin
+        .from("ohlcv_cache")
+        .select("open, high, low, close, volume, time")
+        .eq("symbol", symbol)
+        .eq("timeframe", tf)
+        .order("time", { ascending: true })
+        .limit(250);
+      if (data && data.length >= 30) {
+        ohlcvData[tf] = data;
+      }
+    } catch (e) {
+      // Non-blocking — skip timeframe if unavailable
+    }
+  }
+  return generateSignalFromOHLCV(symbol, ohlcvData);
 }
 
 async function generateSignalsForAllPairs() {
