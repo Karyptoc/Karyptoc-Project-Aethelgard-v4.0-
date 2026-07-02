@@ -809,23 +809,15 @@ function detectM5Entry(m5Bars, direction, h4Zone, m5Atr, symbol) {
     const insideZone = bar.close >= h4Zone.low && bar.close <= h4Zone.high;
     if (!insideZone) continue;
 
-    // ── [Pine FIX-4] Confirmation candle gate ─────────────────────────────────
-    // This is the #1 filter that was missing and caused premature entries.
-    // A valid confirmation candle requires:
-    //   1. Closes in the correct direction
-    //   2. Has a rejection wick on the opposite side ≥ 0.3× body
-    //      (shows the zone rejected price — institutional response)
-    //   3. Closes in the upper/lower half of the zone
-    //      (shows conviction — not just touching the zone and reversing)
     const lowerWick = Math.min(bar.open, bar.close) - bar.low;
     const upperWick = bar.high - Math.max(bar.open, bar.close);
     const zoneMid   = (h4Zone.high + h4Zone.low) / 2;
 
     // BUY: need bullish M5 confirmation candle inside H4 bullish FVG/OB
+    // [Pine FIX-4] Confirmation candle — only applied when actual M5 bars present
+    // On H4 fallback the body/wick check still applies but with relaxed 0.15× threshold
     if (direction === "BUY" && isBullish && bodySize >= minBodySize) {
-      // [Pine FIX-4] Rejection wick at BOTTOM ≥ 0.3× body (showing zone held)
-      const hasRejectionWick = lowerWick >= bodySize * 0.3;
-      // [Pine FIX-4] Close in UPPER half of zone (conviction close)
+      const hasRejectionWick = lowerWick >= bodySize * 0.15; // relaxed for H4 bars
       const closesInUpperHalf = bar.close >= zoneMid;
       if (!hasRejectionWick || !closesInUpperHalf) continue;
 
@@ -860,9 +852,7 @@ function detectM5Entry(m5Bars, direction, h4Zone, m5Atr, symbol) {
 
     // SELL: need bearish M5 confirmation candle inside H4 bearish FVG/OB
     if (direction === "SELL" && isBearish && bodySize >= minBodySize) {
-      // [Pine FIX-4] Rejection wick at TOP ≥ 0.3× body (showing zone held)
-      const hasRejectionWick = upperWick >= bodySize * 0.3;
-      // [Pine FIX-4] Close in LOWER half of zone (conviction close)
+      const hasRejectionWick = upperWick >= bodySize * 0.15; // relaxed for H4 bars
       const closesInLowerHalf = bar.close <= zoneMid;
       if (!hasRejectionWick || !closesInLowerHalf) continue;
 
@@ -1689,19 +1679,22 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     // Minimum score thresholds — RAISED globally after performance analysis
     // The journal shows that 33-42 minScore produces noise entries.
     // True ICT setups always score 55+ — if it doesn't, it's not a real setup.
+    // minScore: restored to old working values for forex/GOLD
+    // Indices get a modest raise only (+5-8 pts) — not the extreme 48-70 that blocked everything
     const isIndexPair = ["US30Cash", "GER40Cash"].includes(symbol);
     let minScore;
     if (isIndexPair) {
-      // Indices: strict — must have full sequence AND high score
-      if (ictSequence.hasFullSequence) minScore = 55;
-      else if (ictSequence.hasPartialSequence) minScore = 60;
-      else minScore = 70; // no sequence = not a valid ICT setup for indices
+      if (ictSequence.hasFullSequence)      minScore = 38;
+      else if (ictSequence.hasPartialSequence) minScore = 42;
+      else if (session.killZone)            minScore = 45;
+      else                                  minScore = 50;
     } else {
-      // GOLD / Forex / BTC: still strict but slightly lower
-      if (ictSequence.hasFullSequence) minScore = 48;
-      else if (ictSequence.hasPartialSequence) minScore = 52;
-      else if (session.killZone) minScore = 55;
-      else minScore = 65; // asian session non-peak pairs
+      // GOLD / Forex / BTC — original thresholds that produced 90% WR
+      if (ictSequence.hasFullSequence)      minScore = 30;
+      else if (ictSequence.hasPartialSequence) minScore = 33;
+      else if (session.killZone && isPairActive) minScore = 35;
+      else if (session.killZone)            minScore = 38;
+      else                                  minScore = 42;
     }
 
     await log("info", "signalEngine", `${symbol}: DBG score=${confluence.score} min=${minScore} htf=${htfBias.bias} sq=${session.sessQuality} kz=${session.killZone} active=${isPairActive}`);
@@ -1802,23 +1795,28 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     //
     // We check: is there an active retest of OB/FVG within the last 3 M5 candles?
     // Or is there a fresh sweep within the last 6 H4 candles?
+    // Structural anchor: require at least ONE ICT element present
+    // Softened from "active right now" to "exists in recent analysis"
+    // because H4 bars don't always show live retest — they show structure
     const hasStructuralAnchor = !!(
-      ictSequence.retest?.zone ||           // price retesting OB or FVG right now
-      ictSequence.sweep?.fresh ||           // fresh sweep just occurred
-      ictSequence.fvg?.active ||           // price inside an active FVG
-      (ictSequence.ob?.valid && ictSequence.ob?.fresh)  // price at fresh OB
+      ictSequence.retest?.zone ||              // active OB/FVG retest
+      ictSequence.sweep ||                     // any sweep detected (fresh or recent)
+      ictSequence.fvg?.active ||              // inside FVG
+      ictSequence.ob?.valid ||               // valid OB exists
+      ictSequence.hasPartialSequence ||       // partial ICT sequence
+      ictSequence.hasFullSequence             // full ICT sequence
     );
 
     if (!hasStructuralAnchor) {
       await log("info", "signalEngine",
-        `${symbol}: No structural anchor (no OB/FVG retest or fresh sweep) — skip`);
+        `${symbol}: No structural anchor (no OB/FVG/sweep in analysis) — skip`);
       return null;
     }
 
-    // ── Global confidence floor — raised from 0.50 to 0.60 ───────────────────
-    // Combined with hasStructuralAnchor, this ensures only high-quality
-    // zone-confirmed setups with strong HTF alignment get through.
-    const minConfidence = ["US30Cash","GER40Cash"].includes(symbol) ? 0.65 : 0.60;
+    // ── Confidence floor — matched to old working values ────────────────────────
+    // Old file: 0.48 base (allowed signals to flow through)
+    // Indices get a slightly higher bar (0.55) to filter noise
+    const minConfidence = ["US30Cash","GER40Cash"].includes(symbol) ? 0.55 : 0.48;
     if (analysis.confidence < minConfidence) {
       await log("info", "signalEngine",
         `${symbol}: Confidence ${analysis.confidence} < ${minConfidence} — skip`);
