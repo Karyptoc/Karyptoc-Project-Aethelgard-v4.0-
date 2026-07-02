@@ -1643,11 +1643,16 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     // Step 7: Premium/Discount zone
     const pdZone = getPremiumDiscount(primaryBars);
 
-    // Bundle ICT sequence
+    // Bundle ICT sequence — include obs/fvgs so hasICTBasis gate can see them
+    const activeOB  = obs.length  > 0 ? obs[obs.length - 1]   : null;
+    const activeFVG = fvgs.length > 0 ? fvgs[fvgs.length - 1] : null;
+
     const ictSequence = {
       sweep,
       displacement,
       retest,
+      ob:  activeOB  ? { valid: true, ...activeOB }  : null,
+      fvg: activeFVG ? { active: true, ...activeFVG } : null,
       eqLiquidity: (eqLiquidity?.eqh?.length > 0 || eqLiquidity?.eql?.length > 0) ? eqLiquidity : null,
       strength,
       pdZone,
