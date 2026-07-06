@@ -17,7 +17,13 @@ export default function Login() {
       await login(email, password);
       navigate("/");
     } catch (err) {
-      setError(err.response?.data?.error || "Authentication failed");
+      // FIX: this used to show err.response?.data?.error directly — whatever
+      // raw message the backend/Supabase happened to return. Two problems:
+      // 1) could leak internal details (db error text, etc) to the login form
+      // 2) different messages for "no such user" vs "wrong password" let
+      //    someone enumerate valid emails by trying logins and watching
+      //    which error comes back. One generic message avoids both.
+      setError("Invalid email or password.");
     } finally {
       setLoading(false);
     }

@@ -12,6 +12,7 @@ const router = express.Router();
 const crypto = require("crypto");
 const { supabaseAdmin, log } = require("../services/supabase");
 const { verifyToken } = require("../middleware/auth");
+const { encryptSecret, decryptSecret } = require("../services/crypto");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -103,11 +104,14 @@ router.post("/clients", verifyToken, async (req, res) => {
     const portalToken = generatePortalToken();
     const portalUrl = `${process.env.FRONTEND_URL}/client-portal?token=${portalToken}`;
 
+    // FIX: mt5_password was stored in plaintext. Encrypted at rest now —
+    // see services/crypto.js. Decrypted only where the bridge needs the
+    // actual password to log into MT5 (bridge/accounts, bridge/lot-sizes).
     const { data, error } = await supabaseAdmin
       .from("client_accounts")
       .insert({
         name, email, phone,
-        mt5_login, mt5_password, mt5_server,
+        mt5_login, mt5_password: encryptSecret(mt5_password), mt5_server,
         starting_balance: starting_balance || 0,
         balance: starting_balance || 0,
         equity: starting_balance || 0,
@@ -121,6 +125,7 @@ router.post("/clients", verifyToken, async (req, res) => {
       .single();
 
     if (error) throw error;
+    if (data) delete data.mt5_password; // never echo even the encrypted form back to the admin UI
 
     await log("info", "copyTrading", `New client added: ${name} (${email})`);
     res.json({ ok: true, client: data, portal_url: portalUrl });
@@ -134,6 +139,10 @@ router.put("/clients/:id", verifyToken, async (req, res) => {
     const updates = { ...req.body, updated_at: new Date().toISOString() };
     // Don't allow updating portal_token via this endpoint
     delete updates.portal_token;
+    // FIX: encrypt mt5_password if this update is changing it
+    if (updates.mt5_password) {
+      updates.mt5_password = encryptSecret(updates.mt5_password);
+    }
 
     const { data, error } = await supabaseAdmin
       .from("client_accounts")
@@ -143,6 +152,7 @@ router.put("/clients/:id", verifyToken, async (req, res) => {
       .single();
 
     if (error) throw error;
+    if (data) delete data.mt5_password;
     res.json({ ok: true, client: data });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -262,7 +272,15 @@ router.get("/bridge/accounts", verifyBridgeSecret, async (req, res) => {
       .eq("copy_enabled", true)
       .eq("connection_type", "credentials");
     if (error) throw error;
-    res.json({ accounts: data || [] });
+    // FIX: mt5_password is now encrypted at rest — decrypt here, since
+    // this endpoint is bridge-secret-protected and the bridge genuinely
+    // needs the plaintext password to call mt5.login(). This is the ONLY
+    // place besides bridge/lot-sizes that should ever see plaintext.
+    const accounts = (data || []).map(acc => ({
+      ...acc,
+      mt5_password: decryptSecret(acc.mt5_password),
+    }));
+    res.json({ accounts });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -409,7 +427,9 @@ router.post("/bridge/lot-sizes", verifyBridgeSecret, async (req, res) => {
       client_id: client.id,
       client_name: client.name,
       mt5_login: client.mt5_login,
-      mt5_password: client.mt5_password,
+      // FIX: decrypt here — this is bridge-secret-protected and the
+      // bridge needs the real password to place the copy trade.
+      mt5_password: decryptSecret(client.mt5_password),
       mt5_server: client.mt5_server,
       lot_size: calculateClientLot(master_lot, client.balance, master_balance, client.risk_percent, 1.0),
     }));
@@ -509,7 +529,7 @@ router.post("/portal/connect-mt5", verifyPortalToken, async (req, res) => {
     }
 
     await supabaseAdmin.from("client_accounts").update({
-      mt5_login, mt5_password, mt5_server,
+      mt5_login, mt5_password: encryptSecret(mt5_password), mt5_server,
       connection_type: "credentials",
       updated_at: new Date().toISOString()
     }).eq("id", client.id);

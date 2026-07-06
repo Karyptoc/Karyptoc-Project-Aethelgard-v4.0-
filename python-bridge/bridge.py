@@ -69,6 +69,8 @@ TIMEFRAMES = {}
 # ── Fix 1: Signal retry tracking ─────────────────────────────────────────────
 # Prevents infinite retry loops on failed signals (was causing 100+ retries)
 _signal_attempts = {}   # signal_id -> attempt count
+_signal_blacklist = set()  # signal_ids permanently blocked after max attempts
+_original_sl_cache = {}  # ticket -> original SL at open (for accurate R calculation)
 MAX_SIGNAL_ATTEMPTS = 3
 
 # ── Fix 2: Minimum SL distance per instrument ─────────────────────────────────
@@ -103,11 +105,16 @@ def api_headers():
 def init_timeframes():
     global TIMEFRAMES
     # M5 added for precision kill zone entry (H4 analysis + M5 execution)
+    # FIX: D1 and W1 added — signalEngine.js's getHTFBias() and getADRStatus()
+    # expect these and silently degrade to H4-only bias / permanently-open
+    # ADR exhaustion checks without them. This was never wired up before.
     TIMEFRAMES = {
         "M5":  mt5.TIMEFRAME_M5,   # Entry timing (kill zones only)
         "M15": mt5.TIMEFRAME_M15,  # Confirmation
         "H1":  mt5.TIMEFRAME_H1,   # Structure
         "H4":  mt5.TIMEFRAME_H4,   # Primary analysis
+        "D1":  mt5.TIMEFRAME_D1,   # HTF bias + ADR calculation
+        "W1":  mt5.TIMEFRAME_W1,   # HTF bias (weekly alignment)
     }
 
 def fetch_pair_controls():
@@ -452,10 +459,17 @@ def execute_trade(account_id, order):
     symbol = order["symbol"]
     signal_id = order.get("signal_id", "unknown")
 
-    # ── Fix 1: Retry limit check ──────────────────────────────────────────────
+    # ── Retry limit + permanent blacklist ────────────────────────────────────
+    # Once a signal hits max attempts it goes into _signal_blacklist so it
+    # can never re-queue even if _signal_attempts is reset or the bridge restarts.
+    # Without this, clearing _signal_attempts on expiry allowed infinite loops.
+    if signal_id in _signal_blacklist:
+        return {"success": False, "error": f"Signal {signal_id[:8]} is blacklisted — already expired"}
+
     attempts = _signal_attempts.get(signal_id, 0)
     if attempts >= MAX_SIGNAL_ATTEMPTS:
         log.warning(f"{symbol}: Signal {signal_id} hit max {MAX_SIGNAL_ATTEMPTS} attempts — expiring")
+        _signal_blacklist.add(signal_id)   # permanent block — survives attempt counter reset
         _signal_attempts.pop(signal_id, None)
         # Expire the signal in the database
         try:
@@ -501,17 +515,40 @@ def execute_trade(account_id, order):
     pending_price     = order.get("pending_price")
     market_price      = tick.ask if direction == "BUY" else tick.bid
 
+    # ── Stale pending order guard ─────────────────────────────────────────────
+    # Thresholds per instrument type — tighter for forex, wider for crypto/indices
+    STALE_PCT = {
+        "BTCUSD": 1.0,     # BTC: 1% = ~$627 at current levels — still a valid zone
+        "US30Cash": 0.5,   # US30: 0.5% = ~$258
+        "GER40Cash": 0.5,
+        "GOLD": 0.8,       # Gold: 0.8% = ~$33
+    }
+    max_pct = STALE_PCT.get(symbol, 0.5)  # forex: 0.5% default
+
+    if pending_price and signal_order_type != "MARKET":
+        pct_away = abs(float(pending_price) - market_price) / market_price * 100
+        if pct_away > max_pct:
+            log.warning(f"{symbol}: Pending {pending_price:.5f} is {pct_away:.1f}% from market {market_price:.5f} (max {max_pct}%) — stale, skipping")
+            _signal_blacklist.add(signal_id)  # blacklist stale pending so it never re-queues
+            return {"success": False, "error": f"Pending price {pct_away:.1f}% from market — stale signal"}
+
     mt5_action     = mt5.TRADE_ACTION_DEAL
     mt5_order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
     exec_price     = market_price
     expiry         = None
+
+    # ── Pending order time mode ───────────────────────────────────────────────
+    # Using ORDER_TIME_DAY: order stays active until end of current trading day.
+    # This avoids all datetime timezone issues (naive vs aware) on Windows MT5.
+    # No expiry datetime field needed — MT5 handles end-of-day cancellation.
+    expiry_dt = None  # not used with ORDER_TIME_DAY
 
     if signal_order_type == "BUY_LIMIT" and pending_price:
         if float(pending_price) < market_price:
             mt5_action     = mt5.TRADE_ACTION_PENDING
             mt5_order_type = mt5.ORDER_TYPE_BUY_LIMIT
             exec_price     = float(pending_price)
-            expiry         = int((datetime.utcnow() + timedelta(hours=4)).timestamp())
+            expiry         = expiry_dt
             log.info(f"{symbol}: BUY LIMIT @ {exec_price:.5f} (market={market_price:.5f}, expires 4h)")
         else:
             log.info(f"{symbol}: BUY_LIMIT {pending_price} >= market — falling back to MARKET")
@@ -521,7 +558,7 @@ def execute_trade(account_id, order):
             mt5_action     = mt5.TRADE_ACTION_PENDING
             mt5_order_type = mt5.ORDER_TYPE_SELL_LIMIT
             exec_price     = float(pending_price)
-            expiry         = int((datetime.utcnow() + timedelta(hours=4)).timestamp())
+            expiry         = expiry_dt
             log.info(f"{symbol}: SELL LIMIT @ {exec_price:.5f} (market={market_price:.5f}, expires 4h)")
         else:
             log.info(f"{symbol}: SELL_LIMIT {pending_price} <= market — falling back to MARKET")
@@ -531,7 +568,7 @@ def execute_trade(account_id, order):
             mt5_action     = mt5.TRADE_ACTION_PENDING
             mt5_order_type = mt5.ORDER_TYPE_BUY_STOP
             exec_price     = float(pending_price)
-            expiry         = int((datetime.utcnow() + timedelta(hours=4)).timestamp())
+            expiry         = expiry_dt
             log.info(f"{symbol}: BUY STOP @ {exec_price:.5f} (market={market_price:.5f}, expires 4h)")
         else:
             log.info(f"{symbol}: BUY_STOP {pending_price} <= market — falling back to MARKET")
@@ -541,7 +578,7 @@ def execute_trade(account_id, order):
             mt5_action     = mt5.TRADE_ACTION_PENDING
             mt5_order_type = mt5.ORDER_TYPE_SELL_STOP
             exec_price     = float(pending_price)
-            expiry         = int((datetime.utcnow() + timedelta(hours=4)).timestamp())
+            expiry         = expiry_dt
             log.info(f"{symbol}: SELL STOP @ {exec_price:.5f} (market={market_price:.5f}, expires 4h)")
         else:
             log.info(f"{symbol}: SELL_STOP {pending_price} >= market — falling back to MARKET")
@@ -564,6 +601,24 @@ def execute_trade(account_id, order):
             tp = price - abs(price - sl) * 2.0
             log.warning(f"{symbol}: TP above entry for SELL — corrected to {tp:.5f}")
 
+    # ── Select correct filling mode ───────────────────────────────────────────
+    # ORDER_FILLING_IOC is only valid for MARKET orders.
+    # Pending orders (LIMIT/STOP) require ORDER_FILLING_RETURN on most brokers.
+    # This was causing mt5.order_send() to return None entirely (silent rejection).
+    if mt5_action == mt5.TRADE_ACTION_PENDING:
+        filling_mode = mt5.ORDER_FILLING_RETURN
+    else:
+        # For market orders, use the broker's supported filling mode
+        filling_mode = mt5.ORDER_FILLING_IOC
+        if sym_info:
+            filling_flags = sym_info.filling_mode
+            if filling_flags & 1:    # FOK supported
+                filling_mode = mt5.ORDER_FILLING_FOK
+            elif filling_flags & 2:  # IOC supported
+                filling_mode = mt5.ORDER_FILLING_IOC
+            else:
+                filling_mode = mt5.ORDER_FILLING_RETURN
+
     req = {
         "action":       mt5_action,
         "symbol":       broker_symbol,
@@ -575,13 +630,18 @@ def execute_trade(account_id, order):
         "deviation":    30,
         "magic":        20260101,
         "comment":      order.get("comment", "Aethelgard"),
-        "type_time":    mt5.ORDER_TIME_SPECIFIED if expiry else mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
+        # ORDER_TIME_DAY: pending orders cancel at end of trading day automatically.
+        # ORDER_TIME_GTC: market orders stay until manually cancelled.
+        "type_time":    mt5.ORDER_TIME_DAY if mt5_action == mt5.TRADE_ACTION_PENDING else mt5.ORDER_TIME_GTC,
+        "type_filling": filling_mode,
     }
-    if expiry:
-        req["expiration"] = expiry
+    # No expiration field needed when using ORDER_TIME_DAY
 
     result = mt5.order_send(req)
+    if result is None:
+        err = mt5.last_error()
+        log.error(f"Trade failed [{broker_symbol} {direction} {signal_order_type}]: mt5.order_send returned None — MT5 error: {err}")
+        return {"success": False, "error": f"order_send returned None: {err}", "retcode": -1}
     if result.retcode != mt5.TRADE_RETCODE_DONE:
         log.error(f"Trade failed [{broker_symbol} {direction} {signal_order_type}]: {result.comment} (retcode:{result.retcode})")
         return {"success": False, "error": result.comment, "retcode": result.retcode}
@@ -642,6 +702,12 @@ def manage_open_trades():
     positions = mt5.positions_get()
     if not positions:
         return
+    # Clean up cache for any tickets no longer open
+    active_tickets = {pos.ticket for pos in positions}
+    stale_keys = [t for t in _original_sl_cache if t not in active_tickets]
+    for t in stale_keys:
+        del _original_sl_cache[t]
+
     for pos in positions:
         try:
             symbol = pos.symbol
@@ -656,36 +722,87 @@ def manage_open_trades():
             if not atr_val:
                 continue
 
-            # ── Break-even: trigger at 20 pips (was 10) ──────────────────────
-            # Previous 10-pip trigger was closing winners too early before
-            # they reached their TP. 20 pips gives trades room to develop.
-            if profit_pips >= 20:
-                be = open_price + pip * 5 if direction == "BUY" else open_price - pip * 5
-                needs_update = (direction == "BUY" and be > (current_sl or 0)) or \
-                               (direction == "SELL" and (current_sl == 0 or be < current_sl))
-                if needs_update:
-                    res = modify_sl(pos.ticket, orig, be)
-                    if res["success"]:
-                        log.info(f"Break-even: #{pos.ticket} {orig} SL->{be:.5f} (profit: {profit_pips:.1f}pips)")
+            # ── Kill Zone RR-Based SL Management ──────────────────────────────
+            # Uses R multiples (risk units) rather than fixed pip counts so
+            # the system scales correctly across all instruments and lot sizes.
+            #
+            # Ladder:
+            #   @ 0.5R → move SL to breakeven (free trade, protect capital)
+            #   @ 1.1R → start trailing at 0.5x ATR (lock in early profit)
+            #   @ 2.0R → tighten trail to 0.3x ATR (squeeze toward 2-3R TP)
+            #
+            # Falls back to pip-based system if no original SL is recorded.
 
-            # ── Trailing stop: trigger at 30 pips (was 15), trail at 2.0x ATR ─
-            # Previous 15-pip trigger with 1.5x ATR trail was pulling SL too
-            # close too soon, getting stopped out before TP was reached.
-            # 30 pips + 2.0x ATR gives the trade more room to run.
-            if profit_pips >= 30:
-                trail = atr_val * 2.0
-                if direction == "BUY":
-                    new_sl = price - trail
-                    if new_sl > (current_sl or 0):
-                        res = modify_sl(pos.ticket, orig, new_sl)
+            # Use cached original SL for accurate R calculation.
+            # pos.sl changes as BE/trail moves it — we need the SL at trade open.
+            ticket = pos.ticket
+            if ticket not in _original_sl_cache and pos.sl and pos.sl > 0:
+                _original_sl_cache[ticket] = float(pos.sl)  # first time we see it
+
+            original_sl = _original_sl_cache.get(ticket, float(pos.sl) if pos.sl else 0)
+
+            if original_sl > 0:
+                r_distance = abs(open_price - original_sl)  # 1R in price units
+
+                if r_distance > 0:
+                    current_r = abs(price - open_price) / r_distance
+
+                    # Stage 1: Breakeven at 0.5R — free trade
+                    if current_r >= 0.5:
+                        if direction == "BUY":
+                            be = open_price + pip * 2  # 2 pips above entry
+                            if be > (current_sl or 0):
+                                res = modify_sl(pos.ticket, orig, be)
+                                if res["success"]:
+                                    log.info(f"BE@0.5R: #{pos.ticket} {orig} SL->{be:.5f} ({profit_pips:.0f}p / {current_r:.2f}R)")
+                        else:
+                            be = open_price - pip * 2
+                            if current_sl == 0 or be < current_sl:
+                                res = modify_sl(pos.ticket, orig, be)
+                                if res["success"]:
+                                    log.info(f"BE@0.5R: #{pos.ticket} {orig} SL->{be:.5f} ({profit_pips:.0f}p / {current_r:.2f}R)")
+
+                    # Stage 2: Trail at 1.1R — 0.5x ATR
+                    if current_r >= 1.1 and atr_val > 0:
+                        trail = atr_val * 0.5
+                        if direction == "BUY":
+                            new_sl = price - trail
+                            if new_sl > (current_sl or 0):
+                                res = modify_sl(pos.ticket, orig, new_sl)
+                                if res["success"]:
+                                    log.info(f"Trail@1.1R: #{pos.ticket} ->{new_sl:.5f} ({current_r:.2f}R)")
+                        else:
+                            new_sl = price + trail
+                            if current_sl == 0 or new_sl < current_sl:
+                                res = modify_sl(pos.ticket, orig, new_sl)
+                                if res["success"]:
+                                    log.info(f"Trail@1.1R: #{pos.ticket} ->{new_sl:.5f} ({current_r:.2f}R)")
+
+                    # Stage 3: Tighter trail at 2.0R — 0.3x ATR
+                    if current_r >= 2.0 and atr_val > 0:
+                        trail = atr_val * 0.3
+                        if direction == "BUY":
+                            new_sl = price - trail
+                            if new_sl > (current_sl or 0):
+                                res = modify_sl(pos.ticket, orig, new_sl)
+                                if res["success"]:
+                                    log.info(f"Trail@2.0R: #{pos.ticket} ->{new_sl:.5f} ({current_r:.2f}R) — approaching TP")
+                        else:
+                            new_sl = price + trail
+                            if current_sl == 0 or new_sl < current_sl:
+                                res = modify_sl(pos.ticket, orig, new_sl)
+                                if res["success"]:
+                                    log.info(f"Trail@2.0R: #{pos.ticket} ->{new_sl:.5f} ({current_r:.2f}R) — approaching TP")
+
+            else:
+                # Fallback: no SL recorded — pip-based
+                if profit_pips >= 20:
+                    be = open_price + pip * 5 if direction == "BUY" else open_price - pip * 5
+                    needs_update = (direction == "BUY" and be > (current_sl or 0)) or                                    (direction == "SELL" and (current_sl == 0 or be < current_sl))
+                    if needs_update:
+                        res = modify_sl(pos.ticket, orig, be)
                         if res["success"]:
-                            log.info(f"Trail SL: #{pos.ticket} ->{new_sl:.5f}")
-                else:
-                    new_sl = price + trail
-                    if current_sl == 0 or new_sl < current_sl:
-                        res = modify_sl(pos.ticket, orig, new_sl)
-                        if res["success"]:
-                            log.info(f"Trail SL: #{pos.ticket} ->{new_sl:.5f}")
+                            log.info(f"BE(pip): #{pos.ticket} {orig} SL->{be:.5f} ({profit_pips:.1f}pips)")
         except Exception as e:
             log.error(f"Trade management #{pos.ticket}: {e}")
 
@@ -743,18 +860,26 @@ def push_ohlcv():
 
             ohlcv_data = {}
             # Bar counts per timeframe:
-            # M5:  60 bars = 5 hours  (kill zone entry precision)
+            # M5:  60 bars = 5 hours   (kill zone entry precision)
             # M15: 100 bars = 25 hours (confirmation)
-            # H1:  150 bars = 6 days  (structure)
-            # H4:  200 bars = 33 days (primary analysis + ICT sequence)
-            bar_counts = {"M5": 60, "M15": 100, "H1": 150, "H4": 200}
+            # H1:  150 bars = 6 days   (structure)
+            # H4:  200 bars = 33 days  (primary analysis + ICT sequence)
+            # D1:  100 bars = 100 days (HTF bias + ADR — needs ~50+ for EMA50)
+            # W1:  60 bars  = ~14 months (HTF bias — needs ~50+ for EMA50)
+            bar_counts = {"M5": 60, "M15": 100, "H1": 150, "H4": 200, "D1": 100, "W1": 60}
+            # D1/W1 need fewer confirming bars than intraday TFs since each
+            # bar covers far more time — 30 bars is already a month+ of daily data.
+            min_bars_by_tf = {"M5": 10, "D1": 30, "W1": 20}
             for tf in TIMEFRAMES:
                 bars = get_ohlcv(symbol, tf, bar_counts.get(tf, 150))
-                min_bars = 10 if tf == "M5" else 50
+                min_bars = min_bars_by_tf.get(tf, 50)
                 if bars and len(bars) > min_bars:
                     ohlcv_data[tf] = bars
-                    # Cache H4 for backtesting only
-                    if tf == "H4":
+                    # Cache H4/D1/W1 for backtesting — these are the timeframes
+                    # the rebuilt backtest engine needs to replicate live HTF logic.
+                    # M5/M15 excluded to keep cache volume reasonable (entry-timing
+                    # only, not used for the backtest's structural analysis).
+                    if tf in ("H4", "D1", "W1"):
                         cache_ohlcv_for_backtest(symbol, tf, bars)
 
             if not ohlcv_data:
@@ -866,7 +991,7 @@ def poll_commands():
 def main():
     log.info("Aethelgard MT5 Bridge v12 starting...")
     log.info(f"Pairs: {', '.join(PAIRS)}")
-    log.info("Features: M5 entry | H4/D1/W1 analysis | Retry limit | SL validation | Copy trading | BE@20pips | Trail@30pips | Pending orders")
+    log.info("Features: M5 entry | H4/D1/W1 analysis | Retry limit | SL validation | Copy trading | BE@0.5R | Trail@1.1R/2.0R | Pending orders")
 
     if not mt5.initialize():
         log.error(f"MT5 init failed: {mt5.last_error()}")

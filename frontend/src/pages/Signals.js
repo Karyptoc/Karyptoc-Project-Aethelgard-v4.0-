@@ -139,37 +139,41 @@ export default function Signals() {
   const [filter, setFilter] = useState("all");
   const [view, setView] = useState("cards");
   const [toast, setToast] = useState("");
-  const [tgConfig, setTgConfig] = useState(() => JSON.parse(localStorage.getItem("tg_config") || "{}"));
+  // FIX: Telegram config now lives server-side (see Settings.js + backend
+  // services/telegram.js) instead of localStorage, and sending goes through
+  // the backend proxy so the bot token never reaches the browser. This page
+  // only needs to know WHETHER Telegram is configured, not the credentials.
+  const [tgConfigured, setTgConfigured] = useState(false);
   const [autoSend, setAutoSend] = useState(() => localStorage.getItem("tg_auto_send") === "true");
-  const [showTgModal, setShowTgModal] = useState(false);
-  const [tgForm, setTgForm] = useState({ bot_token: "", chat_id: "" });
   const sentRef = React.useRef(new Set());
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3500); };
 
+  useEffect(() => {
+    api.get("/api/system/telegram/config")
+      .then(r => setTgConfigured(!!r.data.configured))
+      .catch(() => setTgConfigured(false));
+  }, []);
+
   const sendToTelegram = useCallback(async (text) => {
-    if (!tgConfig.bot_token || !tgConfig.chat_id) return false;
     try {
-      const r = await fetch(`https://api.telegram.org/bot${tgConfig.bot_token}/sendMessage`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: tgConfig.chat_id, text, parse_mode: "Markdown" })
-      });
-      return (await r.json()).ok;
+      const r = await api.post("/api/system/telegram/send", { text });
+      return !!r.data.ok;
     } catch { return false; }
-  }, [tgConfig]);
+  }, []);
 
   const load = useCallback(async () => {
     const r = await api.get("/api/signals");
     const newSigs = r.data.signals || [];
     setSignals(newSigs);
-    if (autoSend && tgConfig.bot_token) {
+    if (autoSend && tgConfigured) {
       const newExec = newSigs.filter(s => s.status === "executed" && !sentRef.current.has(s.id));
       for (const sig of newExec.slice(0, 3)) {
         sentRef.current.add(sig.id);
         await sendToTelegram(formatMsg(sig));
       }
     }
-  }, [autoSend, tgConfig, sendToTelegram]);
+  }, [autoSend, tgConfigured, sendToTelegram]);
 
   useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv); }, [load]);
 
@@ -186,20 +190,13 @@ export default function Signals() {
   const handleShare = async (sig, type) => {
     const msg = formatMsg(sig);
     if (type === "telegram") {
-      if (!tgConfig.bot_token) { setShowTgModal(true); return; }
+      if (!tgConfigured) { showToast("⚠️ Configure Telegram in Settings first"); return; }
       const ok = await sendToTelegram(msg);
       showToast(ok ? "✅ Sent to Telegram!" : "❌ Telegram failed");
     } else {
       navigator.clipboard.writeText(msg);
       showToast("✅ Copied!");
     }
-  };
-
-  const saveTg = () => {
-    localStorage.setItem("tg_config", JSON.stringify(tgForm));
-    setTgConfig(tgForm);
-    setShowTgModal(false);
-    showToast("✅ Telegram saved!");
   };
 
   const filtered = signals.filter(s => {
@@ -219,15 +216,15 @@ export default function Signals() {
           <div className="page-subtitle">ICT/SMC AI SIGNALS · {signals.length} TOTAL · {PAIRS.length} PAIRS</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {tgConfig.bot_token ? (
+          {tgConfigured ? (
             <button className={`btn btn-sm ${autoSend ? "btn-success" : "btn-ghost"}`}
               onClick={() => { const v = !autoSend; setAutoSend(v); localStorage.setItem("tg_auto_send", v.toString()); showToast(v ? "✅ Auto-send ON" : "⏸ Auto-send OFF"); }}>
               {autoSend ? "📱 Auto ON" : "📱 Auto OFF"}
             </button>
           ) : (
-            <button className="btn btn-ghost btn-sm" onClick={() => { setTgForm({ bot_token: tgConfig.bot_token||"", chat_id: tgConfig.chat_id||"" }); setShowTgModal(true); }}>
-              📱 Telegram
-            </button>
+            <a href="/settings" className="btn btn-ghost btn-sm" title="Configure Telegram in Settings">
+              📱 Set up Telegram
+            </a>
           )}
           <button className={`btn btn-sm ${view === "compact" ? "btn-primary" : "btn-ghost"}`}
             onClick={() => setView(v => v === "cards" ? "compact" : "cards")}>
@@ -272,33 +269,6 @@ export default function Signals() {
           </div>
         )}
       </div>
-
-      {showTgModal && (
-        <div className="modal-overlay" onClick={() => setShowTgModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">📱 Telegram Setup</div>
-            <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 16 }}>
-              1. Message @BotFather → /newbot → copy token<br/>
-              2. Add bot to your channel as admin<br/>
-              3. Get chat ID from @userinfobot
-            </div>
-            <div className="form-group">
-              <label className="form-label">Bot Token</label>
-              <input className="form-input" placeholder="1234567890:AAF..." value={tgForm.bot_token}
-                onChange={e => setTgForm({ ...tgForm, bot_token: e.target.value })} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Chat ID</label>
-              <input className="form-input" placeholder="-1001234567890" value={tgForm.chat_id}
-                onChange={e => setTgForm({ ...tgForm, chat_id: e.target.value })} />
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => setShowTgModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={saveTg}>Save</button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

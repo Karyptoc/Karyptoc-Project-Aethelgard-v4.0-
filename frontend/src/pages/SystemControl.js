@@ -1,11 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { createClient } from "@supabase/supabase-js";
 import api from "../lib/api";
-
-const supabase = createClient(
-  process.env.REACT_APP_SUPABASE_URL,
-  process.env.REACT_APP_SUPABASE_ANON_KEY
-);
 
 function StatusDot({ online }) {
   return (
@@ -42,23 +36,26 @@ export default function SystemControl() {
 
   const loadSettings = useCallback(async () => {
     if (pendingChange.current) return; // block re-fetch during toggle
-    const { data } = await supabase
-      .from("platform_settings")
-      .select("key, value");
-    if (data) {
-      const s = {};
-      data.forEach(row => { s[row.key] = row.value; });
+    try {
+      const r = await api.get("/api/system/settings");
+      const s = r.data.settings || {};
       setSettings({
         trading_enabled: s["trading_enabled"] === true || s["trading_enabled"] === "true",
         signal_interval_minutes: parseInt(s["signal_interval_minutes"]) || 15,
         ...s
       });
+    } catch (e) {
+      console.error("Failed to load settings:", e.response?.data?.error || e.message);
     }
   }, []);
 
   const loadClients = useCallback(async () => {
-    const { data } = await supabase.from("clients").select("*").eq("status", "active");
-    if (data) setClients(data);
+    try {
+      const r = await api.get("/api/clients");
+      setClients((r.data.clients || []).filter(c => c.status === "active"));
+    } catch (e) {
+      console.error("Failed to load clients:", e.response?.data?.error || e.message);
+    }
   }, []);
 
   const loadStatus = useCallback(async () => {
@@ -94,9 +91,20 @@ export default function SystemControl() {
     pendingChange.current = true;
     // Optimistic update immediately
     setSettings(s => ({ ...s, [key]: value }));
-    await supabase
-      .from("platform_settings")
-      .upsert({ key, value }, { onConflict: "key" });
+    try {
+      // FIX: this used to write directly to platform_settings via the
+      // Supabase anon key from the browser — including this exact path
+      // for the emergency-stop toggle. Anon-key writes depend entirely on
+      // RLS being correctly locked down; routing through the backend's
+      // verifyToken-protected endpoint means this now requires a real
+      // authenticated admin session and gets logged like every other
+      // admin action, regardless of what RLS policy is (or isn't) set.
+      await api.put("/api/system/settings", { key, value });
+    } catch (e) {
+      console.error("Failed to save setting:", e.response?.data?.error || e.message);
+      showToast("❌ Failed to save — reverting");
+      await loadSettings();
+    }
     // Keep blocked for 3s to survive any in-flight interval poll
     setTimeout(() => { pendingChange.current = false; }, 3000);
   };
@@ -263,7 +271,7 @@ export default function SystemControl() {
             </div>
           </div>
           <div style={{ marginTop: 12, padding: "10px 14px", background: "var(--warn-dim)", borderRadius: "var(--radius)", fontSize: 12, color: "var(--warn)" }}>
-            💡 <strong>UptimeRobot:</strong> uptimerobot.com → Add Monitor → HTTP(s) → <code>https://aethelgard-backend-uff7.onrender.com/ping</code> → 5 min interval
+            💡 <strong>UptimeRobot:</strong> uptimerobot.com → Add Monitor → HTTP(s) → <code>{(process.env.REACT_APP_API_URL || "your-backend-url")}/ping</code> → 5 min interval
           </div>
         </div>
 

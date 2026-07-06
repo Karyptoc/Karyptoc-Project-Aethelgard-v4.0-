@@ -2,7 +2,13 @@ import React, { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 
-const API_BASE = process.env.REACT_APP_API_URL || "https://aethelgard-backend-uff7.onrender.com";
+// FIX: this used to fall back to a hardcoded Render URL if
+// REACT_APP_API_URL wasn't set. That made sense while Render was the
+// backend, but after any future migration (e.g. to Railway) it becomes
+// actively wrong — silently talking to a decommissioned backend instead
+// of failing visibly. No fallback now; missing config surfaces as a
+// clear error below instead.
+const API_BASE = process.env.REACT_APP_API_URL;
 
 function api(token) {
   return axios.create({
@@ -115,6 +121,11 @@ export default function ClientPortalPublic() {
   const [showConnect, setShowConnect] = useState(false);
 
   const loadData = async () => {
+    if (!API_BASE) {
+      setError("Configuration error: REACT_APP_API_URL is not set. This page cannot reach the backend — contact support.");
+      setLoading(false);
+      return;
+    }
     if (!token) { setError("No access token provided"); setLoading(false); return; }
     try {
       const [meRes, tradesRes] = await Promise.all([

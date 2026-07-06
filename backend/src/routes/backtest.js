@@ -1,22 +1,28 @@
 /**
- * AETHELGARD - Backtest Cache Route
- * backend/src/routes/backtest.js (add to existing backtest route)
- * Receives OHLCV data from bridge and stores for backtesting
+ * AETHELGARD - Backtest Route (REBUILT)
+ * backend/src/routes/backtest.js
+ *
+ * FIX: this used to run its own simplified, standalone strategy
+ * simulation (analyzeBar/runBacktest) that was materially different from
+ * what's actually live in signalEngine.js. This version walks real
+ * historical H4/D1/W1 bars and calls the SAME functions signalEngine.js
+ * uses live, from signalCore.js and riskEngine.js.
  */
 
 const express = require("express");
 const router = express.Router();
 const { supabaseAdmin, log } = require("../services/supabase");
 const { verifyToken } = require("../middleware/auth");
+const core = require("../services/signalCore");
+const riskEngine = require("../services/riskEngine");
 
-function verifyBridgeSecret(req, res, next) {
-  const secret = req.headers["x-bridge-secret"];
-  if (secret && secret === process.env.BRIDGE_SECRET) return next();
-  // Also allow authenticated users
-  verifyToken(req, res, next);
-}
+const ASSUMED_SPREAD_PIPS = {
+  GOLD: 25, EURUSD: 1.2, GBPUSD: 1.8, USDJPY: 1.2,
+  US30Cash: 200, GER40Cash: 150, BTCUSD: 3000,
+  AUDUSD: 1.5, USDCAD: 1.8, USDCHF: 1.8,
+  NZDUSD: 2.0, GBPJPY: 3.0, EURJPY: 2.0,
+};
 
-// POST /api/backtest/cache — bridge stores OHLCV bars
 router.post("/cache", async (req, res) => {
   const secret = req.headers["x-bridge-secret"];
   if (!secret || secret !== process.env.BRIDGE_SECRET) {
@@ -27,23 +33,14 @@ router.post("/cache", async (req, res) => {
     if (!symbol || !timeframe || !bars?.length) {
       return res.status(400).json({ error: "symbol, timeframe, bars required" });
     }
-
-    // Upsert bars — ignore duplicates
     const rows = bars.map(b => ({
-      symbol,
-      timeframe,
-      time: b.time,
-      open: b.open,
-      high: b.high,
-      low: b.low,
-      close: b.close,
+      symbol, timeframe, time: b.time,
+      open: b.open, high: b.high, low: b.low, close: b.close,
       volume: b.volume || 0
     }));
-
     const { error } = await supabaseAdmin
       .from("ohlcv_cache")
       .upsert(rows, { onConflict: "symbol,timeframe,time", ignoreDuplicates: true });
-
     if (error) throw error;
     res.json({ ok: true, stored: rows.length });
   } catch (e) {
@@ -51,85 +48,30 @@ router.post("/cache", async (req, res) => {
   }
 });
 
-// POST /api/backtest/run — run backtest
-router.post("/run", verifyToken, async (req, res) => {
-  try {
-    const {
-      symbol,
-      timeframe = "H1",
-      days = 30,
-      initial_balance = 1000,
-      risk_percent = 1.0,
-      min_confluence = 35,
-      kill_zone_only = false
-    } = req.body;
+async function fetchCachedBars(symbol, timeframe, fromDate = null) {
+  let query = supabaseAdmin
+    .from("ohlcv_cache")
+    .select("time, open, high, low, close, volume")
+    .eq("symbol", symbol)
+    .eq("timeframe", timeframe)
+    .order("time", { ascending: true });
+  if (fromDate) query = query.gte("time", fromDate);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(b => ({
+    time: b.time,
+    open: parseFloat(b.open), high: parseFloat(b.high),
+    low: parseFloat(b.low), close: parseFloat(b.close),
+    volume: parseInt(b.volume) || 0
+  }));
+}
 
-    if (!symbol) return res.status(400).json({ error: "symbol required" });
-
-    const PIP_SIZES = {
-      GOLD: 0.01, EURUSD: 0.0001, GBPUSD: 0.0001, USDJPY: 0.01,
-      US30Cash: 1.0, GER40Cash: 1.0, BTCUSD: 1.0,
-      AUDUSD: 0.0001, USDCAD: 0.0001, USDCHF: 0.0001,
-      NZDUSD: 0.0001, GBPJPY: 0.01, EURJPY: 0.01
-    };
-    const pipSize = PIP_SIZES[symbol] || 0.0001;
-
-    const fromDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-    const { data: ohlcvData, error } = await supabaseAdmin
-      .from("ohlcv_cache")
-      .select("time, open, high, low, close, volume")
-      .eq("symbol", symbol)
-      .eq("timeframe", timeframe)
-      .gte("time", fromDate)
-      .order("time", { ascending: true });
-
-    if (error) throw error;
-
-    if (!ohlcvData || ohlcvData.length < 100) {
-      return res.status(400).json({
-        error: `Insufficient data: need 100+ bars, got ${ohlcvData?.length || 0} for ${symbol} ${timeframe}. Keep the bridge running to collect more data.`
-      });
-    }
-
-    // Parse numeric fields
-    const bars = ohlcvData.map(b => ({
-      time: b.time,
-      open: parseFloat(b.open),
-      high: parseFloat(b.high),
-      low: parseFloat(b.low),
-      close: parseFloat(b.close),
-      volume: parseInt(b.volume) || 0
-    }));
-
-    await log("info", "backtest", `Running: ${symbol} ${timeframe} | ${bars.length} bars | ${days}d`);
-
-    const result = runBacktest(bars, {
-      initialBalance: initial_balance,
-      riskPercent: risk_percent,
-      minConfluence: min_confluence,
-      killZoneOnly: kill_zone_only,
-      pipSize
-    });
-
-    await log("info", "backtest",
-      `Complete: ${symbol} | ${result.summary.total_trades} trades | WR:${result.summary.win_rate}% | PF:${result.summary.profit_factor}`
-    );
-
-    res.json({ ok: true, symbol, timeframe, days, bars_used: bars.length, ...result });
-  } catch (e) {
-    await log("error", "backtest", `Error: ${e.message}`);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// GET /api/backtest/availability
 router.get("/availability", verifyToken, async (req, res) => {
   try {
     const { data } = await supabaseAdmin
       .from("ohlcv_cache")
       .select("symbol, timeframe, time")
       .order("time", { ascending: false });
-
     const map = {};
     (data || []).forEach(row => {
       const key = `${row.symbol}_${row.timeframe}`;
@@ -142,241 +84,242 @@ router.get("/availability", verifyToken, async (req, res) => {
   }
 });
 
-// ── Backtest Engine ───────────────────────────────────────────────────────────
+router.post("/run", verifyToken, async (req, res) => {
+  try {
+    const { symbol, days = 30, initial_balance = 1000, risk_percent = 1.0 } = req.body;
+    if (!symbol) return res.status(400).json({ error: "symbol required" });
 
-function ema(data, period) {
-  if (data.length < period) return data[data.length - 1];
-  const k = 2 / (period + 1);
-  let val = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < data.length; i++) val = data[i] * k + val * (1 - k);
-  return val;
-}
+    const fromDate = new Date(Date.now() - (days + 120) * 24 * 60 * 60 * 1000).toISOString();
+    const [h4Bars, d1Bars, w1Bars] = await Promise.all([
+      fetchCachedBars(symbol, "H4", fromDate),
+      fetchCachedBars(symbol, "D1"),
+      fetchCachedBars(symbol, "W1"),
+    ]);
 
-function rsi(data, period = 14) {
-  if (data.length < period + 1) return 50;
-  let gains = 0, losses = 0;
-  const slice = data.slice(-(period + 1));
-  for (let i = 1; i < slice.length; i++) {
-    const d = slice[i] - slice[i - 1];
-    if (d > 0) gains += d; else losses += Math.abs(d);
-  }
-  if (losses === 0) return 100;
-  return 100 - 100 / (1 + gains / losses);
-}
-
-function atrCalc(bars, period = 14) {
-  if (!bars || bars.length < period + 1) return null;
-  const tr = [];
-  for (let i = 1; i < bars.length; i++) {
-    tr.push(Math.max(
-      bars[i].high - bars[i].low,
-      Math.abs(bars[i].high - bars[i-1].close),
-      Math.abs(bars[i].low - bars[i-1].close)
-    ));
-  }
-  return tr.slice(-period).reduce((a, b) => a + b, 0) / period;
-}
-
-function detectBOS(bars) {
-  if (!bars || bars.length < 20) return null;
-  const r = bars.slice(-20);
-  let hi = -Infinity, lo = Infinity;
-  for (let i = 1; i < r.length - 1; i++) {
-    if (r[i].high > r[i-1].high && r[i].high > r[i+1].high) hi = Math.max(hi, r[i].high);
-    if (r[i].low < r[i-1].low && r[i].low < r[i+1].low) lo = Math.min(lo, r[i].low);
-  }
-  const c = bars[bars.length-1].close;
-  if (c > hi && hi > -Infinity) return { type: "BULLISH_BOS", level: hi };
-  if (c < lo && lo < Infinity) return { type: "BEARISH_BOS", level: lo };
-  return null;
-}
-
-function detectOBs(bars) {
-  if (!bars || bars.length < 10) return [];
-  const len = bars.length, obs = [];
-  for (let i = len-10; i < len-2; i++) {
-    const b = bars[i], n = bars[i+1], r = b.high - b.low;
-    if (b.close < b.open && n.close > n.open && (n.close-n.open) > r*1.5)
-      obs.push({ type: "BULLISH_OB", high: b.high, low: b.low });
-    if (b.close > b.open && n.close < n.open && (n.open-n.close) > r*1.5)
-      obs.push({ type: "BEARISH_OB", high: b.high, low: b.low });
-  }
-  return obs.slice(-2);
-}
-
-function detectFVGs(bars) {
-  if (!bars || bars.length < 3) return [];
-  const fvgs = [];
-  for (let i = 1; i < bars.length-1; i++) {
-    if (bars[i+1].low > bars[i-1].high) fvgs.push({ type: "BULLISH_FVG" });
-    if (bars[i+1].high < bars[i-1].low) fvgs.push({ type: "BEARISH_FVG" });
-  }
-  return fvgs.slice(-3);
-}
-
-function getSession(date) {
-  const h = date.getUTCHours() + date.getUTCMinutes() / 60;
-  const day = date.getUTCDay();
-  if (day === 0 || day === 6) return { session: "WEEKEND", killZone: false, strength: 0, name: "Weekend" };
-  if (h >= 7 && h < 9)  return { session: "LONDON_OPEN", killZone: true,  strength: 1.0, name: "London Kill Zone" };
-  if (h >= 9 && h < 13) return { session: "LONDON_MAIN", killZone: false, strength: 0.75, name: "London Session" };
-  if (h >= 13 && h < 16) return { session: "NY_OPEN",    killZone: true,  strength: 1.0, name: "NY Kill Zone" };
-  if (h >= 16 && h < 20) return { session: "NY_MAIN",    killZone: false, strength: 0.65, name: "New York Session" };
-  if (h >= 20 && h < 22) return { session: "NY_CLOSE",   killZone: true,  strength: 0.75, name: "NY Close" };
-  if (h >= 0 && h < 6)   return { session: "ASIAN",      killZone: false, strength: 0.5,  name: "Asian Session" };
-  return { session: "DEAD_ZONE", killZone: false, strength: 0.1, name: "Dead Zone" };
-}
-
-function analyzeBar(bars, session) {
-  const closes = bars.map(b => b.close);
-  const len = bars.length;
-  const price = closes[len-1];
-  const e20 = ema(closes, 20);
-  const e50 = ema(closes, Math.min(50, len-1));
-  const r = rsi(closes, 14);
-  const atrVal = atrCalc(bars, 14);
-  const bos = detectBOS(bars);
-  const obs = detectOBs(bars);
-  const fvgs = detectFVGs(bars);
-  const avgVol = bars.slice(-20).reduce((s,b)=>s+b.volume,0)/20;
-  const highVol = bars[len-1].volume > avgVol * 1.5;
-  const bullish = e20 > e50;
-  const aboveEMA20 = price > e20;
-
-  let score = 0;
-  let direction = "HOLD";
-
-  if (session.killZone) score += 35;
-  else if (session.strength >= 0.5) score += 15;
-
-  if (bos) {
-    score += 20;
-    direction = bos.type === "BULLISH_BOS" ? "BUY" : "SELL";
-  }
-  if (obs.length > 0) score += 15;
-  if (fvgs.length > 0) score += 15;
-  if (r < 35) { score += 10; if (direction === "HOLD") direction = "BUY"; }
-  if (r > 65) { score += 10; if (direction === "HOLD") direction = "SELL"; }
-  if (highVol) score += 5;
-  if (bullish && aboveEMA20) { score += 10; if (direction === "HOLD") direction = "BUY"; }
-  else if (!bullish && !aboveEMA20) { score += 10; if (direction === "HOLD") direction = "SELL"; }
-
-  let stopLoss = null, takeProfit = null;
-  if (direction !== "HOLD" && atrVal) {
-    const recentHigh = Math.max(...bars.slice(-20).map(b=>b.high));
-    const recentLow  = Math.min(...bars.slice(-20).map(b=>b.low));
-    const bullishOB = obs.find(o => o.type === "BULLISH_OB");
-    const bearishOB = obs.find(o => o.type === "BEARISH_OB");
-    if (direction === "BUY") {
-      stopLoss = bullishOB ? bullishOB.low - atrVal*0.5 : recentLow - atrVal*0.5;
-      if (price - stopLoss < atrVal*1.5) stopLoss = price - atrVal*1.5;
-      takeProfit = price + Math.abs(price - stopLoss) * 2.0;
-    } else {
-      stopLoss = bearishOB ? bearishOB.high + atrVal*0.5 : recentHigh + atrVal*0.5;
-      if (stopLoss - price < atrVal*1.5) stopLoss = price + atrVal*1.5;
-      takeProfit = price - Math.abs(stopLoss - price) * 2.0;
+    if (h4Bars.length < 100) {
+      return res.status(400).json({
+        error: `Insufficient H4 data: need 100+ bars, got ${h4Bars.length} for ${symbol}.`
+      });
     }
+    if (d1Bars.length < 30 || w1Bars.length < 20) {
+      await log("info", "backtest", `${symbol}: limited D1/W1 history — HTF alignment weaker until more accumulates.`);
+    }
+
+    const windowStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const result = runBacktest(symbol, h4Bars, d1Bars, w1Bars, {
+      initialBalance: initial_balance, riskPercent: risk_percent, windowStart,
+    });
+
+    await log("info", "backtest",
+      `Complete (rebuilt engine): ${symbol} | ${result.summary.total_trades} trades | WR:${result.summary.win_rate}% | PF:${result.summary.profit_factor}`);
+
+    res.json({ ok: true, symbol, timeframe: "H4", days, bars_used: h4Bars.length, engine_version: "v2_shared_core", ...result });
+  } catch (e) {
+    await log("error", "backtest", `Error: ${e.message}`);
+    res.status(500).json({ error: e.message });
   }
+});
 
-  return {
-    direction, score, atrVal, stopLoss, takeProfit,
-    grade: score >= 75 ? "A" : score >= 55 ? "B" : score >= 40 ? "C" : "D",
-    bos: bos?.type, hasOB: obs.length > 0, hasFVG: fvgs.length > 0
-  };
-}
+function runBacktest(symbol, h4Bars, d1Bars, w1Bars, params) {
+  const { initialBalance = 1000, riskPercent = 1.0, windowStart } = params;
+  const pipSize = core.PIP_SIZES[symbol] || 0.0001;
+  const spreadPips = ASSUMED_SPREAD_PIPS[symbol] || 2.0;
 
-function runBacktest(bars, params) {
-  const { initialBalance=1000, riskPercent=1.0, minConfluence=35, killZoneOnly=false, pipSize=0.0001 } = params;
   let balance = initialBalance;
   let peakBalance = initialBalance;
   let maxDrawdown = 0;
   const trades = [];
-  const equityCurve = [{ time: bars[0]?.time, equity: balance }];
-  const LOOKBACK = 50;
-  let lastTradeBar = -4;
+  const equityCurve = [{ time: h4Bars[0]?.time, equity: balance }];
 
-  for (let i = LOOKBACK; i < bars.length - 1; i++) {
-    const window = bars.slice(Math.max(0, i - LOOKBACK), i + 1);
-    const bar = bars[i];
-    const session = getSession(new Date(bar.time));
+  const LOOKBACK = 60;
+  const MAX_HOLD_BARS = 60;
+  let lastTradeExitIndex = -1;
 
+  for (let i = LOOKBACK; i < h4Bars.length - 1; i++) {
+    const bar = h4Bars[i];
+    const barTime = new Date(bar.time);
+    if (barTime < windowStart) continue;
+    if (i <= lastTradeExitIndex) continue;
+
+    const session = core.getSessionInfo(barTime);
     if (session.session === "WEEKEND" || session.session === "DEAD_ZONE") continue;
-    if (killZoneOnly && !session.killZone) continue;
-    if (i - lastTradeBar < 4) continue;
 
-    const analysis = analyzeBar(window, session);
-    if (analysis.direction === "HOLD" || analysis.score < minConfluence) continue;
-    if (!analysis.stopLoss || !analysis.takeProfit) continue;
+    const news = core.isNewsBlackout(barTime);
+    if (news.blocked) continue;
 
-    const riskAmount = balance * riskPercent / 100;
-    const slPips = Math.abs(bar.close - analysis.stopLoss) / pipSize;
-    if (slPips < 1) continue;
-    const lotSize = Math.max(0.01, Math.min(parseFloat((riskAmount / (slPips * 10)).toFixed(2)), 5.0));
+    const isPairActive = core.isPairActiveInSession(symbol, session.session);
+    const sessionThreshold = (session.sessQuality >= 2) ? 0.2 : 0.4;
+    if (!isPairActive && session.strength < sessionThreshold) continue;
+    if (!session.killZone) continue;
 
-    let outcome = "OPEN";
+    const primaryBars = h4Bars.slice(Math.max(0, i - 200 + 1), i + 1);
+    const currentATR = core.atrCalc(primaryBars, 14);
+    const ind = core.getIndicators(primaryBars, currentATR);
+    if (!ind) continue;
+
+    const d1Window = d1Bars.filter(b => new Date(b.time) <= barTime).slice(-100);
+    const w1Window = w1Bars.filter(b => new Date(b.time) <= barTime).slice(-60);
+    const htfBias = core.getHTFBias(primaryBars, d1Window.length ? d1Window : null, w1Window.length ? w1Window : null);
+
+    const adrStatus = core.getADRStatus(primaryBars, d1Window, symbol);
+    if (adrStatus.exhausted) continue;
+
+    const sweep = core.detectLiquiditySweep(primaryBars, 15);
+    const displacement = currentATR ? core.detectDisplacement(primaryBars, currentATR) : null;
+    const fvgs = ind.fvgs || [];
+    const obs = ind.obs || [];
+    const retestDirection = sweep?.direction || (htfBias.bias === "bullish" ? "BUY" : "SELL");
+    const retest = core.checkRetest(primaryBars, fvgs, obs, retestDirection);
+    const eqLiquidity = currentATR ? core.detectEqualHighsLows(primaryBars, currentATR) : null;
+    const strength = currentATR ? core.calculateStrength(primaryBars, currentATR) : null;
+    const pdZone = core.getPremiumDiscount(primaryBars);
+
+    const ictSequence = {
+      sweep, displacement, retest,
+      eqLiquidity: (eqLiquidity?.eqh?.length > 0 || eqLiquidity?.eql?.length > 0) ? eqLiquidity : null,
+      strength, pdZone,
+      hasFullSequence: !!(sweep && displacement && retest),
+      hasPartialSequence: !!(sweep && displacement)
+    };
+
+    ind.direction = retestDirection;
+    const confluence = core.scoreConfluence(ind, session, htfBias, isPairActive, ictSequence);
+
+    let minScore;
+    if (ictSequence.hasFullSequence) minScore = 30;
+    else if (ictSequence.hasPartialSequence) minScore = 33;
+    else if (session.killZone && isPairActive) minScore = 35;
+    else if (session.killZone) minScore = 38;
+    else minScore = 42;
+
+    if (confluence.score < minScore) continue;
+
+    const analysis = core.makePureMathDecision(confluence, htfBias, ictSequence, ind, session);
+    if (analysis.direction === "HOLD") continue;
+
+    const sltp = core.calculateStructuralSLTP(
+      analysis.direction, bar.close, ind, currentATR, symbol, ictSequence, analysis.reward_risk_ratio
+    );
+    if (!sltp.stopLoss || !sltp.takeProfit) continue;
+
+    const sizing = riskEngine.calculatePositionSize({
+      balance,
+      riskPercent: riskPercent * (analysis.position_size_modifier || 1.0),
+      stopLossPips: sltp.slPips,
+      symbol,
+      signalGrade: confluence.grade,
+    });
+
+    const pipValuePerLot = { GOLD: 1, BTCUSD: 1, US30Cash: 1, GER40Cash: 1 }[symbol] || 10;
+    const spreadCost = spreadPips * pipValuePerLot * sizing.lotSize;
+
+    const entryPrice = bar.close;
+    let currentSL = sltp.stopLoss;
+    let remainingLots = sizing.lotSize;
+    let realizedPnl = -spreadCost;
+    let outcome = null;
+    let exitIndex = i;
     let exitPrice = null;
-    let exitBar = i + 1;
-    let pnl = 0;
 
-    for (let j = i + 1; j < Math.min(i + 51, bars.length); j++) {
-      const fb = bars[j];
-      exitBar = j;
-      if (analysis.direction === "BUY") {
-        if (fb.low <= analysis.stopLoss) { outcome = "LOSS"; exitPrice = analysis.stopLoss; pnl = -riskAmount; break; }
-        if (fb.high >= analysis.takeProfit) { outcome = "WIN"; exitPrice = analysis.takeProfit; pnl = riskAmount * 2.0; break; }
-      } else {
-        if (fb.high >= analysis.stopLoss) { outcome = "LOSS"; exitPrice = analysis.stopLoss; pnl = -riskAmount; break; }
-        if (fb.low <= analysis.takeProfit) { outcome = "WIN"; exitPrice = analysis.takeProfit; pnl = riskAmount * 2.0; break; }
+    for (let j = i + 1; j < Math.min(i + 1 + MAX_HOLD_BARS, h4Bars.length); j++) {
+      const fb = h4Bars[j];
+      exitIndex = j;
+
+      const hitSL = analysis.direction === "BUY" ? fb.low <= currentSL : fb.high >= currentSL;
+      const hitTP = analysis.direction === "BUY" ? fb.high >= sltp.takeProfit : fb.low <= sltp.takeProfit;
+
+      if (hitSL) {
+        const lossPips = Math.abs(entryPrice - currentSL) / pipSize;
+        realizedPnl += -lossPips * pipValuePerLot * remainingLots;
+        outcome = realizedPnl >= 0 ? "WIN" : "LOSS";
+        exitPrice = currentSL;
+        break;
+      }
+      if (hitTP) {
+        const winPips = Math.abs(sltp.takeProfit - entryPrice) / pipSize;
+        realizedPnl += winPips * pipValuePerLot * remainingLots;
+        outcome = "WIN";
+        exitPrice = sltp.takeProfit;
+        break;
+      }
+
+      const recentBars = h4Bars.slice(Math.max(0, j - 5), j + 1);
+      const mgmt = riskEngine.calculateAsymmetricPartialTP(
+        analysis.direction, entryPrice, fb.close, currentSL, currentATR, recentBars
+      );
+
+      if (mgmt.action === "partial_close" && mgmt.closePercent > 0) {
+        const closingLots = remainingLots * (mgmt.closePercent / 100);
+        const gainPips = analysis.direction === "BUY"
+          ? (fb.close - entryPrice) / pipSize
+          : (entryPrice - fb.close) / pipSize;
+        realizedPnl += gainPips * pipValuePerLot * closingLots;
+        remainingLots -= closingLots;
+        if (mgmt.newSL) currentSL = mgmt.newSL;
+      } else if ((mgmt.action === "move_to_be" || mgmt.action === "tighten_trail") && mgmt.newSL) {
+        currentSL = mgmt.newSL;
+      }
+
+      if (remainingLots <= 0.001) {
+        outcome = realizedPnl >= 0 ? "WIN" : "LOSS";
+        exitPrice = fb.close;
+        break;
       }
     }
 
-    if (outcome === "OPEN") {
-      exitPrice = bars[Math.min(i + 50, bars.length-1)].close;
-      const rawPnl = analysis.direction === "BUY"
-        ? (exitPrice - bar.close) / pipSize * lotSize * 10
-        : (bar.close - exitPrice) / pipSize * lotSize * 10;
-      pnl = parseFloat(rawPnl.toFixed(2));
-      outcome = pnl >= 0 ? "WIN" : "LOSS";
+    if (outcome === null) {
+      const lastBar = h4Bars[Math.min(i + MAX_HOLD_BARS, h4Bars.length - 1)];
+      exitPrice = lastBar.close;
+      const gainPips = analysis.direction === "BUY"
+        ? (exitPrice - entryPrice) / pipSize
+        : (entryPrice - exitPrice) / pipSize;
+      realizedPnl += gainPips * pipValuePerLot * remainingLots;
+      outcome = realizedPnl >= 0 ? "WIN" : "LOSS";
     }
 
-    balance += pnl;
+    realizedPnl = parseFloat(realizedPnl.toFixed(2));
+    balance += realizedPnl;
     if (balance > peakBalance) peakBalance = balance;
     const dd = ((peakBalance - balance) / peakBalance) * 100;
     if (dd > maxDrawdown) maxDrawdown = dd;
-    lastTradeBar = i;
+    lastTradeExitIndex = exitIndex;
 
     trades.push({
       entry_time: bar.time,
-      exit_time: bars[Math.min(exitBar, bars.length-1)].time,
+      exit_time: h4Bars[Math.min(exitIndex, h4Bars.length - 1)].time,
       direction: analysis.direction,
-      entry_price: parseFloat(bar.close.toFixed(5)),
-      stop_loss: parseFloat(analysis.stopLoss.toFixed(5)),
-      take_profit: parseFloat(analysis.takeProfit.toFixed(5)),
-      exit_price: parseFloat((exitPrice||bar.close).toFixed(5)),
-      lot_size: lotSize,
-      pnl: parseFloat(pnl.toFixed(2)),
+      entry_price: parseFloat(entryPrice.toFixed(5)),
+      stop_loss: parseFloat(sltp.stopLoss.toFixed(5)),
+      take_profit: parseFloat(sltp.takeProfit.toFixed(5)),
+      exit_price: exitPrice ? parseFloat(exitPrice.toFixed(5)) : null,
+      lot_size: sizing.lotSize,
+      pnl: realizedPnl,
       outcome,
-      grade: analysis.grade,
-      score: analysis.score,
-      session: session.name || session.session,
+      grade: confluence.grade,
+      score: confluence.score,
+      session: session.name,
       kill_zone: session.killZone,
+      htf_bias: htfBias.bias,
+      htf_full_alignment: htfBias.fullAlignment,
+      ict_full_sequence: ictSequence.hasFullSequence,
+      spread_cost: parseFloat(spreadCost.toFixed(2)),
       balance_after: parseFloat(balance.toFixed(2))
     });
 
     equityCurve.push({
-      time: bars[Math.min(exitBar, bars.length-1)].time,
+      time: h4Bars[Math.min(exitIndex, h4Bars.length - 1)].time,
       equity: parseFloat(balance.toFixed(2))
     });
   }
 
   const winners = trades.filter(t => t.outcome === "WIN");
-  const losers  = trades.filter(t => t.outcome === "LOSS");
-  const grossProfit = winners.reduce((s,t) => s+t.pnl, 0);
-  const grossLoss   = Math.abs(losers.reduce((s,t) => s+t.pnl, 0));
+  const losers = trades.filter(t => t.outcome === "LOSS");
+  const grossProfit = winners.reduce((s, t) => s + t.pnl, 0);
+  const grossLoss = Math.abs(losers.reduce((s, t) => s + t.pnl, 0));
 
   const bySession = {};
   trades.forEach(t => {
-    if (!bySession[t.session]) bySession[t.session] = { trades:0, wins:0, pnl:0 };
+    if (!bySession[t.session]) bySession[t.session] = { trades: 0, wins: 0, pnl: 0 };
     bySession[t.session].trades++;
     if (t.outcome === "WIN") bySession[t.session].wins++;
     bySession[t.session].pnl += t.pnl;
@@ -384,34 +327,36 @@ function runBacktest(bars, params) {
 
   const byGrade = {};
   trades.forEach(t => {
-    if (!byGrade[t.grade]) byGrade[t.grade] = { trades:0, wins:0, pnl:0 };
+    if (!byGrade[t.grade]) byGrade[t.grade] = { trades: 0, wins: 0, pnl: 0 };
     byGrade[t.grade].trades++;
     if (t.outcome === "WIN") byGrade[t.grade].wins++;
     byGrade[t.grade].pnl += t.pnl;
   });
+
+  const htfAligned = trades.filter(t => t.htf_full_alignment);
+  const htfNotAligned = trades.filter(t => !t.htf_full_alignment);
 
   return {
     summary: {
       total_trades: trades.length,
       winners: winners.length,
       losers: losers.length,
-      win_rate: trades.length > 0 ? parseFloat((winners.length/trades.length*100).toFixed(1)) : 0,
-      profit_factor: grossLoss > 0 ? parseFloat((grossProfit/grossLoss).toFixed(2)) : null,
+      win_rate: trades.length > 0 ? parseFloat((winners.length / trades.length * 100).toFixed(1)) : 0,
+      profit_factor: grossLoss > 0 ? parseFloat((grossProfit / grossLoss).toFixed(2)) : null,
       total_pnl: parseFloat((balance - initialBalance).toFixed(2)),
       gross_profit: parseFloat(grossProfit.toFixed(2)),
       gross_loss: parseFloat(grossLoss.toFixed(2)),
       initial_balance: initialBalance,
       final_balance: parseFloat(balance.toFixed(2)),
       max_drawdown_pct: parseFloat(maxDrawdown.toFixed(2)),
-      avg_win: winners.length > 0 ? parseFloat((grossProfit/winners.length).toFixed(2)) : 0,
-      avg_loss: losers.length > 0 ? parseFloat((grossLoss/losers.length).toFixed(2)) : 0,
-      best_trade: trades.length > 0 ? Math.max(...trades.map(t=>t.pnl)) : 0,
-      worst_trade: trades.length > 0 ? Math.min(...trades.map(t=>t.pnl)) : 0,
-      kill_zone_trades: trades.filter(t=>t.kill_zone).length,
-      kill_zone_win_rate: (() => {
-        const kz = trades.filter(t=>t.kill_zone);
-        return kz.length > 0 ? parseFloat((kz.filter(t=>t.outcome==="WIN").length/kz.length*100).toFixed(1)) : 0;
-      })()
+      avg_win: winners.length > 0 ? parseFloat((grossProfit / winners.length).toFixed(2)) : 0,
+      avg_loss: losers.length > 0 ? parseFloat((grossLoss / losers.length).toFixed(2)) : 0,
+      total_spread_cost: parseFloat(trades.reduce((s, t) => s + (t.spread_cost || 0), 0).toFixed(2)),
+      htf_aligned_trades: htfAligned.length,
+      htf_aligned_win_rate: htfAligned.length > 0
+        ? parseFloat((htfAligned.filter(t => t.outcome === "WIN").length / htfAligned.length * 100).toFixed(1)) : null,
+      htf_not_aligned_win_rate: htfNotAligned.length > 0
+        ? parseFloat((htfNotAligned.filter(t => t.outcome === "WIN").length / htfNotAligned.length * 100).toFixed(1)) : null,
     },
     by_session: bySession,
     by_grade: byGrade,

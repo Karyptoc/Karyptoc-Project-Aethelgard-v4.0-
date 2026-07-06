@@ -254,13 +254,18 @@ router.get("/commands", async (req, res) => {
             : 20;
 
           const positionSizeModifier = signal.regime_detail?.position_size_modifier || 1.0;
+          // FIX: confluence grade was never passed here, so calculatePositionSize
+          // silently defaulted every signal to grade "B" (1.0x multiplier) —
+          // A-grade and D-grade setups were sized identically in live trading.
+          const signalGrade = signal.regime_detail?.confluence_grade || "B";
 
           // Use default_risk_percent from platform_settings
           const sizing = calculatePositionSize({
             balance: account.balance || 500,
             riskPercent: settings.defaultRiskPercent * positionSizeModifier,
             stopLossPips: Math.max(stopPips, 5),
-            symbol: signal.symbol
+            symbol: signal.symbol,
+            signalGrade
           });
 
           const cmdId = `sig_${signal.id}_${account.id}`;

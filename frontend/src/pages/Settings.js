@@ -4,7 +4,13 @@ import api from "../lib/api";
 export default function Settings() {
   const [settings, setSettings] = useState({});
   const [saved, setSaved] = useState(false);
-  const [tgForm, setTgForm] = useState(() => JSON.parse(localStorage.getItem("tg_config") || "{}"));
+  // FIX: bot token used to live in localStorage and every send happened
+  // as a direct browser call to api.telegram.org with the token exposed
+  // in the request. Now the token is stored encrypted server-side
+  // (services/telegram.js) and this form only ever sends it once, to
+  // save it — it's never read back to the browser afterward.
+  const [tgStatus, setTgStatus] = useState({ configured: false, chat_id: null });
+  const [tgForm, setTgForm] = useState({ bot_token: "", chat_id: "" });
   const [testing, setTesting] = useState(false);
 
   // Prevents re-fetch from overwriting in-progress toggle changes
@@ -20,9 +26,20 @@ export default function Settings() {
     }
   }, []);
 
+  const fetchTelegramStatus = useCallback(async () => {
+    try {
+      const r = await api.get("/api/system/telegram/config");
+      setTgStatus({ configured: r.data.configured, chat_id: r.data.chat_id });
+      setTgForm(f => ({ ...f, chat_id: r.data.chat_id || "" }));
+    } catch (e) {
+      console.error("Failed to load Telegram status", e);
+    }
+  }, []);
+
   useEffect(() => {
     fetchSettings();
-  }, [fetchSettings]);
+    fetchTelegramStatus();
+  }, [fetchSettings, fetchTelegramStatus]);
 
   const save = async (key, value) => {
     pendingChange.current = true;
@@ -40,29 +57,31 @@ export default function Settings() {
     save(key, newVal);
   };
 
-  const saveTelegram = () => {
-    localStorage.setItem("tg_config", JSON.stringify(tgForm));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const saveTelegram = async () => {
+    try {
+      await api.put("/api/system/telegram/config", {
+        bot_token: tgForm.bot_token || undefined,
+        chat_id: tgForm.chat_id || undefined,
+      });
+      setTgForm(f => ({ ...f, bot_token: "" })); // never keep the token in client state after saving
+      await fetchTelegramStatus();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      alert("❌ Failed to save: " + (e.response?.data?.error || e.message));
+    }
   };
 
   const testTelegram = async () => {
     setTesting(true);
     try {
-      const r = await fetch(`https://api.telegram.org/bot${tgForm.bot_token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: tgForm.chat_id,
-          text: "✅ *Aethelgard* connected successfully! Trading signals will be sent here.",
-          parse_mode: "Markdown"
-        })
+      const r = await api.post("/api/system/telegram/send", {
+        text: "✅ *Aethelgard* connected successfully! Trading signals will be sent here."
       });
-      const data = await r.json();
-      if (data.ok) alert("✅ Test message sent to Telegram!");
-      else alert("❌ Failed: " + data.description);
+      if (r.data.ok) alert("✅ Test message sent to Telegram!");
+      else alert("❌ Failed: " + r.data.error);
     } catch (e) {
-      alert("❌ Error: " + e.message);
+      alert("❌ Error: " + (e.response?.data?.error || e.message));
     } finally { setTesting(false); }
   };
 
@@ -177,14 +196,15 @@ export default function Settings() {
           <div className="card">
             <div className="card-header">
               <span className="card-title">Telegram Alerts</span>
-              {tgForm.bot_token && <span className="tg-badge">✈️ Connected</span>}
+              {tgStatus.configured && <span className="tg-badge">✈️ Connected</span>}
             </div>
             <div className="alert alert-info" style={{ fontSize: 12, marginBottom: 16 }}>
               <strong>Setup:</strong> Message @BotFather → /newbot → copy token. Add bot to your channel/group. Get chat ID from @userinfobot.
+              <br /><strong>Note:</strong> the bot token is stored encrypted on the server and never sent back to this page after saving — you'll need to re-enter it only if you want to change it.
             </div>
             <div className="form-group">
-              <label className="form-label">Bot Token</label>
-              <input className="form-input" placeholder="1234567890:AAFxxx..." value={tgForm.bot_token || ""}
+              <label className="form-label">Bot Token {tgStatus.configured && <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>(already set — leave blank to keep current)</span>}</label>
+              <input className="form-input" type="password" placeholder={tgStatus.configured ? "••••••••••••••••" : "1234567890:AAFxxx..."} value={tgForm.bot_token || ""}
                 onChange={e => setTgForm({ ...tgForm, bot_token: e.target.value })} />
             </div>
             <div className="form-group">
@@ -194,7 +214,7 @@ export default function Settings() {
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button className="btn btn-primary" onClick={saveTelegram}>Save Config</button>
-              <button className="btn btn-ghost" onClick={testTelegram} disabled={testing || !tgForm.bot_token}>
+              <button className="btn btn-ghost" onClick={testTelegram} disabled={testing || !tgStatus.configured}>
                 {testing ? "Sending..." : "Send Test Message"}
               </button>
             </div>

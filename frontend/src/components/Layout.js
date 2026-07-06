@@ -2,13 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Outlet, NavLink } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
-import { createClient } from "@supabase/supabase-js";
 import api from "../lib/api";
-
-const supabase = createClient(
-  process.env.REACT_APP_SUPABASE_URL,
-  process.env.REACT_APP_SUPABASE_ANON_KEY
-);
 
 const NAV = [
   { to: "/",         icon: "◈", label: "Dashboard",     exact: true },
@@ -62,11 +56,9 @@ export default function Layout() {
 
     const checkHaltedPairs = async () => {
       try {
-        const { data } = await supabase
-          .from("pair_controls")
-          .select("symbol")
-          .or("enabled.eq.false,auto_halted.eq.true");
-        setHaltedPairs((data || []).length);
+        const r = await api.get("/api/pairs/controls");
+        const halted = (r.data.controls || []).filter(p => !p.enabled || p.auto_halted);
+        setHaltedPairs(halted.length);
       } catch {}
     };
 

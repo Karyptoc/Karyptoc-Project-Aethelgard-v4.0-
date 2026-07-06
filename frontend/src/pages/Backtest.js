@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from "react";
 import api from "../lib/api";
 
 const PAIRS = ["GOLD","EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","GBPJPY","EURJPY","US30Cash","GER40Cash","BTCUSD"];
-const TIMEFRAMES = ["M15","H1","H4"];
 
 function StatCard({ label, value, color, sub }) {
   return (
@@ -39,10 +38,16 @@ function MiniEquityCurve({ data, width = 300, height = 60 }) {
 }
 
 export default function Backtest() {
+  // FIX: the backend backtest engine was rebuilt to share the exact same
+  // strategy logic as live trading (see signalCore.js). It always uses
+  // H4 + D1 + W1 internally now (that's the point — matching live's real
+  // multi-timeframe HTF alignment), and confluence thresholds are now
+  // derived dynamically from ICT sequence quality rather than a single
+  // fixed number. timeframe/min_confluence/kill_zone_only are no longer
+  // accepted by the backend and have been removed from this form.
   const [form, setForm] = useState({
-    symbol: "GOLD", timeframe: "H1", days: 30,
+    symbol: "GOLD", days: 30,
     initial_balance: 1000, risk_percent: 1.0,
-    min_confluence: 35, kill_zone_only: false
   });
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
@@ -64,7 +69,10 @@ export default function Backtest() {
     setError("");
     setResult(null);
     try {
-      const r = await api.post("/api/backtest/run", form);
+      // Longer timeout than the api.js default (20s) — walking months of
+      // H4 bars through the full strategy pipeline genuinely takes longer
+      // than a typical API call, especially for 60-90 day ranges.
+      const r = await api.post("/api/backtest/run", form, { timeout: 90000 });
       setResult(r.data);
       setActiveTab("summary");
     } catch (e) {
@@ -77,8 +85,8 @@ export default function Backtest() {
   const pnlColor = (v) => parseFloat(v) >= 0 ? "var(--bull)" : "var(--bear)";
   const pnlSign = (v) => parseFloat(v) >= 0 ? "+" : "";
 
-  // Check data availability for selected pair/timeframe
-  const dataAvail = availability.find(a => a.symbol === form.symbol && a.timeframe === form.timeframe);
+  // Backend always uses H4 as primary now — check H4 availability specifically
+  const dataAvail = availability.find(a => a.symbol === form.symbol && a.timeframe === "H4");
 
   return (
     <>
@@ -102,13 +110,6 @@ export default function Backtest() {
               </select>
             </div>
             <div>
-              <label className="form-label">Timeframe</label>
-              <select className="form-select" value={form.timeframe}
-                onChange={e => setForm({...form, timeframe: e.target.value})}>
-                {TIMEFRAMES.map(t => <option key={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
               <label className="form-label">Days Back</label>
               <select className="form-select" value={form.days}
                 onChange={e => setForm({...form, days: parseInt(e.target.value)})}>
@@ -125,19 +126,12 @@ export default function Backtest() {
               <input className="form-input" type="number" step="0.1" min="0.1" max="5" value={form.risk_percent}
                 onChange={e => setForm({...form, risk_percent: parseFloat(e.target.value)})} />
             </div>
-            <div>
-              <label className="form-label">Min Confluence Score</label>
-              <input className="form-input" type="number" min="20" max="80" value={form.min_confluence}
-                onChange={e => setForm({...form, min_confluence: parseInt(e.target.value)})} />
-            </div>
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
-              <input type="checkbox" checked={form.kill_zone_only}
-                onChange={e => setForm({...form, kill_zone_only: e.target.checked})} />
-              Kill Zone trades only
-            </label>
+            <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>
+              Always uses H4 primary structure with D1/W1 HTF alignment and kill-zone gating — same as live trading, not configurable here anymore.
+            </span>
 
             {dataAvail ? (
               <span style={{ fontSize: 11, color: "var(--bull)", fontFamily: "var(--font-mono)" }}>
@@ -145,7 +139,7 @@ export default function Backtest() {
               </span>
             ) : (
               <span style={{ fontSize: 11, color: "var(--warn)", fontFamily: "var(--font-mono)" }}>
-                ⚠️ No data yet — run bridge first to collect OHLCV data
+                ⚠️ No H4 data yet — run bridge first to collect OHLCV data
               </span>
             )}
 
@@ -178,12 +172,14 @@ export default function Backtest() {
                 color={pnlColor(result.summary.total_pnl)} sub={`from $${result.summary.initial_balance}`} />
               <StatCard label="Avg Win" value={`$${result.summary.avg_win}`} color="var(--bull)" />
               <StatCard label="Avg Loss" value={`-$${result.summary.avg_loss}`} color="var(--bear)" />
-              <StatCard label="Kill Zone WR" value={`${result.summary.kill_zone_win_rate}%`}
-                color="var(--accent)" sub={`${result.summary.kill_zone_trades} trades`} />
+              <StatCard label="HTF Aligned WR" value={`${result.summary.htf_aligned_win_rate ?? "—"}%`}
+                color="var(--accent)" sub={`${result.summary.htf_aligned_trades} trades w/ full H4+D1+W1 alignment`} />
+              <StatCard label="Spread Cost" value={`$${result.summary.total_spread_cost}`}
+                color="var(--warn)" sub="total across all trades" />
               <StatCard label="Best Trade" value={`$${result.summary.best_trade}`} color="var(--bull)" />
               <StatCard label="Worst Trade" value={`$${result.summary.worst_trade}`} color="var(--bear)" />
               <StatCard label="Bars Used" value={result.bars_used} color="var(--text-muted)"
-                sub={`${result.days} days ${result.timeframe}`} />
+                sub={`${result.days} days, ${result.timeframe} primary`} />
             </div>
 
             {/* Equity Curve */}
@@ -338,15 +334,15 @@ export default function Backtest() {
                   <div style={{ padding: "10px 14px", background: "var(--bg-elevated)", borderRadius: "var(--radius)", borderLeft: `3px solid ${result.summary.profit_factor >= 1.5 ? "var(--bull)" : "var(--bear)"}` }}>
                     <strong>Profit Factor: {result.summary.profit_factor || "∞"}</strong> — {result.summary.profit_factor >= 2.0 ? "Excellent — strategy has strong edge" : result.summary.profit_factor >= 1.5 ? "Good — strategy is profitable" : result.summary.profit_factor >= 1.0 ? "Marginal — needs refinement" : "Poor — strategy loses money"}
                   </div>
-                  <div style={{ padding: "10px 14px", background: "var(--bg-elevated)", borderRadius: "var(--radius)", borderLeft: `3px solid ${result.summary.kill_zone_win_rate >= 55 ? "var(--bull)" : "var(--warn)"}` }}>
-                    <strong>Kill Zone Win Rate: {result.summary.kill_zone_win_rate}%</strong> ({result.summary.kill_zone_trades} trades) — {result.summary.kill_zone_win_rate >= 55 ? "Kill zones are your best window — keep focusing there" : "Kill zones need improvement — check session alignment"}
+                  <div style={{ padding: "10px 14px", background: "var(--bg-elevated)", borderRadius: "var(--radius)", borderLeft: `3px solid ${result.summary.htf_aligned_win_rate >= 55 ? "var(--bull)" : "var(--warn)"}` }}>
+                    <strong>HTF-Aligned Win Rate: {result.summary.htf_aligned_win_rate ?? "—"}%</strong> ({result.summary.htf_aligned_trades} trades) vs {result.summary.htf_not_aligned_win_rate ?? "—"}% when H4/D1/W1 don't fully agree — {result.summary.htf_aligned_win_rate > result.summary.htf_not_aligned_win_rate ? "full multi-timeframe alignment is meaningfully improving results, as designed" : "alignment isn't showing a clear edge yet — worth investigating once more D1/W1 history accumulates"}
                   </div>
                   <div style={{ padding: "10px 14px", background: "var(--bg-elevated)", borderRadius: "var(--radius)", borderLeft: `3px solid ${result.summary.max_drawdown_pct < 10 ? "var(--bull)" : "var(--bear)"}` }}>
                     <strong>Max Drawdown: {result.summary.max_drawdown_pct}%</strong> — {result.summary.max_drawdown_pct < 5 ? "Excellent risk control" : result.summary.max_drawdown_pct < 10 ? "Acceptable drawdown" : result.summary.max_drawdown_pct < 20 ? "High drawdown — reduce risk per trade" : "Dangerous drawdown — reduce position size immediately"}
                   </div>
                   {result.summary.win_rate < 45 && (
                     <div style={{ padding: "10px 14px", background: "var(--bg-elevated)", borderRadius: "var(--radius)", borderLeft: "3px solid var(--bear)" }}>
-                      <strong>⚠️ Win Rate {result.summary.win_rate}% is below 45%</strong> — Consider raising min confluence score to {form.min_confluence + 10} to filter weak setups
+                      <strong>⚠️ Win Rate {result.summary.win_rate}% is below 45%</strong> — the confluence threshold now adapts automatically to ICT sequence quality rather than a fixed number you can tune here; check the By Grade tab to see whether lower-grade setups are dragging the average down
                     </div>
                   )}
                   {result.summary.total_trades < 10 && (
@@ -365,10 +361,10 @@ export default function Backtest() {
           <div className="card">
             <div className="card-header"><span className="card-title">How Backtesting Works</span></div>
             <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.8 }}>
-              <p>The backtester replays your exact ICT/SMC signal logic on historical OHLCV data stored from your bridge. It detects BOS, Order Blocks, FVGs and session windows — the same logic as the live engine.</p>
+              <p>The backtester walks real historical H4 bars through the exact same strategy code the live engine uses — multi-timeframe H4/D1/W1 HTF bias, ICT sweep/displacement/retest sequence detection, confluence scoring, and the PURE_MATH decision engine. This is the same code, not a separate simulation, so results here reflect what the live strategy would actually have done.</p>
               <p><strong>No Claude API cost</strong> — uses pure mathematical signal detection without AI narrative generation.</p>
-              <p><strong>Data collection:</strong> The bridge automatically saves OHLCV bars every 15 minutes. After 1 week of bridge running you'll have enough data for meaningful backtests.</p>
-              <p><strong>Simulated execution:</strong> Entries at bar close, exits when price reaches SL or TP in subsequent bars (up to 50 bars forward).</p>
+              <p><strong>Data collection:</strong> The bridge saves H4/D1/W1 OHLCV bars automatically. D1/W1 history builds up more slowly than H4 (one bar per day/week respectively) — expect HTF alignment stats to become more meaningful after a few weeks of bridge uptime.</p>
+              <p><strong>Simulated execution:</strong> Position sizing uses your real per-instrument pip values and confluence-grade risk scaling. Exits simulate your actual breakeven/trailing/partial-close logic rather than a simple stop-or-target check, and a spread cost estimate is deducted from every trade.</p>
             </div>
           </div>
         )}

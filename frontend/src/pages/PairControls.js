@@ -1,10 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.REACT_APP_SUPABASE_URL,
-  process.env.REACT_APP_SUPABASE_ANON_KEY
-);
+import api from "../lib/api";
 
 const PAIR_FLAGS = {
   GOLD: "🥇", EURUSD: "🇪🇺", GBPUSD: "🇬🇧", USDJPY: "🇯🇵",
@@ -25,12 +20,12 @@ export default function PairControls() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("pair_controls")
-      .select("*")
-      .order("symbol");
-    if (error) showToast("❌ " + error.message);
-    else setPairs(data || []);
+    try {
+      const r = await api.get("/api/pairs/controls");
+      setPairs(r.data.controls || []);
+    } catch (e) {
+      showToast("❌ " + (e.response?.data?.error || e.message));
+    }
     setLoading(false);
   }, []);
 
@@ -42,13 +37,12 @@ export default function PairControls() {
 
   const haltPair = async (symbol) => {
     setActing(symbol);
-    const reason = haltReasons[symbol]?.trim() || "Manually halted by operator";
-    const { error } = await supabase
-      .from("pair_controls")
-      .update({ enabled: false, updated_at: new Date().toISOString() })
-      .eq("symbol", symbol);
-    if (error) showToast("❌ " + error.message);
-    else showToast(`⏸ ${symbol} halted`);
+    try {
+      await api.put(`/api/pairs/controls/${symbol}`, { enabled: false });
+      showToast(`⏸ ${symbol} halted`);
+    } catch (e) {
+      showToast("❌ " + (e.response?.data?.error || e.message));
+    }
     setHaltReasons(r => ({ ...r, [symbol]: "" }));
     await load();
     setActing(null);
@@ -56,28 +50,27 @@ export default function PairControls() {
 
   const resumePair = async (symbol) => {
     setActing(symbol);
-    const { error } = await supabase
-      .from("pair_controls")
-      .update({ enabled: true, auto_halted: false, auto_halt_reason: null, updated_at: new Date().toISOString() })
-      .eq("symbol", symbol);
-    if (error) showToast("❌ " + error.message);
-    else showToast(`✅ ${symbol} resumed`);
+    try {
+      await api.put(`/api/pairs/controls/${symbol}`, { enabled: true, auto_halted: false, auto_halt_reason: null });
+      showToast(`✅ ${symbol} resumed`);
+    } catch (e) {
+      showToast("❌ " + (e.response?.data?.error || e.message));
+    }
     await load();
     setActing(null);
   };
 
   const saveEdit = async (pair) => {
-    const { error } = await supabase
-      .from("pair_controls")
-      .update({
+    try {
+      await api.put(`/api/pairs/controls/${pair.symbol}`, {
         max_daily_loss_usd: pair.max_daily_loss_usd,
         max_trades_per_day: pair.max_trades_per_day,
-        notes: pair.notes,
-        updated_at: new Date().toISOString()
-      })
-      .eq("symbol", pair.symbol);
-    if (error) showToast("❌ " + error.message);
-    else showToast(`✅ ${pair.symbol} settings saved`);
+        notes: pair.notes
+      });
+      showToast(`✅ ${pair.symbol} settings saved`);
+    } catch (e) {
+      showToast("❌ " + (e.response?.data?.error || e.message));
+    }
     setEditing(null);
     await load();
   };

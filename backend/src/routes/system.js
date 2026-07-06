@@ -9,10 +9,52 @@ const { supabaseAdmin, log } = require("../services/supabase");
 const { getSystemStatus } = require("../services/keepAlive");
 const { generateMonthlyReport, generateAllMonthlyReports } = require("../services/reportGenerator");
 const { verifyToken } = require("../middleware/auth");
+const { isConfigured, getTelegramConfig, saveTelegramConfig, sendTelegramMessage } = require("../services/telegram");
 
 router.use(verifyToken);
 
-// GET /api/system/status — full system health
+// GET /api/system/telegram/config — returns whether Telegram is configured
+// (never returns the actual bot token — only a boolean and the chat ID,
+// which isn't sensitive on its own)
+router.get("/telegram/config", async (req, res) => {
+  try {
+    const { chatId } = await getTelegramConfig();
+    const configured = await isConfigured();
+    res.json({ configured, chat_id: chatId });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/system/telegram/config — save bot token (encrypted) and/or chat ID
+router.put("/telegram/config", async (req, res) => {
+  try {
+    const { bot_token, chat_id } = req.body;
+    if (!bot_token && !chat_id) {
+      return res.status(400).json({ error: "bot_token or chat_id required" });
+    }
+    await saveTelegramConfig({ botToken: bot_token, chatId: chat_id });
+    await log("info", "system", "Telegram configuration updated");
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/system/telegram/send — send a message via the server-side bot.
+// The frontend only ever sends message text here — it never sees the token.
+router.post("/telegram/send", async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: "text required" });
+    const result = await sendTelegramMessage(text);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 router.get("/status", async (req, res) => {
   try {
     const status = await getSystemStatus();
