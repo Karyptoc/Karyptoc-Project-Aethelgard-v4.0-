@@ -1,0 +1,4 @@
+node_modules/
+*.log
+python-bridge/*.log
+.env

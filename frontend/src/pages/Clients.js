@@ -1,11 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-// Direct Supabase connection — bypasses backend for reliability
-const supabase = createClient(
-  process.env.REACT_APP_SUPABASE_URL,
-  process.env.REACT_APP_SUPABASE_ANON_KEY
-);
+import api from "../lib/api";
 
 const EMPTY = {
   full_name: "", email: "", phone: "",
@@ -23,12 +17,12 @@ export default function Clients() {
   const [error, setError] = useState("");
 
   const load = async () => {
-    const { data, error } = await supabase
-      .from("clients")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (!error && data) setClients(data);
-    else console.error("Clients load error:", error);
+    try {
+      const r = await api.get("/api/clients");
+      setClients(r.data.clients || []);
+    } catch (e) {
+      console.error("Clients load error:", e.response?.data?.error || e.message);
+    }
   };
 
   useEffect(() => { load(); }, []);
@@ -37,26 +31,27 @@ export default function Clients() {
     e.preventDefault();
     setSaving(true); setError("");
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const { error } = await supabase.from("clients").insert({
-        ...form,
-        admin_id: user?.id,
-        status: "active"
-      });
-      if (error) throw error;
+      // FIX: admin_id used to be attached client-side via supabase.auth.getUser()
+      // after a direct-to-Supabase insert. The backend route now derives this
+      // from the verified JWT (req.user.id) itself, so it's handled server-side.
+      await api.post("/api/clients", { ...form, status: "active" });
       setShowModal(false);
       setForm(EMPTY);
       await load();
     } catch (err) {
-      setError(err.message || "Failed to add client");
+      setError(err.response?.data?.error || "Failed to add client");
     } finally {
       setSaving(false);
     }
   };
 
   const deactivate = async (id) => {
-    await supabase.from("clients").update({ status: "inactive" }).eq("id", id);
-    await load();
+    try {
+      await api.delete(`/api/clients/${id}`);
+      await load();
+    } catch (e) {
+      console.error("Deactivate error:", e.response?.data?.error || e.message);
+    }
   };
 
   return (
