@@ -109,11 +109,38 @@ async function getDuplicateWindow() {
     const { data } = await supabaseAdmin
       .from("platform_settings").select("value")
       .eq("key", "duplicate_signal_minutes").single();
-    return parseInt(data?.value) || 5;
-  } catch { return 20; }
+    return parseInt(data?.value) || 3;
+  } catch { return 3; }
+}
+// FIX: default window reduced from 20 to 3 minutes. This check's job is now
+// just to prevent the same 5-minute cycle (or an adjacent one) from firing
+// two near-simultaneous signals for the same setup - the REAL concurrency
+// limit (how many trades can be open on a symbol at once) is now handled
+// by getOpenPositionCount() + the grade-based check below, so this no
+// longer needs to be wide enough to block a legitimate second or third
+// grade-A entry hours apart.
+
+// NEW: counts currently open trades for a symbol, so multiple concurrent
+// positions can be allowed for high-quality (grade A) setups specifically,
+// while lower grades stay capped at one at a time.
+async function getOpenPositionCount(symbol) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("trades")
+      .select("id")
+      .eq("symbol", symbol)
+      .eq("status", "open");
+    if (error) throw error;
+    return data?.length ?? 0;
+  } catch (e) {
+    // Fail safe: if we can't determine open count, assume the conservative
+    // maximum (1) so a DB hiccup never accidentally allows overexposure.
+    await log("warning", "signalEngine", `getOpenPositionCount(${symbol}) failed: ${e.message} - assuming 1`);
+    return 1;
+  }
 }
 
-async function hasRecentSignal(symbol, minutes = 20) {
+async function hasRecentSignal(symbol, minutes = 3) {
   const cutoff = new Date(Date.now() - minutes * 60 * 1000).toISOString();
   const { data } = await supabaseAdmin
     .from("signals").select("id, direction, created_at")
@@ -404,6 +431,19 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     await log("info", "signalEngine", `${symbol}: DBG score=${confluence.score} min=${minScore} htf=${htfBias.bias} sq=${session.sessQuality} kz=${session.killZone} active=${isPairActive}`);
     if (confluence.score < minScore) {
       await log("info", "signalEngine", `${symbol}: Score ${confluence.score} < ${minScore} — no setup`);
+      return null;
+    }
+
+    // NEW: grade-based concurrency limit. Grade A setups can stack up to 3
+    // concurrent positions on the same pair; everything else stays capped
+    // at 1 at a time, same as before. This runs AFTER grade is known
+    // (confluence.grade) and BEFORE the more expensive AI/SL-TP work below,
+    // so a blocked signal doesn't waste that computation.
+    const maxConcurrent = confluence.grade === "A" ? 3 : 1;
+    const openCount = await getOpenPositionCount(symbol);
+    if (openCount >= maxConcurrent) {
+      await log("info", "signalEngine",
+        `${symbol}: At capacity (${openCount}/${maxConcurrent} open, grade ${confluence.grade}) — HOLD`);
       return null;
     }
 

@@ -1008,8 +1008,14 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
     }
   }
 
-  // Hard cap at 2.5x ATR
-  const maxSLPips = (atrVal * 2.5) / pip;
+  // FIX (confirmed bug): this cap used to run unconditionally after the
+  // minSLPips floor above, with no guarantee maxSLPips >= minSLPips. When
+  // atrVal was small, 1.5x ATR could come out SMALLER than the minimum
+  // floor, silently shrinking the stop back down - this is what produced
+  // the near-zero GBPUSD/NZDUSD stops ("SL distance 0.00006 < minimum
+  // 0.00100") that bridge.py had to catch and correct at execution time.
+  // The cap can now never go below the floor.
+  const maxSLPips = Math.max((atrVal * 1.5) / pip, minSLPips);
   if (slPips > maxSLPips) {
     stopLoss = direction === "BUY"
       ? price - maxSLPips * pip
@@ -1017,12 +1023,37 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
     slPips = maxSLPips;
   }
 
+  // NEW SAFETY NET: catches the class of bug behind the EURUSD/USDCAD/
+  // USDCHF trades that all showed IDENTICAL SL/TP regardless of entry
+  // price (e.g. every EURUSD SELL getting SL=1.17715/TP=1.17141 no matter
+  // whether entry was 1.14144 or 1.14372). I traced every "recent window"
+  // function this could plausibly come from (getIndicators, detectOBs,
+  // detectMarketStructure, detectLiquiditySweep) and all of them correctly
+  // scope to the last 10-20 bars - none should be able to produce a
+  // reference price hundreds of pips from live price for 24+ hours. I
+  // could not pin down the exact mechanism through static reading alone.
+  // This check doesn't fix the root cause - it stops the SYMPTOM from
+  // ever reaching a live order, and logs enough detail to find the real
+  // cause from the next occurrence instead of guessing further.
+  const maxSanePips = Math.max(maxSLPips * 3, minSLPips * 5);
+  if (slPips > maxSanePips) {
+    console.error(`[SLTP SANITY] ${symbol}: computed SL ${slPips.toFixed(1)} pips from price ${price} is implausible ` +
+      `(sane ceiling ${maxSanePips.toFixed(1)}p). stopLoss=${stopLoss}, atrVal=${atrVal}, ` +
+      `sweepAnchor=${ictSequence.sweep?.slAnchor}, recentHigh=${ind?.recentHigh}, recentLow=${ind?.recentLow}. ` +
+      `Discarding structural result, forcing pure ATR-based SL from live price.`);
+    stopLoss = direction === "BUY" ? price - atrVal * 1.5 : price + atrVal * 1.5;
+    slPips = Math.abs(price - stopLoss) / pip;
+  }
+
   stopLoss = parseFloat(stopLoss.toFixed(5));
   const risk = Math.abs(price - stopLoss);
 
   // NEW: TP targets using liquidity pools (EQH/EQL) when available
   let tp1, tp2, tp3;
-  const rrRatio = Math.max(analysisRR || 2.0, 2.0);
+  // FIX: floor reduced from 2.0 to 1.5 - a 2.0R minimum on every single
+  // trade regardless of setup quality was part of what made TPs (and
+  // therefore effective SL distance, since both compound) too large.
+  const rrRatio = Math.max(analysisRR || 1.5, 1.5);
 
   if (ictSequence.eqLiquidity) {
     const { eqh, eql } = ictSequence.eqLiquidity;
@@ -1037,20 +1068,26 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
     }
   }
 
-  // Ensure TP1 is at least 1.5R
-  if (!tp1 || Math.abs(tp1 - price) < risk * 1.5) {
+  // FIX: floor reduced from 1.5R to 1.2R, consistent with the overall tightening
+  if (!tp1 || Math.abs(tp1 - price) < risk * 1.2) {
     tp1 = direction === "BUY"
-      ? parseFloat((price + risk * Math.max(rrRatio, 1.5)).toFixed(5))
-      : parseFloat((price - risk * Math.max(rrRatio, 1.5)).toFixed(5));
+      ? parseFloat((price + risk * Math.max(rrRatio, 1.2)).toFixed(5))
+      : parseFloat((price - risk * Math.max(rrRatio, 1.2)).toFixed(5));
   }
 
+  // FIX: this is the actual takeProfit used (see "const takeProfit = tp2"
+  // below) - was floored at 2.5R minimum on every trade, which combined
+  // with the wide SL cap above is what made TPs consistently large.
+  // Reduced floor to 1.8R - still solidly profitable (>1.5:1 reward:risk)
+  // without the excess.
   tp2 = direction === "BUY"
-    ? parseFloat((price + risk * Math.max(rrRatio, 2.5)).toFixed(5))
-    : parseFloat((price - risk * Math.max(rrRatio, 2.5)).toFixed(5));
+    ? parseFloat((price + risk * Math.max(rrRatio, 1.8)).toFixed(5))
+    : parseFloat((price - risk * Math.max(rrRatio, 1.8)).toFixed(5));
 
+  // FIX: stretch target reduced from 4.0R to 2.5R for the same reason
   tp3 = direction === "BUY"
-    ? parseFloat((price + risk * 4.0).toFixed(5))
-    : parseFloat((price - risk * 4.0).toFixed(5));
+    ? parseFloat((price + risk * 2.5).toFixed(5))
+    : parseFloat((price - risk * 2.5).toFixed(5));
 
   // ── TP DIRECTION VALIDATION: prevent TP below entry ─────────────────────
   const slDist = Math.abs(price - stopLoss);

@@ -601,6 +601,30 @@ def execute_trade(account_id, order):
             tp = price - abs(price - sl) * 2.0
             log.warning(f"{symbol}: TP above entry for SELL — corrected to {tp:.5f}")
 
+    # ── Hard magnitude sanity check (independent of the backend) ─────────────
+    # FIX: the backend was found sending SL/TP hundreds of pips from live
+    # price for some EURUSD/USDCAD/USDCHF signals (all showing IDENTICAL
+    # SL/TP regardless of actual entry - traced to signalCore.js, fixed
+    # there). The direction-only check above would "fix" these to still be
+    # on the correct side, but the distance stayed just as huge either way.
+    # This is a second, independent layer here in the bridge itself: a hard
+    # per-instrument pip ceiling that refuses to place ANY order whose SL/TP
+    # is absurdly far from live price, regardless of what the backend sent
+    # or whether a future regression reintroduces a similar bug upstream.
+    MAX_SANE_PIPS = {
+        "GOLD": 500, "BTCUSD": 3000, "US30Cash": 1500, "GER40Cash": 1000,
+        "GBPJPY": 300, "EURJPY": 300, "USDJPY": 150,
+    }
+    max_sane = MAX_SANE_PIPS.get(symbol, 150)  # forex majors default: 150 pips
+    pip = PIP_SIZES.get(symbol, 0.0001)
+    sl_pips_check = abs(price - sl) / pip if sl else 0
+    tp_pips_check = abs(price - tp) / pip if tp else 0
+    if sl_pips_check > max_sane or tp_pips_check > max_sane:
+        log.error(f"{symbol}: REJECTED - SL/TP implausibly far from live price "
+                   f"(SL {sl_pips_check:.0f}p, TP {tp_pips_check:.0f}p, ceiling {max_sane}p). "
+                   f"price={price:.5f} sl={sl:.5f} tp={tp:.5f}. Not sending to broker.")
+        return {"success": False, "error": f"SL/TP sanity check failed ({sl_pips_check:.0f}/{tp_pips_check:.0f}p > {max_sane}p ceiling)"}
+
     # ── Select correct filling mode ───────────────────────────────────────────
     # ORDER_FILLING_IOC is only valid for MARKET orders.
     # Pending orders (LIMIT/STOP) require ORDER_FILLING_RETURN on most brokers.
@@ -894,6 +918,12 @@ def push_ohlcv():
                 res = r.json()
                 if res.get("signal"):
                     log.info(f"Signal: {symbol} -> {res['signal']}")
+                elif res.get("reason"):
+                    # FIX: the backend already tells us WHY (e.g. "Trading disabled"),
+                    # but this was being silently discarded — every no-signal case
+                    # printed identically, making it impossible to tell "trading is
+                    # off" apart from "no setup right now" just from this log.
+                    log.info(f"No signal: {symbol} ({res['reason']})")
                 else:
                     log.info(f"No signal: {symbol} (HOLD)")
             else:
