@@ -319,9 +319,17 @@ router.post("/commands/:id/ack", async (req, res) => {
       const signalId = withoutPrefix.substring(0, withoutPrefix.length - 37); // remove trailing underscore + UUID
 
       // Insert trade record
+      // FIX: signalId was already being parsed above (line ~319) and even
+      // used below to update the signals table status - it was just never
+      // actually included in this insert. This is why signal_id has been
+      // null on every single trade (confirmed: 0 of 740 had it populated).
+      // Fixing this is what makes grade-based analytics on closed/open
+      // trades possible going forward - it doesn't change any trading
+      // logic, purely a data-completeness fix.
       await supabaseAdmin.from("trades").insert({
         account_id: accountId,
         ticket: result.ticket,
+        signal_id: signalId || null,
         symbol: result.order?.symbol,
         direction: result.order?.direction,
         volume: result.volume || result.order?.volume,
