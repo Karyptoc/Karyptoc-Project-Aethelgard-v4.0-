@@ -10,17 +10,24 @@ router.use(verifyToken);
 
 router.get("/", async (req, res) => {
   const { status, account_id, symbol } = req.query;
+  // FIX: was hardcoded .limit(200) with no way to see anything beyond that.
+  // Now accepts ?limit= and ?offset= for pagination, capped at 1000 per
+  // request to avoid an accidental huge query, and returns the total count
+  // so the frontend can show "X of Y" and a working Load More button.
+  const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+  const offset = parseInt(req.query.offset) || 0;
+
   let query = supabaseAdmin
     .from("trades")
-    .select("*, mt5_accounts(label, login)")
+    .select("*, mt5_accounts(label, login)", { count: "exact" })
     .order("created_at", { ascending: false })
-    .limit(200);
+    .range(offset, offset + limit - 1);
   if (status && status !== "all") query = query.eq("status", status);
   if (account_id) query = query.eq("account_id", account_id);
   if (symbol) query = query.eq("symbol", symbol);
-  const { data, error } = await query;
+  const { data, error, count } = await query;
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ trades: data });
+  res.json({ trades: data, total: count, limit, offset });
 });
 
 // POST /api/trades/analyze — AI post-trade analysis

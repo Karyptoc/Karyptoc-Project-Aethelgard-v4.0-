@@ -14,6 +14,20 @@ router.post("/logout", async (req, res) => {
   res.json({ ok: true });
 });
 
+// NEW: refresh an expiring session using its refresh_token, without
+// requiring the user to log in again. This was completely missing before -
+// login stored access_token once and nothing ever refreshed it, so once
+// Supabase's ~1hr expiry hit, every request started failing with a real
+// 401 and the frontend force-logged-out. This endpoint is what api.js now
+// calls automatically when that happens (see api.js changes).
+router.post("/refresh", async (req, res) => {
+  const { refresh_token } = req.body;
+  if (!refresh_token) return res.status(400).json({ error: "No refresh_token provided" });
+  const { data, error } = await supabaseAnon.auth.refreshSession({ refresh_token });
+  if (error) return res.status(401).json({ error: error.message });
+  res.json({ session: data.session, user: data.user });
+});
+
 router.get("/me", async (req, res) => {
   const token = req.headers.authorization?.split(" ")[1];
   if (!token) return res.status(401).json({ error: "No token" });

@@ -18,21 +18,41 @@ export default function Trades() {
   const [status, setStatus] = useState("all");
   const [symbol, setSymbol] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [total, setTotal] = useState(0);
+  const PAGE_SIZE = 200;
   const [analyzing, setAnalyzing] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
+
+  const buildQuery = (offset) => {
+    const params = [`limit=${PAGE_SIZE}`, `offset=${offset}`];
+    if (status !== "all") params.push(`status=${status}`);
+    if (symbol) params.push(`symbol=${symbol}`);
+    return params.join("&");
+  };
 
   const load = async () => {
     setLoading(true);
     try {
       const [tradesR, perfR] = await Promise.all([
-        api.get(`/api/trades?${status !== "all" ? `status=${status}` : ""}${symbol ? `&symbol=${symbol}` : ""}`),
+        api.get(`/api/trades?${buildQuery(0)}`),
         api.get("/api/dashboard/performance")
       ]);
       setTrades(tradesR.data.trades || []);
+      setTotal(tradesR.data.total || 0);
       setStats(perfR.data.stats);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
+  };
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try {
+      const r = await api.get(`/api/trades?${buildQuery(trades.length)}`);
+      setTrades(prev => [...prev, ...(r.data.trades || [])]);
+    } catch (e) { console.error(e); }
+    finally { setLoadingMore(false); }
   };
 
   useEffect(() => { load(); }, [status, symbol]);
@@ -112,7 +132,9 @@ export default function Trades() {
         <div className="card">
           <div className="card-header">
             <span className="card-title">Trade History</span>
-            <span className="badge accent">{trades.length} records</span>
+            <span className="badge accent">
+              {trades.length}{total > trades.length ? ` of ${total}` : ""} records
+            </span>
           </div>
           {loading ? (
             <div style={{ padding: 24, color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>Loading...</div>
@@ -156,6 +178,13 @@ export default function Trades() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {!loading && trades.length < total && (
+            <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
+              <button className="btn btn-ghost btn-sm" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore ? "Loading..." : `Load More (${total - trades.length} remaining)`}
+              </button>
             </div>
           )}
         </div>
