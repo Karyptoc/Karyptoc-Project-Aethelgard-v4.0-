@@ -1032,16 +1032,39 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
   // scope to the last 10-20 bars - none should be able to produce a
   // reference price hundreds of pips from live price for 24+ hours. I
   // could not pin down the exact mechanism through static reading alone.
-  // This check doesn't fix the root cause - it stops the SYMPTOM from
-  // ever reaching a live order, and logs enough detail to find the real
-  // cause from the next occurrence instead of guessing further.
-  const maxSanePips = Math.max(maxSLPips * 3, minSLPips * 5);
+  //
+  // FIX (this was a real gap in my first version of this check, confirmed
+  // by live logs on 2026-07-09 where sl=1.17715 still got through despite
+  // this check being deployed): the ceiling below was calculated relative
+  // to atrVal. If atrVal ITSELF is corrupted or stale for the same
+  // underlying reason as the stuck SL, the ceiling inflates right along
+  // with it and the bug slips through anyway - a relative check is only
+  // as trustworthy as the thing it's relative to. Added a hard, ABSOLUTE
+  // per-symbol ceiling below that doesn't depend on atrVal at all (mirrors
+  // the same fixed table already in bridge.py), and the true ceiling is
+  // now whichever of the two is SMALLER - so a corrupted ATR can no longer
+  // raise the ceiling high enough to let this back in.
+  const ABSOLUTE_MAX_PIPS = {
+    GOLD: 500, BTCUSD: 3000, US30Cash: 1500, GER40Cash: 1000,
+    GBPJPY: 300, EURJPY: 300, USDJPY: 150,
+  };
+  const absoluteCeiling = ABSOLUTE_MAX_PIPS[symbol] || 150; // forex majors default: 150 pips
+  const relativeCeiling = Math.max(maxSLPips * 3, minSLPips * 5);
+  const maxSanePips = Math.min(absoluteCeiling, relativeCeiling);
+
   if (slPips > maxSanePips) {
     console.error(`[SLTP SANITY] ${symbol}: computed SL ${slPips.toFixed(1)} pips from price ${price} is implausible ` +
-      `(sane ceiling ${maxSanePips.toFixed(1)}p). stopLoss=${stopLoss}, atrVal=${atrVal}, ` +
-      `sweepAnchor=${ictSequence.sweep?.slAnchor}, recentHigh=${ind?.recentHigh}, recentLow=${ind?.recentLow}. ` +
-      `Discarding structural result, forcing pure ATR-based SL from live price.`);
-    stopLoss = direction === "BUY" ? price - atrVal * 1.5 : price + atrVal * 1.5;
+      `(ceiling ${maxSanePips.toFixed(1)}p = min(absolute ${absoluteCeiling}p, relative ${relativeCeiling.toFixed(1)}p)). ` +
+      `stopLoss=${stopLoss}, atrVal=${atrVal}, sweepAnchor=${ictSequence.sweep?.slAnchor}, ` +
+      `recentHigh=${ind?.recentHigh}, recentLow=${ind?.recentLow}. Discarding structural result.`);
+
+    // FIX: also guard the correction itself - if atrVal is implausibly
+    // large in pip terms (a sign it's corrupted too, same root issue),
+    // don't use it to build the "corrected" SL either, or the fallback
+    // inherits the same corruption. Fall back to a fixed 1% of price.
+    const atrPips = atrVal / pip;
+    const safeAtrVal = atrPips > absoluteCeiling ? price * 0.01 : atrVal;
+    stopLoss = direction === "BUY" ? price - safeAtrVal * 1.5 : price + safeAtrVal * 1.5;
     slPips = Math.abs(price - stopLoss) / pip;
   }
 
