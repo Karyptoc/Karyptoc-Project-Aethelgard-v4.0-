@@ -355,14 +355,29 @@ router.post("/commands/:id/ack", async (req, res) => {
     }
   } else if (id.startsWith("sig_") && !result.success) {
     await log("warning", "bridge", `Trade failed for ${id}: ${result.error}`);
-    // Revert signal to pending so it can retry on next cycle
+    // FIX: this used to unconditionally revert status back to "pending" on
+    // ANY failure - but bridge.py maintains its OWN permanent blacklist
+    // once a signal hits its local max-attempts limit, and this code had
+    // no awareness of that. Result: backend keeps reviving a signal
+    // bridge.py has already permanently given up on, resending it every
+    // poll cycle, bridge rejects it again, backend revives it again -
+    // looping for hours until expires_at finally passes (confirmed live:
+    // same 3 signal_ids retried continuously for 5+ hours on 2026-07-09).
+    // Now recognizes bridge's own blacklist message and marks the signal
+    // permanently expired instead of reviving it - other failure types
+    // (network hiccup, temporary MT5 issue) still get the retry-via-
+    // pending behavior, since that's legitimately useful for those.
     try {
       const withoutPrefix = id.substring(4);
       const signalId = withoutPrefix.substring(0, withoutPrefix.length - 37);
       if (signalId) {
+        const isPermanentlyDead = (result.error || "").includes("blacklisted");
         await supabaseAdmin.from("signals")
-          .update({ status: "pending" })
+          .update({ status: isPermanentlyDead ? "expired" : "pending" })
           .eq("id", signalId);
+        if (isPermanentlyDead) {
+          await log("info", "bridge", `${id}: bridge blacklisted this signal - marking expired instead of retrying`);
+        }
       }
     } catch (e) {}
   }
