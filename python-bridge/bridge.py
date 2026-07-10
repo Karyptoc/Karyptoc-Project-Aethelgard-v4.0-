@@ -611,8 +611,12 @@ def execute_trade(account_id, order):
     # per-instrument pip ceiling that refuses to place ANY order whose SL/TP
     # is absurdly far from live price, regardless of what the backend sent
     # or whether a future regression reintroduces a similar bug upstream.
+    # FIX: same pip-scale mismatch as the backend's copy of this table -
+    # GOLD/BTCUSD ceilings were far too tight because they didn't account
+    # for their non-standard pip_size. See signalCore.js for the full
+    # explanation and the live-log evidence that confirmed this.
     MAX_SANE_PIPS = {
-        "GOLD": 500, "BTCUSD": 3000, "US30Cash": 1500, "GER40Cash": 1000,
+        "GOLD": 15000, "BTCUSD": 8000, "US30Cash": 1500, "GER40Cash": 1000,
         "GBPJPY": 300, "EURJPY": 300, "USDJPY": 150,
     }
     max_sane = MAX_SANE_PIPS.get(symbol, 150)  # forex majors default: 150 pips
