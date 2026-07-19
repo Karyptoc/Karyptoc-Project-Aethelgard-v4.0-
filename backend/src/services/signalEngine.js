@@ -301,11 +301,19 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       return null;
     }
 
-    // ── SESSION TRADE CAP: max 3 per 2.5hr window ─────────────────────────
+    // ── SESSION TRADE CAP: max 3 per pair per 2.5hr window ────────────────
+    // FIX (confirmed severe pre-existing bug, not something introduced by
+    // the grade-concurrency work): this query had no symbol filter, so it
+    // counted trades across ALL 13 pairs combined. Once any 3 trades opened
+    // anywhere on the account within 2.5 hours, EVERY pair got locked out
+    // simultaneously - confirmed live via Render logs showing all 13 pairs
+    // hitting "Session cap (3/3)" at once for over an hour. This also ran
+    // BEFORE the grade-based concurrency check, so that logic never even
+    // got reached once this tripped. Now correctly scoped per-symbol.
     try {
       const kzCutoff = new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString();
       const { data: kzTrades } = await supabaseAdmin
-        .from("trades").select("id").gte("open_time", kzCutoff);
+        .from("trades").select("id").eq("symbol", symbol).gte("open_time", kzCutoff);
       if ((kzTrades?.length || 0) >= 3) {
         await log("info", "signalEngine", `${symbol}: Session cap (${kzTrades.length}/3) — HOLD`);
         return null;
