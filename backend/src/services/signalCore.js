@@ -1045,7 +1045,9 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
   // now whichever of the two is SMALLER - so a corrupted ATR can no longer
   // raise the ceiling high enough to let this back in.
   const ABSOLUTE_MAX_PIPS = {
-    GOLD: 500, BTCUSD: 3000, US30Cash: 1500, GER40Cash: 1000,
+    GOLD: 15000,     // = $150 at pip_size 0.01 (~4x a $35-42 ATR)
+    BTCUSD: 8000,     // = $8000 at pip_size 1.0
+    US30Cash: 1500, GER40Cash: 1000,
     GBPJPY: 300, EURJPY: 300, USDJPY: 150,
   };
   const absoluteCeiling = ABSOLUTE_MAX_PIPS[symbol] || 150; // forex majors default: 150 pips

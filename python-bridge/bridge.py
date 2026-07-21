@@ -612,7 +612,7 @@ def execute_trade(account_id, order):
     # is absurdly far from live price, regardless of what the backend sent
     # or whether a future regression reintroduces a similar bug upstream.
     MAX_SANE_PIPS = {
-        "GOLD": 500, "BTCUSD": 3000, "US30Cash": 1500, "GER40Cash": 1000,
+        "GOLD": 15000, "BTCUSD": 8000, "US30Cash": 1500, "GER40Cash": 1000,
         "GBPJPY": 300, "EURJPY": 300, "USDJPY": 150,
     }
     max_sane = MAX_SANE_PIPS.get(symbol, 150)  # forex majors default: 150 pips
@@ -973,6 +973,15 @@ def poll_commands():
                 order = cmd["order"]
                 symbol = order.get("symbol", "")
 
+                # NEW: reserve guaranteed slots for the designated priority
+                # pairs so they can never be crowded out by the other 9 pairs
+                # filling up the global cap first. Non-priority pairs are
+                # blocked once they'd push total open positions above
+                # (max_trades - reserved) - priority pairs are only limited
+                # by the raw max_trades ceiling itself, same as before.
+                PRIORITY_PAIRS = {"GOLD", "GER40Cash", "US30Cash", "BTCUSD"}
+                RESERVED_FOR_PRIORITY = 4  # one guaranteed slot per priority pair
+
                 # ── Bridge-level guard 1: Global concurrent trade cap ─────────
                 # Checks actual MT5 open positions (not DB — DB lags 30s)
                 current_open = get_open_trade_count()
@@ -982,6 +991,18 @@ def poll_commands():
                         requests.post(f"{BACKEND_URL}/api/bridge/commands/{cmd['id']}/ack",
                             headers=api_headers(),
                             json={"success": False, "error": f"Max concurrent trades {current_open}/{max_trades}"},
+                            timeout=5)
+                    except:
+                        pass
+                    continue
+
+                if symbol not in PRIORITY_PAIRS and current_open >= (max_trades - RESERVED_FOR_PRIORITY):
+                    log.warning(f"BLOCKED: {symbol} — {current_open}/{max_trades} open, "
+                                f"{RESERVED_FOR_PRIORITY} slots reserved for priority pairs — skip")
+                    try:
+                        requests.post(f"{BACKEND_URL}/api/bridge/commands/{cmd['id']}/ack",
+                            headers=api_headers(),
+                            json={"success": False, "error": f"Slots reserved for priority pairs ({current_open}/{max_trades})"},
                             timeout=5)
                     except:
                         pass
