@@ -356,6 +356,8 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, params) {
       max_drawdown_pct: parseFloat(maxDrawdown.toFixed(2)),
       avg_win: winners.length > 0 ? parseFloat((grossProfit / winners.length).toFixed(2)) : 0,
       avg_loss: losers.length > 0 ? parseFloat((grossLoss / losers.length).toFixed(2)) : 0,
+      best_trade: trades.length > 0 ? parseFloat(Math.max(...trades.map(t => t.pnl)).toFixed(2)) : 0,
+      worst_trade: trades.length > 0 ? parseFloat(Math.min(...trades.map(t => t.pnl)).toFixed(2)) : 0,
       total_spread_cost: parseFloat(trades.reduce((s, t) => s + (t.spread_cost || 0), 0).toFixed(2)),
       htf_aligned_trades: htfAligned.length,
       htf_aligned_win_rate: htfAligned.length > 0
