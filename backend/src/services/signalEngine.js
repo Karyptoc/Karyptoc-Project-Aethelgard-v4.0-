@@ -413,7 +413,8 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       strength,
       pdZone,
       hasFullSequence: !!(sweep && displacement && retest),
-      hasPartialSequence: !!(sweep && displacement)
+      hasPartialSequence: !!(sweep && displacement),
+      _session: session, // needed by calculateStructuralSLTP for kill-zone-aware SL cap
     };
 
     // Confluence scoring with ICT sequence

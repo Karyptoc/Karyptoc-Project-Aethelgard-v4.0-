@@ -1015,7 +1015,18 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
   // the near-zero GBPUSD/NZDUSD stops ("SL distance 0.00006 < minimum
   // 0.00100") that bridge.py had to catch and correct at execution time.
   // The cap can now never go below the floor.
-  const maxSLPips = Math.max((atrVal * 1.5) / pip, minSLPips);
+  // RESTORED (was present in earlier versions, lost somewhere in later
+  // iterations): session-aware cap instead of a flat 1.5x ATR always.
+  // Kill-zone trades are the highest-quality setups and should risk less
+  // per trade for a given target - tightening to 1.0x ATR specifically
+  // during kill zones, while keeping 1.5x outside them. This does NOT
+  // touch the safety-net fixes below (min/max ordering guarantee,
+  // absolute ceiling, pip-scale correction) - those stay exactly as they
+  // are, this only changes what the "normal" cap value is before those
+  // safety nets ever need to engage.
+  const inKillZone = !!(ictSequence._session?.killZone);
+  const maxSLMult = inKillZone ? 1.0 : 1.5;
+  const maxSLPips = Math.max((atrVal * maxSLMult) / pip, minSLPips);
   if (slPips > maxSLPips) {
     stopLoss = direction === "BUY"
       ? price - maxSLPips * pip

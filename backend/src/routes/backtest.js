@@ -188,7 +188,8 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, params) {
       eqLiquidity: (eqLiquidity?.eqh?.length > 0 || eqLiquidity?.eql?.length > 0) ? eqLiquidity : null,
       strength, pdZone,
       hasFullSequence: !!(sweep && displacement && retest),
-      hasPartialSequence: !!(sweep && displacement)
+      hasPartialSequence: !!(sweep && displacement),
+      _session: session, // needed by calculateStructuralSLTP for kill-zone-aware SL cap
     };
 
     ind.direction = retestDirection;
