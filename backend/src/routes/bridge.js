@@ -326,19 +326,45 @@ router.post("/commands/:id/ack", async (req, res) => {
       // Fixing this is what makes grade-based analytics on closed/open
       // trades possible going forward - it doesn't change any trading
       // logic, purely a data-completeness fix.
-      await supabaseAdmin.from("trades").insert({
-        account_id: accountId,
-        ticket: result.ticket,
-        signal_id: signalId || null,
-        symbol: result.order?.symbol,
-        direction: result.order?.direction,
-        volume: result.volume || result.order?.volume,
-        open_price: result.price,
-        stop_loss: result.order?.stop_loss,
-        take_profit: result.order?.take_profit,
-        status: "open",
-        open_time: new Date().toISOString()
-      });
+      // FIX: this used to unconditionally INSERT a new row every time this
+      // handler fired, with no check for an existing row - unlike the sync
+      // logic above (lines 91-107) which correctly checks by ticket first.
+      // Confirmed live: pending orders (GBPJPY BUY_LIMIT etc) get an initial
+      // row inserted here with placeholder data (open_price=0), then when
+      // the order actually fills and this handler fires again for the same
+      // ticket, it inserted a SECOND row instead of updating the first -
+      // leaving an orphaned garbage row (open_price=0, profit=null) behind
+      // every time. Now checks for an existing row by ticket+account first,
+      // matching the same safe pattern already used in the sync path.
+      const { data: existingTrade } = await supabaseAdmin.from("trades")
+        .select("id").eq("account_id", accountId).eq("ticket", result.ticket).single();
+
+      if (existingTrade) {
+        await supabaseAdmin.from("trades").update({
+          signal_id: signalId || null,
+          symbol: result.order?.symbol,
+          direction: result.order?.direction,
+          volume: result.volume || result.order?.volume,
+          open_price: result.price,
+          stop_loss: result.order?.stop_loss,
+          take_profit: result.order?.take_profit,
+          status: "open",
+        }).eq("id", existingTrade.id);
+      } else {
+        await supabaseAdmin.from("trades").insert({
+          account_id: accountId,
+          ticket: result.ticket,
+          signal_id: signalId || null,
+          symbol: result.order?.symbol,
+          direction: result.order?.direction,
+          volume: result.volume || result.order?.volume,
+          open_price: result.price,
+          stop_loss: result.order?.stop_loss,
+          take_profit: result.order?.take_profit,
+          status: "open",
+          open_time: new Date().toISOString()
+        });
+      }
 
       // Mark signal executed only after confirmed trade
       if (signalId) {
