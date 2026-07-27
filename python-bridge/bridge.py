@@ -324,20 +324,34 @@ def calc_atr(symbol, period=14):
           for i in range(1, len(rates))]
     return sum(tr[-period:]) / period
 
-def validate_sl_distance(symbol, direction, price, sl):
+def validate_sl_distance(symbol, direction, price, sl, sym_info=None):
     """
     Fix 2: Validate SL is far enough from entry price.
     Returns (is_valid, corrected_sl).
     If SL too close, adjusts it to minimum distance instead of rejecting.
+
+    FIX: previously only used a static MIN_SL_DISTANCE table, never checked
+    against the broker's own live trade_stops_level. If the broker's actual
+    required minimum is larger than our static guess (brokers can and do
+    widen this dynamically based on volatility/session), our "correction"
+    would still be too small and MT5 would reject with Invalid Stops anyway
+    - a plausible real cause of the GOLD retcode:10016 failures on
+    2026-07-24. Now takes the LARGER of our static table and the broker's
+    live-reported minimum, so we never undershoot what MT5 actually requires.
     """
     if sl == 0:
         return True, 0  # No SL set — let MT5 handle it
 
-    min_dist = MIN_SL_DISTANCE.get(symbol, 0.0005)
+    static_min = MIN_SL_DISTANCE.get(symbol, 0.0005)
+    broker_min = 0
+    if sym_info and sym_info.trade_stops_level > 0:
+        broker_min = sym_info.trade_stops_level * sym_info.point
+    min_dist = max(static_min, broker_min)
     actual_dist = abs(price - sl)
 
     if actual_dist < min_dist:
-        log.warning(f"{symbol}: SL distance {actual_dist:.5f} < minimum {min_dist:.5f} — adjusting")
+        log.warning(f"{symbol}: SL distance {actual_dist:.5f} < minimum {min_dist:.5f} "
+                    f"(static={static_min:.5f}, broker_live={broker_min:.5f}) — adjusting")
         if direction == "BUY":
             corrected_sl = price - min_dist
         else:
@@ -406,9 +420,8 @@ def execute_copy_trade(client, order, master_price, master_balance, master_ticke
         tp = float(order.get("take_profit") or 0)
 
         # Validate SL distance for client account
-        sl_valid, sl = validate_sl_distance(symbol, direction, price, sl)
-
         sym_info = mt5.symbol_info(broker_symbol)
+        sl_valid, sl = validate_sl_distance(symbol, direction, price, sl, sym_info)
         if sym_info:
             client_lot = max(client_lot, sym_info.volume_min)
             client_lot = round(round(client_lot / sym_info.volume_step) * sym_info.volume_step, 2)
@@ -589,7 +602,7 @@ def execute_trade(account_id, order):
     price = exec_price
 
     # ── Validate SL distance ──────────────────────────────────────────────────
-    sl_valid, sl = validate_sl_distance(symbol, direction, price, sl)
+    sl_valid, sl = validate_sl_distance(symbol, direction, price, sl, sym_info)
     if not sl_valid:
         log.info(f"{symbol}: SL corrected to {sl:.5f} (was too close to {price:.5f})")
 
@@ -667,7 +680,21 @@ def execute_trade(account_id, order):
         log.error(f"Trade failed [{broker_symbol} {direction} {signal_order_type}]: mt5.order_send returned None — MT5 error: {err}")
         return {"success": False, "error": f"order_send returned None: {err}", "retcode": -1}
     if result.retcode != mt5.TRADE_RETCODE_DONE:
-        log.error(f"Trade failed [{broker_symbol} {direction} {signal_order_type}]: {result.comment} (retcode:{result.retcode})")
+        # FIX: this error never logged the actual price/sl/tp/stops_level
+        # that were sent, making "Invalid stops" impossible to diagnose from
+        # logs alone (this is exactly what happened with GOLD on 2026-07-24
+        # - retcode 10016 with no way to see the real numbers involved).
+        # Every other bug in this project got solved by adding the missing
+        # diagnostic detail first, then fixing based on real evidence on the
+        # next occurrence - doing the same here rather than guessing.
+        stops_level = sym_info.trade_stops_level if sym_info else "unknown"
+        point = sym_info.point if sym_info else "unknown"
+        dist_to_sl = abs(price - sl) if sl else 0
+        dist_to_tp = abs(price - tp) if tp else 0
+        log.error(f"Trade failed [{broker_symbol} {direction} {signal_order_type}]: {result.comment} (retcode:{result.retcode}) | "
+                   f"actual_order_type={mt5_order_type} action={mt5_action} price={price:.5f} sl={sl:.5f} tp={tp:.5f} | "
+                   f"dist_to_sl={dist_to_sl:.5f} dist_to_tp={dist_to_tp:.5f} | "
+                   f"broker_stops_level={stops_level} point={point}")
         return {"success": False, "error": result.comment, "retcode": result.retcode}
 
     # ── Success: clear retry counter ──────────────────────────────────────────
