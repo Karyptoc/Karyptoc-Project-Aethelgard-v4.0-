@@ -86,7 +86,7 @@ router.get("/availability", verifyToken, async (req, res) => {
 
 router.post("/run", verifyToken, async (req, res) => {
   try {
-    const { symbol, days = 30, initial_balance = 1000, risk_percent = 1.0 } = req.body;
+    const { symbol, days = 30, initial_balance = 1000, risk_percent = 1.0, min_score_override } = req.body;
     if (!symbol) return res.status(400).json({ error: "symbol required" });
 
     const fromDate = new Date(Date.now() - (days + 120) * 24 * 60 * 60 * 1000).toISOString();
@@ -107,7 +107,7 @@ router.post("/run", verifyToken, async (req, res) => {
 
     const windowStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const result = runBacktest(symbol, h4Bars, d1Bars, w1Bars, {
-      initialBalance: initial_balance, riskPercent: risk_percent, windowStart,
+      initialBalance: initial_balance, riskPercent: risk_percent, windowStart, minScoreOverride: min_score_override,
     });
 
     await log("info", "backtest",
@@ -121,7 +121,7 @@ router.post("/run", verifyToken, async (req, res) => {
 });
 
 function runBacktest(symbol, h4Bars, d1Bars, w1Bars, params) {
-  const { initialBalance = 1000, riskPercent = 1.0, windowStart } = params;
+  const { initialBalance = 1000, riskPercent = 1.0, windowStart, minScoreOverride } = params;
   const pipSize = core.PIP_SIZES[symbol] || 0.0001;
   const spreadPips = ASSUMED_SPREAD_PIPS[symbol] || 2.0;
 
@@ -186,7 +186,12 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, params) {
     const confluence = core.scoreConfluence(ind, session, htfBias, isPairActive, ictSequence);
 
     let minScore;
-    if (ictSequence.hasFullSequence) minScore = 30;
+    if (typeof minScoreOverride === "number") {
+      // Test mode: flat floor regardless of ICT sequence/session context,
+      // for comparing "what if we required at least grade B/A" against
+      // real historical data before ever touching production thresholds.
+      minScore = minScoreOverride;
+    } else if (ictSequence.hasFullSequence) minScore = 30;
     else if (ictSequence.hasPartialSequence) minScore = 33;
     else if (session.killZone && isPairActive) minScore = 35;
     else if (session.killZone) minScore = 38;
