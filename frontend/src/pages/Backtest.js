@@ -48,6 +48,7 @@ export default function Backtest() {
   const [form, setForm] = useState({
     symbol: "GOLD", days: 30,
     initial_balance: 1000, risk_percent: 1.0,
+    min_score_mode: "default", // "default" | "55" (B-grade min) | "75" (A-grade min)
   });
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
@@ -72,7 +73,11 @@ export default function Backtest() {
       // Longer timeout than the api.js default (20s) — walking months of
       // H4 bars through the full strategy pipeline genuinely takes longer
       // than a typical API call, especially for 60-90 day ranges.
-      const r = await api.post("/api/backtest/run", form, { timeout: 90000 });
+      const { min_score_mode, ...rest } = form;
+      const payload = min_score_mode === "default"
+        ? rest
+        : { ...rest, min_score_override: parseInt(min_score_mode, 10) };
+      const r = await api.post("/api/backtest/run", payload, { timeout: 90000 });
       setResult(r.data);
       setActiveTab("summary");
     } catch (e) {
@@ -125,6 +130,15 @@ export default function Backtest() {
               <label className="form-label">Risk Per Trade (%)</label>
               <input className="form-input" type="number" step="0.1" min="0.1" max="5" value={form.risk_percent}
                 onChange={e => setForm({...form, risk_percent: parseFloat(e.target.value)})} />
+            </div>
+            <div>
+              <label className="form-label">Confluence Floor</label>
+              <select className="form-select" value={form.min_score_mode}
+                onChange={e => setForm({...form, min_score_mode: e.target.value})}>
+                <option value="default">Default (tiered 30-42)</option>
+                <option value="55">B-grade minimum (55)</option>
+                <option value="75">A-grade minimum (75)</option>
+              </select>
             </div>
           </div>
 
