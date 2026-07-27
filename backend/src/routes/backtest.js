@@ -16,9 +16,18 @@ const { verifyToken } = require("../middleware/auth");
 const core = require("../services/signalCore");
 const riskEngine = require("../services/riskEngine");
 
+// FIX: these were badly miscalibrated for GOLD/US30Cash/GER40Cash/BTCUSD -
+// confirmed by comparing against real spreads observed in live bridge logs
+// (e.g. "Spread:50.0pips" for BTCUSD, "Spread:5.5pips" for US30Cash,
+// "Spread:2.5pips" for GER40Cash - vs the old assumed 3000/200/150). The
+// old BTCUSD value alone was ~60x too high, which was silently erasing
+// most or all of every simulated trade's profit before the strategy ever
+// got a fair test - confirmed by the mathematically implausible negative
+// average win it was producing. GOLD was actually a bit too LOW versus
+// real observed spreads (50-56 in live logs vs the old 25), corrected too.
 const ASSUMED_SPREAD_PIPS = {
-  GOLD: 25, EURUSD: 1.2, GBPUSD: 1.8, USDJPY: 1.2,
-  US30Cash: 200, GER40Cash: 150, BTCUSD: 3000,
+  GOLD: 50, EURUSD: 1.2, GBPUSD: 1.8, USDJPY: 1.2,
+  US30Cash: 5.5, GER40Cash: 2.5, BTCUSD: 50,
   AUDUSD: 1.5, USDCAD: 1.8, USDCHF: 1.8,
   NZDUSD: 2.0, GBPJPY: 3.0, EURJPY: 2.0,
 };
