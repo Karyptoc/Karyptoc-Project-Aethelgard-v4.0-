@@ -1110,6 +1110,26 @@ def poll_commands():
     except Exception as e:
         log.error(f"Command poll: {e}")
 
+def run_backfill_generator():
+    """
+    Does the actual M5/M15/H1 backfill work, one (symbol, timeframe) pair
+    at a time, yielding control back to the caller after each one. This is
+    what makes the backfill interleave-able with the main loop instead of
+    blocking it - the main loop calls next() on this once per iteration,
+    so schedule.run_pending() and time.sleep(1) still run in between,
+    keeping command polling and position management alive throughout.
+    Target counts are ~45 days of history for each timeframe - may return
+    fewer bars than requested if the broker/terminal doesn't have that
+    much local history downloaded; backfill_historical_bars logs a warning
+    per-pair/timeframe if so, rather than failing silently.
+    """
+    BACKFILL_COUNTS = {"M5": 12960, "M15": 4320, "H1": 1080}
+    for pair_idx, sym in enumerate(PAIRS, 1):
+        log.info(f"Backfill progress: {sym} ({pair_idx}/{len(PAIRS)})")
+        for tf_key, count in BACKFILL_COUNTS.items():
+            backfill_historical_bars(sym, tf_key, count)
+            yield
+
 def main():
     log.info("Aethelgard MT5 Bridge v12 starting...")
     log.info(f"Pairs: {', '.join(PAIRS)}")
@@ -1145,24 +1165,17 @@ def main():
     # time would be wasteful (thousands of bars per pair) and could hit
     # MT5/broker rate limits for no benefit, since the backend already
     # has whatever was cached from the first run.
+    #
+    # FIX: the actual backfill WORK now happens interleaved with the main
+    # loop below (see run_backfill_generator) instead of blocking here -
+    # this just decides whether it's needed. Scheduler jobs are registered
+    # immediately after this, before any backfill work starts, so command
+    # polling and position management are live from the first second.
     BACKFILL_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".backfill_done")
-    if not os.path.exists(BACKFILL_FLAG):
-        log.info("Running one-time M5/M15/H1 historical backfill for backtesting...")
-        # Target counts: ~45 days of history for each timeframe. May return
-        # fewer bars than requested if the broker/terminal doesn't have that
-        # much local history downloaded - backfill_historical_bars logs
-        # a warning per-pair/timeframe if so, rather than failing silently.
-        BACKFILL_COUNTS = {"M5": 12960, "M15": 4320, "H1": 1080}
-        for pair_idx, sym in enumerate(PAIRS, 1):
-            log.info(f"Backfill progress: {sym} ({pair_idx}/{len(PAIRS)})")
-            for tf_key, count in BACKFILL_COUNTS.items():
-                backfill_historical_bars(sym, tf_key, count)
-        try:
-            with open(BACKFILL_FLAG, "w") as f:
-                f.write(datetime.now(timezone.utc).isoformat())
-            log.info("Backfill complete - flag file written, will not re-run on future restarts.")
-        except Exception as e:
-            log.warning(f"Backfill completed but couldn't write flag file: {e} - may re-run next restart.")
+    backfill_needed = not os.path.exists(BACKFILL_FLAG)
+    if backfill_needed:
+        log.info("M5/M15/H1 backfill needed - will run interleaved with normal operation "
+                 "(command polling/position management stay live throughout).")
     else:
         log.info("M5/M15/H1 backfill already done (flag file present) - skipping.")
 
@@ -1185,10 +1198,23 @@ def main():
     log.info(f"Signal interval: every {interval_minutes} minutes (from dashboard setting)")
     schedule.every(interval_minutes).minutes.do(push_ohlcv)
 
+    backfill_gen = run_backfill_generator() if backfill_needed else None
+
     log.info("Bridge v12 running. Ctrl+C to stop.")
     try:
         while True:
             schedule.run_pending()
+            if backfill_gen is not None:
+                try:
+                    next(backfill_gen)
+                except StopIteration:
+                    backfill_gen = None
+                    try:
+                        with open(BACKFILL_FLAG, "w") as f:
+                            f.write(datetime.now(timezone.utc).isoformat())
+                        log.info("Backfill complete - flag file written, will not re-run on future restarts.")
+                    except Exception as e:
+                        log.warning(f"Backfill completed but couldn't write flag file: {e} - may re-run next restart.")
             time.sleep(1)
     except KeyboardInterrupt:
         log.info("Bridge stopped.")
