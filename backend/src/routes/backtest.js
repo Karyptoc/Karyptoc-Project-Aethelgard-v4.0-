@@ -99,10 +99,19 @@ router.post("/run", verifyToken, async (req, res) => {
     if (!symbol) return res.status(400).json({ error: "symbol required" });
 
     const fromDate = new Date(Date.now() - (days + 120) * 24 * 60 * 60 * 1000).toISOString();
-    const [h4Bars, d1Bars, w1Bars] = await Promise.all([
+    // M5/M15/H1 added for the new POI detection (sweep/OB/FVG moved from
+    // H4 to M15/M5) and H1-added HTF bias. These have far less accumulated
+    // history than H4 right now (one-time ~45-day backfill vs H4's longer
+    // running history) - fetchCachedBars just returns whatever exists in
+    // the window, so this degrades gracefully rather than erroring while
+    // the cache builds up further via the bridge's ongoing per-cycle push.
+    const [h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars] = await Promise.all([
       fetchCachedBars(symbol, "H4", fromDate),
       fetchCachedBars(symbol, "D1"),
       fetchCachedBars(symbol, "W1"),
+      fetchCachedBars(symbol, "H1", fromDate),
+      fetchCachedBars(symbol, "M15", fromDate),
+      fetchCachedBars(symbol, "M5", fromDate),
     ]);
 
     if (h4Bars.length < 100) {
@@ -113,9 +122,13 @@ router.post("/run", verifyToken, async (req, res) => {
     if (d1Bars.length < 30 || w1Bars.length < 20) {
       await log("info", "backtest", `${symbol}: limited D1/W1 history — HTF alignment weaker until more accumulates.`);
     }
+    if (m15Bars.length < 100 || m5Bars.length < 100) {
+      await log("info", "backtest",
+        `${symbol}: limited M15/M5 history (${m15Bars.length}/${m5Bars.length} bars) — POI detection window may be sparse until the backfill/ongoing cache accumulates more.`);
+    }
 
     const windowStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const result = runBacktest(symbol, h4Bars, d1Bars, w1Bars, {
+    const result = runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, {
       initialBalance: initial_balance, riskPercent: risk_percent, windowStart, minScoreOverride: min_score_override,
     });
 
@@ -129,7 +142,13 @@ router.post("/run", verifyToken, async (req, res) => {
   }
 });
 
-function runBacktest(symbol, h4Bars, d1Bars, w1Bars, params) {
+// STAGE 1 (data plumbing only): h1Bars/m15Bars/m5Bars now reach this
+// function and are available for the POI-detection rewrite (moving
+// sweep/OB/FVG from H4 to M15/M5, and adding H1 to HTF bias) - the replay
+// loop itself still runs on H4 exactly as before. Intentionally split into
+// its own stage so this data-availability change can be verified
+// independently before the higher-risk logic rewrite happens on top of it.
+function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, params) {
   const { initialBalance = 1000, riskPercent = 1.0, windowStart, minScoreOverride } = params;
   const pipSize = core.PIP_SIZES[symbol] || 0.0001;
   const spreadPips = ASSUMED_SPREAD_PIPS[symbol] || 2.0;

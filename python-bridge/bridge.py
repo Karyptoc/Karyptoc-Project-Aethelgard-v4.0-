@@ -302,16 +302,56 @@ def cache_ohlcv_for_backtest(symbol, tf_key, bars):
         if not new_bars:
             return
 
-        r = requests.post(
-            f"{BACKEND_URL}/api/backtest/cache",
-            headers=api_headers(),
-            json={"symbol": symbol, "timeframe": tf_key, "bars": new_bars},
-            timeout=30
-        )
-        if r.status_code == 200:
-            log.info(f"Cached {len(new_bars)} new {symbol} {tf_key} bars for backtesting")
+        # Chunk large pushes (e.g. one-time backfills) so a single request
+        # never carries thousands of bars - avoids payload-size/timeout
+        # risk on both the bridge and backend sides.
+        CHUNK = 500
+        total_sent = 0
+        for i in range(0, len(new_bars), CHUNK):
+            chunk = new_bars[i:i + CHUNK]
+            r = requests.post(
+                f"{BACKEND_URL}/api/backtest/cache",
+                headers=api_headers(),
+                json={"symbol": symbol, "timeframe": tf_key, "bars": chunk},
+                timeout=30
+            )
+            if r.status_code == 200:
+                total_sent += len(chunk)
+        if total_sent > 0:
+            log.info(f"Cached {total_sent} new {symbol} {tf_key} bars for backtesting")
     except Exception as e:
         log.warning(f"OHLCV cache error {symbol}: {e}")
+
+def backfill_historical_bars(symbol, tf_key, target_count):
+    """
+    ONE-TIME deep historical pull for a timeframe, used at startup to seed
+    the backtest cache with enough real history to actually test against -
+    the regular per-cycle push only carries a small rolling window (e.g.
+    60 M5 bars = 5 hours), which would otherwise take WEEKS of live uptime
+    to accumulate into something backtestable. Logs the actual count
+    received in case the broker/terminal has less history available than
+    requested - MT5's copy_rates_from_pos can return fewer bars than asked
+    for if that much local history hasn't been downloaded by the terminal.
+    """
+    broker_symbol = SYMBOL_MAP.get(symbol, symbol)
+    tf = TIMEFRAMES.get(tf_key, mt5.TIMEFRAME_H1)
+    if not mt5.symbol_select(broker_symbol, True):
+        log.warning(f"Backfill {symbol} {tf_key}: symbol_select failed")
+        return
+    rates = mt5.copy_rates_from_pos(broker_symbol, tf, 0, target_count)
+    if rates is None or len(rates) < 10:
+        log.warning(f"Backfill {symbol} {tf_key}: no/insufficient data returned")
+        return
+    bars = [{
+        "time": datetime.fromtimestamp(r["time"], tz=timezone.utc).isoformat(),
+        "open": float(r["open"]), "high": float(r["high"]),
+        "low": float(r["low"]), "close": float(r["close"]),
+        "volume": int(r["tick_volume"])
+    } for r in rates]
+    if len(bars) < target_count * 0.5:
+        log.warning(f"Backfill {symbol} {tf_key}: only got {len(bars)}/{target_count} bars "
+                    f"(broker/terminal may not have deeper history readily available)")
+    cache_ohlcv_for_backtest(symbol, tf_key, bars)
 
 def calc_atr(symbol, period=14):
     broker_symbol = SYMBOL_MAP.get(symbol, symbol)
@@ -926,12 +966,16 @@ def push_ohlcv():
                 min_bars = min_bars_by_tf.get(tf, 50)
                 if bars and len(bars) > min_bars:
                     ohlcv_data[tf] = bars
-                    # Cache H4/D1/W1 for backtesting — these are the timeframes
-                    # the rebuilt backtest engine needs to replicate live HTF logic.
-                    # M5/M15 excluded to keep cache volume reasonable (entry-timing
-                    # only, not used for the backtest's structural analysis).
-                    if tf in ("H4", "D1", "W1"):
-                        cache_ohlcv_for_backtest(symbol, tf, bars)
+                    # Cache all timeframes for backtesting - M5/M15/H1 added
+                    # so the backtest can actually replicate the new POI
+                    # detection logic (moved from H4 to M15/M5) and the H1
+                    # addition to HTF bias. Was previously H4/D1/W1 only,
+                    # back when the backtest's structural analysis ran
+                    # entirely on H4. The one-time startup backfill (see
+                    # backfill_historical_bars) seeds real depth for these;
+                    # this per-cycle push just keeps that history current
+                    # going forward.
+                    cache_ohlcv_for_backtest(symbol, tf, bars)
 
             if not ohlcv_data:
                 log.warning(f"No data for {symbol}")
@@ -1093,6 +1137,34 @@ def main():
     sync_all()
     log.info("Pushing initial OHLCV for all pairs...")
     push_ohlcv()
+
+    # One-time deep historical backfill for M5/M15/H1, needed for the new
+    # POI detection (moved from H4 to M15/M5) and H1-added HTF bias to
+    # actually be backtestable. Guarded by a local flag file so this only
+    # runs once ever, not on every bridge restart - re-running it every
+    # time would be wasteful (thousands of bars per pair) and could hit
+    # MT5/broker rate limits for no benefit, since the backend already
+    # has whatever was cached from the first run.
+    BACKFILL_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".backfill_done")
+    if not os.path.exists(BACKFILL_FLAG):
+        log.info("Running one-time M5/M15/H1 historical backfill for backtesting...")
+        # Target counts: ~45 days of history for each timeframe. May return
+        # fewer bars than requested if the broker/terminal doesn't have that
+        # much local history downloaded - backfill_historical_bars logs
+        # a warning per-pair/timeframe if so, rather than failing silently.
+        BACKFILL_COUNTS = {"M5": 12960, "M15": 4320, "H1": 1080}
+        for pair_idx, sym in enumerate(PAIRS, 1):
+            log.info(f"Backfill progress: {sym} ({pair_idx}/{len(PAIRS)})")
+            for tf_key, count in BACKFILL_COUNTS.items():
+                backfill_historical_bars(sym, tf_key, count)
+        try:
+            with open(BACKFILL_FLAG, "w") as f:
+                f.write(datetime.now(timezone.utc).isoformat())
+            log.info("Backfill complete - flag file written, will not re-run on future restarts.")
+        except Exception as e:
+            log.warning(f"Backfill completed but couldn't write flag file: {e} - may re-run next restart.")
+    else:
+        log.info("M5/M15/H1 backfill already done (flag file present) - skipping.")
 
     schedule.every(SYNC_INTERVAL_SECONDS).seconds.do(sync_all)
     schedule.every(30).seconds.do(manage_open_trades)
