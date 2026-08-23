@@ -756,7 +756,11 @@ function getPremiumDiscount(bars, lookback = 20) {
   return { zone, pct: parseFloat(pct.toFixed(2)), rangeHigh: high, rangeLow: low };
 }
 
-function getHTFBias(h4Bars, d1Bars = null, w1Bars = null) {
+// STAGE 2: h1Bars added as a 4th optional timeframe, same pattern as
+// d1Bars/w1Bars - degrades gracefully if H1 data isn't available yet
+// (falls back to the original H4/D1/W1-only behavior). Strength tiers
+// widened to account for up to 4 aligned timeframes instead of 3.
+function getHTFBias(h4Bars, d1Bars = null, w1Bars = null, h1Bars = null) {
   const getBias = (bars) => {
     if (!bars || bars.length < 20) return "neutral";
     const closes = bars.map(b => b.close);
@@ -766,16 +770,28 @@ function getHTFBias(h4Bars, d1Bars = null, w1Bars = null) {
     if (price < e20 && e20 < e50) return "bearish";
     return price > e20 ? "bullish" : "bearish";
   };
+  const h1Bias = h1Bars ? getBias(h1Bars) : null;
   const h4Bias = getBias(h4Bars), d1Bias = d1Bars ? getBias(d1Bars) : null, w1Bias = w1Bars ? getBias(w1Bars) : null;
-  const biases = [h4Bias, d1Bias, w1Bias].filter(Boolean);
+  const biases = [h1Bias, h4Bias, d1Bias, w1Bias].filter(Boolean);
   const bullCount = biases.filter(b => b === "bullish").length, bearCount = biases.filter(b => b === "bearish").length;
   let bias, strength;
-  if (bullCount === biases.length)      { bias = "bullish"; strength = biases.length >= 3 ? 0.95 : biases.length === 2 ? 0.80 : 0.65; }
-  else if (bearCount === biases.length) { bias = "bearish"; strength = biases.length >= 3 ? 0.95 : biases.length === 2 ? 0.80 : 0.65; }
+  // Strength ladder by count of ALIGNED timeframes (not total available) -
+  // 4/4 is now the strongest possible read, 1/1 (H4 only, e.g. D1/W1/H1
+  // all unavailable) stays at the original weakest tier.
+  // FIX: caught before deploy - the first version of this ladder mapped
+  // 3/3 alignment to 0.85, which SILENTLY WEAKENED the existing behavior
+  // for any case where H1 isn't available (old code gave 3/3 a 0.95).
+  // 3-way full alignment must stay exactly as strong as it always was -
+  // 4/4 (the new case, all including H1) matches that same top tier
+  // rather than requiring a stronger bar that would leave 3-way-only
+  // callers worse off than before this change.
+  const fullStrengthByCount = { 4: 0.95, 3: 0.95, 2: 0.80, 1: 0.65 };
+  if (bullCount === biases.length)      { bias = "bullish"; strength = fullStrengthByCount[biases.length] || 0.65; }
+  else if (bearCount === biases.length) { bias = "bearish"; strength = fullStrengthByCount[biases.length] || 0.65; }
   else if (bullCount > bearCount)       { bias = "bullish"; strength = 0.60; }
   else if (bearCount > bullCount)       { bias = "bearish"; strength = 0.60; }
   else                                  { bias = "neutral"; strength = 0.40; }
-  return { bias, strength, alignment: biases.length, h4: h4Bias, d1: d1Bias || "n/a", w1: w1Bias || "n/a",
+  return { bias, strength, alignment: biases.length, h1: h1Bias || "n/a", h4: h4Bias, d1: d1Bias || "n/a", w1: w1Bias || "n/a",
            fullAlignment: bias !== "neutral" && (bullCount === biases.length || bearCount === biases.length) };
 }
 

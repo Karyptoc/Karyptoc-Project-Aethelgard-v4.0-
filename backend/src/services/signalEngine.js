@@ -345,7 +345,10 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     }
     if (!Object.keys(multiTFData).length) return null;
 
-    const htfBias = getHTFBias(h4Bars || h1Bars, d1Bars, w1Bars);
+    // STAGE 2: h1Bars was already being extracted (line above) but never
+    // reached getHTFBias - only used as a fallback if h4Bars was missing.
+    // Now passed as the actual 4th HTF bias input.
+    const htfBias = getHTFBias(h4Bars || h1Bars, d1Bars, w1Bars, h1Bars);
 
     const adrStatus = getADRStatus(h4Bars, d1Bars, symbol);
     if (adrStatus.exhausted) {

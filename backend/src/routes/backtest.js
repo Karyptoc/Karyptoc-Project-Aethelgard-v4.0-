@@ -187,7 +187,12 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
 
     const d1Window = d1Bars.filter(b => new Date(b.time) <= barTime).slice(-100);
     const w1Window = w1Bars.filter(b => new Date(b.time) <= barTime).slice(-60);
-    const htfBias = core.getHTFBias(primaryBars, d1Window.length ? d1Window : null, w1Window.length ? w1Window : null);
+    // STAGE 2: h1Window added, filtered to barTime the same way as
+    // d1Window/w1Window to avoid lookahead bias. 150-bar window matches
+    // what bridge.py fetches live for H1 ("structure" per its own
+    // comments), keeping backtest and live behavior consistent.
+    const h1Window = (h1Bars || []).filter(b => new Date(b.time) <= barTime).slice(-150);
+    const htfBias = core.getHTFBias(primaryBars, d1Window.length ? d1Window : null, w1Window.length ? w1Window : null, h1Window.length ? h1Window : null);
 
     const adrStatus = core.getADRStatus(primaryBars, d1Window, symbol);
     if (adrStatus.exhausted) continue;
