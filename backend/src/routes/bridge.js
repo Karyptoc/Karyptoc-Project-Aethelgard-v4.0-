@@ -90,8 +90,20 @@ router.post("/sync", async (req, res) => {
 
     if (positions?.length > 0) {
       for (const pos of positions) {
-        const { data: existing } = await supabaseAdmin.from("trades").select("id")
-          .eq("account_id", account_id).eq("ticket", pos.ticket).eq("status", "open").single();
+        // FIX: this used to filter by .eq("status", "open") too, meaning
+        // if a row ever got marked "closed" by a transient sync glitch
+        // (e.g. one cycle where MT5 briefly didn't report a still-open
+        // position), this check would find nothing on the next sync that
+        // saw it as active again - and insert a brand new row instead of
+        // reopening the original. Confirmed live: a duplicate with a
+        // 21-hour gap between the two rows, one with profit=null (the
+        // prematurely-closed original) and one with the real closing
+        // profit (the new row created later). Now matches by ticket+
+        // account regardless of current status, same principle as the
+        // ack-handler fix - the row's existence is checked independent
+        // of a status field that can be wrong transiently.
+        const { data: existing } = await supabaseAdmin.from("trades").select("id, status")
+          .eq("account_id", account_id).eq("ticket", pos.ticket).single();
 
         if (!existing) {
           await supabaseAdmin.from("trades").insert({
@@ -102,7 +114,14 @@ router.post("/sync", async (req, res) => {
             status: "open", open_time: pos.open_time
           });
         } else {
-          await supabaseAdmin.from("trades").update({ profit: pos.profit }).eq("id", existing.id);
+          // MT5 reports this ticket as an active position right now, so
+          // it must be "open" regardless of what a prior sync cycle set
+          // it to - this is what correctly recovers from the premature-
+          // close glitch instead of leaving a stale "closed" row behind.
+          await supabaseAdmin.from("trades").update({
+            profit: pos.profit,
+            status: "open"
+          }).eq("id", existing.id);
         }
       }
 
