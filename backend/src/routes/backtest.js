@@ -197,15 +197,35 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     const adrStatus = core.getADRStatus(primaryBars, d1Window, symbol);
     if (adrStatus.exhausted) continue;
 
-    const sweep = core.detectLiquiditySweep(primaryBars, 15);
-    const displacement = currentATR ? core.detectDisplacement(primaryBars, currentATR) : null;
-    const fvgs = ind.fvgs || [];
-    const obs = ind.obs || [];
+    // ── STAGE 3: POI detection moved to M15, matching the live change ──────
+    // Filtered to barTime to avoid lookahead bias, same discipline as
+    // d1Window/w1Window/h1Window. 150-bar window (~37 hours) gives enough
+    // recent session structure for sweep/OB/FVG without reaching back into
+    // unrelated prior sessions.
+    //
+    // GRACEFUL FALLBACK: the M15/M5 backfill only covers ~45 days, but this
+    // backtest can run over a 90-day window. For bars older than that (the
+    // portion of the window predating the backfill), there's no M15 history
+    // available yet - falls back to the original H4-based detection for
+    // those specific bars rather than skipping them or breaking. This means
+    // the most recent ~45 days of any backtest get the more precise M15
+    // treatment, older bars get the previous H4 treatment - a real, known
+    // asymmetry worth being aware of, not silently hidden.
+    const m15Window = (m15Bars || []).filter(b => new Date(b.time) <= barTime).slice(-150);
+    const usingPoiM15 = m15Window.length >= 30;
+    const poiBars = usingPoiM15 ? m15Window : primaryBars;
+    const poiATR = usingPoiM15 ? core.atrCalc(poiBars, 14) : currentATR;
+    const poiInd = usingPoiM15 ? core.getIndicators(poiBars, poiATR) : ind;
+
+    const sweep = core.detectLiquiditySweep(poiBars, 15);
+    const displacement = poiATR ? core.detectDisplacement(poiBars, poiATR) : null;
+    const fvgs = poiInd?.fvgs || [];
+    const obs = poiInd?.obs || [];
     const retestDirection = sweep?.direction || (htfBias.bias === "bullish" ? "BUY" : "SELL");
-    const retest = core.checkRetest(primaryBars, fvgs, obs, retestDirection);
-    const eqLiquidity = currentATR ? core.detectEqualHighsLows(primaryBars, currentATR) : null;
-    const strength = currentATR ? core.calculateStrength(primaryBars, currentATR) : null;
-    const pdZone = core.getPremiumDiscount(primaryBars);
+    const retest = core.checkRetest(poiBars, fvgs, obs, retestDirection);
+    const eqLiquidity = poiATR ? core.detectEqualHighsLows(poiBars, poiATR) : null;
+    const strength = poiATR ? core.calculateStrength(poiBars, poiATR) : null;
+    const pdZone = core.getPremiumDiscount(poiBars);
 
     const ictSequence = {
       sweep, displacement, retest,

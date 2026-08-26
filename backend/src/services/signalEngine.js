@@ -382,30 +382,51 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       await checkVolatilitySpike(symbol, currentATR, histATR);
     }
 
+    // ── STAGE 3: POI detection moved to M15 (with M5 available for the
+    // existing detectM5Entry confirmation) ──────────────────────────────────
+    // Previously all of sweep/displacement/FVG/OB/retest/liquidity/strength/
+    // premium-discount ran on H4 bars - the same timeframe used for broader
+    // structure and HTF bias. But kill-zone entries are scoped to a 1-2 hour
+    // session window, while H4 ATR/structure reflects volatility across many
+    // hours or days - a mismatch that was the original diagnosis behind this
+    // whole change (confirmed on the GER40Cash chart: a real move that ran
+    // well past a session-scoped target before reversing, because the target
+    // was sized off H4 volatility, not the session it was actually traded in).
+    //
+    // poiBars/poiInd now feed the actual points-of-interest detection.
+    // Falls back to primaryBars/primaryInd (H4) if M15 data isn't available
+    // for some reason, so this degrades gracefully rather than breaking.
+    // primaryInd (H4) is UNCHANGED as the input to scoreConfluence - the
+    // broader market-context read (RSI, EMA alignment, momentum) stays
+    // H4-scoped; only the POI-specific detection moves.
+    const poiBars = m15Bars || m5Bars || primaryBars;
+    const poiInd = multiTFData["M15"]?.indicators || multiTFData["M5"]?.indicators || primaryInd;
+    const poiATR = poiInd?.atr14 || currentATR;
+
     // ── NEW: ICT Sequence Detection ─────────────────────────────────────────
 
     // Step 1: Liquidity Sweep
-    const sweep = detectLiquiditySweep(primaryBars, 15);
+    const sweep = detectLiquiditySweep(poiBars, 15);
 
     // Step 2: Displacement candle (MSS confirmation)
-    const displacement = currentATR ? detectDisplacement(primaryBars, currentATR) : null;
+    const displacement = poiATR ? detectDisplacement(poiBars, poiATR) : null;
 
-    // Step 3: FVGs and OBs from primary bars
-    const fvgs = primaryInd.fvgs || [];
-    const obs  = primaryInd.obs  || [];
+    // Step 3: FVGs and OBs from POI-timeframe bars
+    const fvgs = poiInd?.fvgs || [];
+    const obs  = poiInd?.obs  || [];
 
     // Step 4: Retest check
     const retestDirection = sweep?.direction || (htfBias.bias === "bullish" ? "BUY" : "SELL");
-    const retest = checkRetest(primaryBars, fvgs, obs, retestDirection);
+    const retest = checkRetest(poiBars, fvgs, obs, retestDirection);
 
     // Step 5: Equal Highs/Lows (liquidity targets)
-    const eqLiquidity = currentATR ? detectEqualHighsLows(primaryBars, currentATR) : null;
+    const eqLiquidity = poiATR ? detectEqualHighsLows(poiBars, poiATR) : null;
 
     // Step 6: Strength engine
-    const strength = currentATR ? calculateStrength(primaryBars, currentATR) : null;
+    const strength = poiATR ? calculateStrength(poiBars, poiATR) : null;
 
     // Step 7: Premium/Discount zone
-    const pdZone = getPremiumDiscount(primaryBars);
+    const pdZone = getPremiumDiscount(poiBars);
 
     // Bundle ICT sequence
     const ictSequence = {
