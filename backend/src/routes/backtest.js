@@ -215,17 +215,29 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     const usingPoiM15 = m15Window.length >= 30;
     const poiBars = usingPoiM15 ? m15Window : primaryBars;
     const poiATR = usingPoiM15 ? core.atrCalc(poiBars, 14) : currentATR;
-    const poiInd = usingPoiM15 ? core.getIndicators(poiBars, poiATR) : ind;
 
-    const sweep = core.detectLiquiditySweep(poiBars, 15);
+    // FIX (confirmed real bug via live A/B test): these lookback windows
+    // were hardcoded assuming H4 bars - see the matching fix and full
+    // explanation in signalEngine.js. Only applied when actually using the
+    // M15 path; the H4 fallback path (older bars, pre-backfill) keeps the
+    // exact original defaults so that portion of the backtest is completely
+    // unaffected by this change.
+    const M15_OB_LOOKBACK = 40, M15_FVG_LOOKBACK = 40, M15_EQHL_LOOKBACK = 60,
+          M15_STRENGTH_LOOKBACK = 60, M15_SWEEP_LOOKBACK = 48, M15_PD_LOOKBACK = 80;
+
+    const poiInd = usingPoiM15
+      ? core.getIndicators(poiBars, poiATR, M15_OB_LOOKBACK, M15_FVG_LOOKBACK, M15_EQHL_LOOKBACK)
+      : ind;
+
+    const sweep = core.detectLiquiditySweep(poiBars, usingPoiM15 ? M15_SWEEP_LOOKBACK : 15);
     const displacement = poiATR ? core.detectDisplacement(poiBars, poiATR) : null;
     const fvgs = poiInd?.fvgs || [];
     const obs = poiInd?.obs || [];
     const retestDirection = sweep?.direction || (htfBias.bias === "bullish" ? "BUY" : "SELL");
     const retest = core.checkRetest(poiBars, fvgs, obs, retestDirection);
-    const eqLiquidity = poiATR ? core.detectEqualHighsLows(poiBars, poiATR) : null;
-    const strength = poiATR ? core.calculateStrength(poiBars, poiATR) : null;
-    const pdZone = core.getPremiumDiscount(poiBars);
+    const eqLiquidity = poiATR ? core.detectEqualHighsLows(poiBars, poiATR, usingPoiM15 ? M15_EQHL_LOOKBACK : 20) : null;
+    const strength = poiATR ? core.calculateStrength(poiBars, poiATR, usingPoiM15 ? M15_STRENGTH_LOOKBACK : 20) : null;
+    const pdZone = core.getPremiumDiscount(poiBars, usingPoiM15 ? M15_PD_LOOKBACK : 20);
 
     const ictSequence = {
       sweep, displacement, retest,

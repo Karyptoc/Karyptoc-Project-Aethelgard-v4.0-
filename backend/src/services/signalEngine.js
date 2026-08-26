@@ -393,20 +393,42 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     // well past a session-scoped target before reversing, because the target
     // was sized off H4 volatility, not the session it was actually traded in).
     //
-    // poiBars/poiInd now feed the actual points-of-interest detection.
-    // Falls back to primaryBars/primaryInd (H4) if M15 data isn't available
-    // for some reason, so this degrades gracefully rather than breaking.
+    // poiBars feeds the actual points-of-interest detection.
+    // Falls back to primaryBars (H4) if M15 data isn't available for some
+    // reason, so this degrades gracefully rather than breaking.
     // primaryInd (H4) is UNCHANGED as the input to scoreConfluence - the
     // broader market-context read (RSI, EMA alignment, momentum) stays
     // H4-scoped; only the POI-specific detection moves.
     const poiBars = m15Bars || m5Bars || primaryBars;
-    const poiInd = multiTFData["M15"]?.indicators || multiTFData["M5"]?.indicators || primaryInd;
-    const poiATR = poiInd?.atr14 || currentATR;
+    const poiATRraw = poiBars ? atrCalc(poiBars, 14) : null;
+    const poiATR = poiATRraw || currentATR;
+
+    // FIX (confirmed real bug via live A/B test - GOLD went 21->2 trades,
+    // EURUSD 21->1 over a comparable window after Stage 3): the OB/FVG/
+    // equal-highs/strength/sweep/premium-discount lookback windows below
+    // were hardcoded assuming H4 bars, where e.g. "20 bars" means ~80 hours
+    // (3.3 days) of genuinely significant history. Feeding these same
+    // hardcoded counts M15 bars silently compressed that to ~5 hours - 16x
+    // less real-world significance, with nothing to compensate. These
+    // values represent roughly a prior session's worth of M15 structure
+    // (10-20 hours) rather than either raw noise (the old unscaled
+    // defaults) or H4's full multi-day span (which would defeat the point
+    // of moving to M15 in the first place). Chosen deliberately, not
+    // empirically validated yet - worth backtesting like everything else
+    // in this project before treating as final.
+    const M15_OB_LOOKBACK = 40;      // ~10 hours
+    const M15_FVG_LOOKBACK = 40;     // ~10 hours
+    const M15_EQHL_LOOKBACK = 60;    // ~15 hours
+    const M15_STRENGTH_LOOKBACK = 60; // ~15 hours
+    const M15_SWEEP_LOOKBACK = 48;   // ~12 hours
+    const M15_PD_LOOKBACK = 80;      // ~20 hours
+
+    const poiInd = poiBars ? getIndicators(poiBars, poiATR, M15_OB_LOOKBACK, M15_FVG_LOOKBACK, M15_EQHL_LOOKBACK) : primaryInd;
 
     // ── NEW: ICT Sequence Detection ─────────────────────────────────────────
 
     // Step 1: Liquidity Sweep
-    const sweep = detectLiquiditySweep(poiBars, 15);
+    const sweep = detectLiquiditySweep(poiBars, M15_SWEEP_LOOKBACK);
 
     // Step 2: Displacement candle (MSS confirmation)
     const displacement = poiATR ? detectDisplacement(poiBars, poiATR) : null;
@@ -420,13 +442,13 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     const retest = checkRetest(poiBars, fvgs, obs, retestDirection);
 
     // Step 5: Equal Highs/Lows (liquidity targets)
-    const eqLiquidity = poiATR ? detectEqualHighsLows(poiBars, poiATR) : null;
+    const eqLiquidity = poiATR ? detectEqualHighsLows(poiBars, poiATR, M15_EQHL_LOOKBACK) : null;
 
     // Step 6: Strength engine
-    const strength = poiATR ? calculateStrength(poiBars, poiATR) : null;
+    const strength = poiATR ? calculateStrength(poiBars, poiATR, M15_STRENGTH_LOOKBACK) : null;
 
     // Step 7: Premium/Discount zone
-    const pdZone = getPremiumDiscount(poiBars);
+    const pdZone = getPremiumDiscount(poiBars, M15_PD_LOOKBACK);
 
     // Bundle ICT sequence
     const ictSequence = {

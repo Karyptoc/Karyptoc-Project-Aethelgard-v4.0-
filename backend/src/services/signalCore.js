@@ -436,10 +436,10 @@ function detectDisplacement(bars, atrVal) {
  * Detect Order Blocks (OBs) — both swing and internal
  * Triggered on BOS/MSS confirmation
  */
-function detectOBs(bars) {
-  if (!bars || bars.length < 10) return [];
+function detectOBs(bars, lookback = 10) {
+  if (!bars || bars.length < lookback) return [];
   const len = bars.length, obs = [];
-  for (let i = len-10; i < len-2; i++) {
+  for (let i = len-lookback; i < len-2; i++) {
     const b = bars[i], n = bars[i+1];
     const range = b.high - b.low;
     // Bullish OB: bearish candle followed by strong bullish move (1.5x range)
@@ -457,13 +457,13 @@ function detectOBs(bars) {
  * BULL FVG: low[current] > high[2 bars ago]
  * BEAR FVG: low[2 bars ago] > high[current]
  */
-function detectFVGs(bars, atrVal) {
+function detectFVGs(bars, atrVal, lookback = 12) {
   if (!bars || bars.length < 4 || !atrVal) return [];
   const len = bars.length;
   const fvgs = [];
   const minSize = atrVal * 0.2; // ATR floor for FVG size
 
-  for (let i = 2; i < Math.min(len-1, 12); i++) {
+  for (let i = 2; i < Math.min(len-1, lookback); i++) {
     const curr = bars[len-1-i+2];
     const mid  = bars[len-1-i+1];
     const prev = bars[len-1-i];
@@ -489,11 +489,11 @@ function detectFVGs(bars, atrVal) {
  * NEW: Equal Highs/Lows Detection (EQH/EQL) — resting liquidity pools
  * From Indicator 2: clusters of equal swing points = institutional stop targets
  */
-function detectEqualHighsLows(bars, atrVal) {
-  if (!bars || bars.length < 20 || !atrVal) return { eqh: [], eql: [] };
+function detectEqualHighsLows(bars, atrVal, lookback = 20) {
+  if (!bars || bars.length < lookback || !atrVal) return { eqh: [], eql: [] };
 
   const threshold = atrVal * 0.15; // within 0.15x ATR = "equal"
-  const pivotBars = bars.slice(-20);
+  const pivotBars = bars.slice(-lookback);
   const eqh = [], eql = [];
 
   // Find swing highs and lows
@@ -539,11 +539,11 @@ function detectEqualHighsLows(bars, atrVal) {
 /**
  * NEW: Buyer/Seller Strength Engine — 7 factors from Indicator 2
  */
-function calculateStrength(bars, atrVal) {
-  if (!bars || bars.length < 20 || !atrVal) return { buyerStr: 50, sellerStr: 50 };
+function calculateStrength(bars, atrVal, lookback = 20) {
+  if (!bars || bars.length < lookback || !atrVal) return { buyerStr: 50, sellerStr: 50 };
 
   const len = bars.length;
-  const recentBars = bars.slice(-20);
+  const recentBars = bars.slice(-lookback);
 
   // 1. Volume bias (directional volume)
   const bullVol = recentBars.filter(b => b.close > b.open).reduce((s,b)=>s+b.volume,0);
@@ -982,7 +982,21 @@ function scoreConfluence(ind, session, htfBias, isPairActive, ictSequence) {
   };
 }
 
-function getIndicators(bars, atrVal) {
+// STAGE 3 FIX: recentHigh/recentLow (used by calculateStructuralSLTP as an
+// SL fallback anchor when no sweep is detected) and the OB/FVG detection
+// windows were all hardcoded assuming H4 bars - where a 20-bar lookback
+// means ~80 hours (3.3 days), a genuinely significant span. When these
+// same hardcoded bar counts got fed M15 bars instead (Stage 3), the exact
+// same "20 bars" became just 5 hours - a 16x reduction in real-world
+// significance, with no scaling logic to compensate. Confirmed live: this
+// was the primary driver of the collapsed trade frequency after Stage 3
+// (GOLD 21→2 trades, EURUSD 21→1 trade over a comparable window) - not a
+// deliberate tightening of quality, but an unintended side effect of
+// reusing H4-tuned constants on a timeframe 16x finer. obLookback/
+// fvgLookback/recentHLLookback default to the exact old H4 values, so any
+// other caller is completely unaffected - only the M15 POI call sites pass
+// explicit, larger values sized for M15.
+function getIndicators(bars, atrVal, obLookback = 10, fvgLookback = 12, recentHLLookback = 20) {
   if (!bars || bars.length < 30) return null;
   const closes = bars.map(b=>b.close);
   const len = bars.length;
@@ -992,8 +1006,8 @@ function getIndicators(bars, atrVal) {
   const avgVol = bars.slice(-20).reduce((s,b)=>s+b.volume,0)/20;
   const currentATR = atrVal || atrCalc(bars, 14);
   const histATR = atrHistorical(bars, 14, 50);
-  const fvgs = detectFVGs(bars, currentATR);
-  const obs  = detectOBs(bars);
+  const fvgs = detectFVGs(bars, currentATR, fvgLookback);
+  const obs  = detectOBs(bars, obLookback);
   const ms   = detectMarketStructure(bars);
 
   return {
@@ -1005,8 +1019,8 @@ function getIndicators(bars, atrVal) {
     bos: ms.bos, choch: ms.choch, trend: ms.trend,
     obs, fvgs,
     bullish: e20 > e50, aboveEMA20: price > e20,
-    recentHigh: Math.max(...bars.slice(-20).map(b=>b.high)),
-    recentLow: Math.min(...bars.slice(-20).map(b=>b.low)),
+    recentHigh: Math.max(...bars.slice(-recentHLLookback).map(b=>b.high)),
+    recentLow: Math.min(...bars.slice(-recentHLLookback).map(b=>b.low)),
     highVol: bars[len-1].volume > avgVol * 1.5,
     direction: e20 > e50 ? "BUY" : "SELL"
   };
