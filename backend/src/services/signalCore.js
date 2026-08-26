@@ -662,11 +662,34 @@ function detectM5Entry(m5Bars, direction, h4Zone, m5Atr, symbol) {
   const pip = PIP_SIZES[symbol] || 0.0001;
   const minBodySize = m5Atr * 0.8; // displacement on M5 = 0.8x M5 ATR (lower than H4 1.5x)
 
+  // FIX (confirmed real bug via external review + code verification): this
+  // used to scan the last 12 M5 bars (60 minutes) and return the FIRST
+  // match found scanning backwards from most recent - but a `barsAgo` field
+  // was computed on the result and never actually checked anywhere in the
+  // codebase (confirmed: zero references to it outside this function).
+  // That meant a valid-looking M5 candle from up to ~60 minutes ago could
+  // be used as "the entry" - its close as entryPrice, its low/high (plus
+  // buffer) as the SL - while live execution happens at whatever price the
+  // market has moved to since. SL/TP/RR all get computed from a price that
+  // may be nothing like the actual fill. This is a likely real contributor
+  // to trades that look like "right call, wrong outcome" in the trade
+  // history - the direction can be correct while the entry itself is stale.
+  //
+  // MAX_BARS_AGO enforces that only the current bar (0) or the immediately
+  // preceding one (1) - i.e. at most ~10 minutes old - can ever be used.
+  // Scanning stops entirely once this is exceeded, since anything further
+  // back would only be staler and is never acceptable regardless of how
+  // well it otherwise matches the setup.
+  const MAX_BARS_AGO = 1;
+
   // Scan last 12 M5 bars (= last 60 minutes) for valid entry candle
   // Start from most recent and work backwards
   const scanBars = m5Bars.slice(-12);
 
   for (let i = scanBars.length - 1; i >= 0; i--) {
+    const barsAgo = scanBars.length - 1 - i;
+    if (barsAgo > MAX_BARS_AGO) break; // everything further back is staler - stop scanning
+
     const bar = scanBars[i];
     const bodySize = Math.abs(bar.close - bar.open);
     const isBullish = bar.close > bar.open;
@@ -703,7 +726,7 @@ function detectM5Entry(m5Bars, direction, h4Zone, m5Atr, symbol) {
         entryCandle: { open: bar.open, high: bar.high, low: bar.low, close: bar.close },
         bodyRatio: parseFloat((bodySize / m5Atr).toFixed(2)),
         timeframe: "M5",
-        barsAgo: scanBars.length - 1 - i
+        barsAgo
       };
     }
 
@@ -733,12 +756,12 @@ function detectM5Entry(m5Bars, direction, h4Zone, m5Atr, symbol) {
         entryCandle: { open: bar.open, high: bar.high, low: bar.low, close: bar.close },
         bodyRatio: parseFloat((bodySize / m5Atr).toFixed(2)),
         timeframe: "M5",
-        barsAgo: scanBars.length - 1 - i
+        barsAgo
       };
     }
   }
 
-  return null; // no valid M5 entry candle found in the zone
+  return null; // no valid FRESH M5 entry candle found in the zone
 }
 
 /**
