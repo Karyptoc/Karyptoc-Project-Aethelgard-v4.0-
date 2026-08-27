@@ -127,10 +127,21 @@ router.post("/run", verifyToken, async (req, res) => {
         `${symbol}: limited M15/M5 history (${m15Bars.length}/${m5Bars.length} bars) — POI detection window may be sparse until the backfill/ongoing cache accumulates more.`);
     }
 
+    // DIAGNOSTIC (temporary - remove once the Stage 3 lookback fix is
+    // confirmed working): log exactly what M15 data is actually available
+    // for this run, since the last test showed byte-identical results to
+    // before the fix despite the deploy being confirmed live. This gives
+    // direct evidence instead of guessing further.
+    await log("info", "backtest",
+      `${symbol}: DIAGNOSTIC m15Bars.length=${m15Bars.length}, earliest=${m15Bars[0]?.time || "none"}, latest=${m15Bars[m15Bars.length-1]?.time || "none"}, windowStart=${new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()}`);
+
     const windowStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const result = runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, {
       initialBalance: initial_balance, riskPercent: risk_percent, windowStart, minScoreOverride: min_score_override,
     });
+
+    await log("info", "backtest",
+      `${symbol}: DIAGNOSTIC usingPoiM15 count=${result.summary.poiM15Count || 0}/${result.summary.poiTotalChecks || 0} bars evaluated`);
 
     await log("info", "backtest",
       `Complete (rebuilt engine): ${symbol} | ${result.summary.total_trades} trades | WR:${result.summary.win_rate}% | PF:${result.summary.profit_factor}`);
@@ -162,6 +173,12 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
   const LOOKBACK = 60;
   const MAX_HOLD_BARS = 60;
   let lastTradeExitIndex = -1;
+
+  // DIAGNOSTIC (temporary) - track how many evaluated bars actually used
+  // the M15 POI path vs falling back to H4, to get direct evidence of
+  // what's happening rather than guessing.
+  let poiM15Count = 0;
+  let poiTotalChecks = 0;
 
   for (let i = LOOKBACK; i < h4Bars.length - 1; i++) {
     const bar = h4Bars[i];
@@ -213,6 +230,8 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     // asymmetry worth being aware of, not silently hidden.
     const m15Window = (m15Bars || []).filter(b => new Date(b.time) <= barTime).slice(-150);
     const usingPoiM15 = m15Window.length >= 30;
+    poiTotalChecks++;
+    if (usingPoiM15) poiM15Count++;
     const poiBars = usingPoiM15 ? m15Window : primaryBars;
     const poiATR = usingPoiM15 ? core.atrCalc(poiBars, 14) : currentATR;
 
@@ -424,6 +443,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
       avg_loss: losers.length > 0 ? parseFloat((grossLoss / losers.length).toFixed(2)) : 0,
       best_trade: trades.length > 0 ? parseFloat(Math.max(...trades.map(t => t.pnl)).toFixed(2)) : 0,
       worst_trade: trades.length > 0 ? parseFloat(Math.min(...trades.map(t => t.pnl)).toFixed(2)) : 0,
+      poiM15Count, poiTotalChecks, // DIAGNOSTIC (temporary)
       total_spread_cost: parseFloat(trades.reduce((s, t) => s + (t.spread_cost || 0), 0).toFixed(2)),
       htf_aligned_trades: htfAligned.length,
       htf_aligned_win_rate: htfAligned.length > 0
