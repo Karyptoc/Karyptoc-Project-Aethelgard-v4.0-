@@ -834,7 +834,26 @@ function getADRStatus(h4Bars, d1Bars, symbol) {
   const pip = PIP_SIZES[symbol] || 0.0001;
   const last14 = d1Bars.slice(-15, -1);
   const adrPips = last14.length ? last14.reduce((s,b) => s+(b.high-b.low)/pip, 0)/last14.length : 0;
-  const todayBars = h4Bars ? h4Bars.slice(-6) : [];
+
+  // FIX (confirmed via targeted test - consumedPct showed 140% at the
+  // moment "today" had just started): "todayBars" used to be a positional
+  // slice(-6) of h4Bars - a rolling 24hr window that does NOT align with
+  // calendar-day boundaries. H4 bars land on fixed clock times (00:00,
+  // 04:00, 08:00, 12:00, 16:00, 20:00 UTC). At 00:00 (Asian KZ), "the last
+  // 6 bars" are entirely YESTERDAY's. At 08:00 (London KZ), half of them
+  // are. Only 20:00 (NY Close) got a genuinely clean same-day window. This
+  // meant 2 of the 3 daily kill-zone checkpoints were being measured
+  // against a range majority-carried-over from the previous day, making
+  // them look artificially "exhausted" before the actual day had properly
+  // started. Confirmed as the dominant cause of a 95% ADR-exhaustion
+  // rejection rate in backtesting (57 of 60 kill-zone-eligible candidates
+  // blocked in a 30-day GOLD test). Now filters to bars matching the SAME
+  // UTC calendar date as the most recent bar, so "today" means today.
+  const latestBar = h4Bars && h4Bars.length ? h4Bars[h4Bars.length-1] : null;
+  const todayDateStr = latestBar ? new Date(latestBar.time).toISOString().slice(0,10) : null;
+  const todayBars = (h4Bars && todayDateStr)
+    ? h4Bars.filter(b => new Date(b.time).toISOString().slice(0,10) === todayDateStr)
+    : [];
   const todayHigh = todayBars.length ? Math.max(...todayBars.map(b=>b.high)) : 0;
   const todayLow  = todayBars.length ? Math.min(...todayBars.map(b=>b.low))  : 0;
   const consumed = todayBars.length ? (todayHigh - todayLow)/pip : 0;
