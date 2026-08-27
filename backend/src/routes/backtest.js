@@ -58,16 +58,32 @@ router.post("/cache", async (req, res) => {
 });
 
 async function fetchCachedBars(symbol, timeframe, fromDate = null) {
+  // FIX (confirmed live via diagnostic logging): this had no explicit
+  // limit, and Supabase/PostgREST silently caps unlimited queries at 1000
+  // rows by default. Ordered ascending with no limit meant that once a
+  // symbol/timeframe's cache grew past 1000 total rows - which M15/M5 hit
+  // far sooner than H4/D1/W1 given how many more bars get pushed per cycle
+  // and from the one-time backfill - the query started silently returning
+  // only the OLDEST 1000 rows, not the most recent ones. Confirmed exactly:
+  // a 30-day GOLD backtest received M15 data from May 28-June 11, 47+ days
+  // stale relative to the actual requested window - explaining why the
+  // Stage 3 lookback fix appeared to do nothing (it was working correctly
+  // on data that was simply too old to matter). Now explicitly orders
+  // descending with a generous limit to get the MOST RECENT bars, then
+  // reverses back to ascending order since the rest of the code (H4 replay
+  // loop, window slicing) expects chronological order.
+  const MAX_BARS = 30000; // generous enough for 90 days of M5 (~25920) plus headroom
   let query = supabaseAdmin
     .from("ohlcv_cache")
     .select("time, open, high, low, close, volume")
     .eq("symbol", symbol)
     .eq("timeframe", timeframe)
-    .order("time", { ascending: true });
+    .order("time", { ascending: false })
+    .limit(MAX_BARS);
   if (fromDate) query = query.gte("time", fromDate);
   const { data, error } = await query;
   if (error) throw error;
-  return (data || []).map(b => ({
+  return (data || []).reverse().map(b => ({
     time: b.time,
     open: parseFloat(b.open), high: parseFloat(b.high),
     low: parseFloat(b.low), close: parseFloat(b.close),
@@ -127,21 +143,10 @@ router.post("/run", verifyToken, async (req, res) => {
         `${symbol}: limited M15/M5 history (${m15Bars.length}/${m5Bars.length} bars) — POI detection window may be sparse until the backfill/ongoing cache accumulates more.`);
     }
 
-    // DIAGNOSTIC (temporary - remove once the Stage 3 lookback fix is
-    // confirmed working): log exactly what M15 data is actually available
-    // for this run, since the last test showed byte-identical results to
-    // before the fix despite the deploy being confirmed live. This gives
-    // direct evidence instead of guessing further.
-    await log("info", "backtest",
-      `${symbol}: DIAGNOSTIC m15Bars.length=${m15Bars.length}, earliest=${m15Bars[0]?.time || "none"}, latest=${m15Bars[m15Bars.length-1]?.time || "none"}, windowStart=${new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()}`);
-
     const windowStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const result = runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, {
       initialBalance: initial_balance, riskPercent: risk_percent, windowStart, minScoreOverride: min_score_override,
     });
-
-    await log("info", "backtest",
-      `${symbol}: DIAGNOSTIC usingPoiM15 count=${result.summary.poiM15Count || 0}/${result.summary.poiTotalChecks || 0} bars evaluated`);
 
     await log("info", "backtest",
       `Complete (rebuilt engine): ${symbol} | ${result.summary.total_trades} trades | WR:${result.summary.win_rate}% | PF:${result.summary.profit_factor}`);
