@@ -1194,14 +1194,62 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
       : parseFloat((price - risk * Math.max(rrRatio, 1.2)).toFixed(5));
   }
 
-  // FIX: this is the actual takeProfit used (see "const takeProfit = tp2"
-  // below) - was floored at 2.5R minimum on every trade, which combined
-  // with the wide SL cap above is what made TPs consistently large.
-  // Reduced floor to 1.8R - still solidly profitable (>1.5:1 reward:risk)
-  // without the excess.
-  tp2 = direction === "BUY"
-    ? parseFloat((price + risk * Math.max(rrRatio, 1.8)).toFixed(5))
-    : parseFloat((price - risk * Math.max(rrRatio, 1.8)).toFixed(5));
+  // STAGE 4: TP2 (the actual executed takeProfit) is now built around real
+  // structural targets instead of a pure RR multiple - direct answer to
+  // the original diagnosis (a real move on GER40Cash ran well past a
+  // session-scoped RR target before reversing, because the target was
+  // sized off broad volatility rather than where price was actually likely
+  // to react). Candidates, in the trade's direction only:
+  //  - EQH/EQL: resting liquidity pools (buyside for BUY, sellside for SELL)
+  //  - Opposing OB: bearish OB above (BUY) / bullish OB below (SELL) - the
+  //    near edge of the zone, since that's the first point price reaches
+  //  - Opposing FVG: same logic, near edge
+  //  - Previous day's high/low
+  // Picks the NEAREST qualifying candidate (as agreed) - most reliably hit,
+  // consistent with session-scoped thinking. If the nearest candidate
+  // implies less than 2R, it's discarded in favor of a straight 2R target
+  // instead (also as agreed) - a real but very close level isn't worth
+  // trading for less than the minimum acceptable reward:risk.
+  const targetCandidates = [];
+
+  if (ictSequence.eqLiquidity) {
+    const { eqh, eql } = ictSequence.eqLiquidity;
+    if (direction === "BUY") (eqh || []).filter(h => h > price).forEach(h => targetCandidates.push({ price: h, source: "EQH_liquidity" }));
+    else (eql || []).filter(l => l < price).forEach(l => targetCandidates.push({ price: l, source: "EQL_liquidity" }));
+  }
+
+  (ictSequence.obs || []).forEach(ob => {
+    if (direction === "BUY" && ob.type === "BEARISH_OB" && ob.low > price) targetCandidates.push({ price: ob.low, source: "opposing_OB" });
+    if (direction === "SELL" && ob.type === "BULLISH_OB" && ob.high < price) targetCandidates.push({ price: ob.high, source: "opposing_OB" });
+  });
+
+  (ictSequence.fvgs || []).forEach(fvg => {
+    if (direction === "BUY" && fvg.type === "BEARISH_FVG" && fvg.low > price) targetCandidates.push({ price: fvg.low, source: "opposing_FVG" });
+    if (direction === "SELL" && fvg.type === "BULLISH_FVG" && fvg.high < price) targetCandidates.push({ price: fvg.high, source: "opposing_FVG" });
+  });
+
+  if (direction === "BUY" && ictSequence.prevDayHigh && ictSequence.prevDayHigh > price) {
+    targetCandidates.push({ price: ictSequence.prevDayHigh, source: "prev_day_high" });
+  }
+  if (direction === "SELL" && ictSequence.prevDayLow && ictSequence.prevDayLow < price) {
+    targetCandidates.push({ price: ictSequence.prevDayLow, source: "prev_day_low" });
+  }
+
+  const MIN_TP_RR = 2.0;
+  let structuralTarget = null;
+  if (targetCandidates.length > 0) {
+    targetCandidates.sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price));
+    const nearest = targetCandidates[0];
+    const impliedRR = Math.abs(nearest.price - price) / risk;
+    if (impliedRR >= MIN_TP_RR) structuralTarget = nearest;
+  }
+
+  tp2 = structuralTarget
+    ? parseFloat(structuralTarget.price.toFixed(5))
+    : (direction === "BUY"
+        ? parseFloat((price + risk * MIN_TP_RR).toFixed(5))
+        : parseFloat((price - risk * MIN_TP_RR).toFixed(5)));
+  const tp2Source = structuralTarget ? structuralTarget.source : "RR_fallback_2R";
 
   // FIX: stretch target reduced from 4.0R to 2.5R for the same reason
   tp3 = direction === "BUY"
@@ -1222,7 +1270,8 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
     stopLoss, takeProfit, tp1, tp2, tp3,
     slPips: parseFloat(slPips.toFixed(1)),
     rrActual: parseFloat((Math.abs(takeProfit - price) / risk).toFixed(2)),
-    usedStructuralSL: !!ictSequence.sweep?.slAnchor
+    usedStructuralSL: !!ictSequence.sweep?.slAnchor,
+    tp2Source // STAGE 4: which structural target (or RR fallback) was actually used
   };
 }
 

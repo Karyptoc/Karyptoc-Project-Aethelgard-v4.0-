@@ -451,6 +451,11 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     const pdZone = getPremiumDiscount(poiBars, M15_PD_LOOKBACK);
 
     // Bundle ICT sequence
+    // STAGE 4: obs/fvgs (already computed above from poiInd, M15-scoped)
+    // and previous day's high/low (from the last completed D1 bar) now
+    // feed calculateStructuralSLTP's structural TP target selection.
+    const lastD1Bar = d1Bars && d1Bars.length ? d1Bars[d1Bars.length - 1] : null;
+
     const ictSequence = {
       sweep,
       displacement,
@@ -458,6 +463,10 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       eqLiquidity: (eqLiquidity?.eqh?.length > 0 || eqLiquidity?.eql?.length > 0) ? eqLiquidity : null,
       strength,
       pdZone,
+      obs,
+      fvgs,
+      prevDayHigh: lastD1Bar?.high || null,
+      prevDayLow: lastD1Bar?.low || null,
       hasFullSequence: !!(sweep && displacement && retest),
       hasPartialSequence: !!(sweep && displacement),
       _session: session, // needed by calculateStructuralSLTP for kill-zone-aware SL cap

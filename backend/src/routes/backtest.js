@@ -289,10 +289,19 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     const strength = poiATR ? core.calculateStrength(poiBars, poiATR, usingPoiM15 ? M15_STRENGTH_LOOKBACK : 20) : null;
     const pdZone = core.getPremiumDiscount(poiBars, usingPoiM15 ? M15_PD_LOOKBACK : 20);
 
+    // STAGE 4: obs/fvgs (already computed above from poiInd) and previous
+    // day's high/low now feed structural TP target selection. Uses
+    // d1Window (already filtered to barTime above) rather than raw d1Bars,
+    // to keep the same lookahead-bias discipline as everything else here.
+    const lastD1Bar = d1Window.length ? d1Window[d1Window.length - 1] : null;
+
     const ictSequence = {
       sweep, displacement, retest,
       eqLiquidity: (eqLiquidity?.eqh?.length > 0 || eqLiquidity?.eql?.length > 0) ? eqLiquidity : null,
       strength, pdZone,
+      obs, fvgs,
+      prevDayHigh: lastD1Bar?.high || null,
+      prevDayLow: lastD1Bar?.low || null,
       hasFullSequence: !!(sweep && displacement && retest),
       hasPartialSequence: !!(sweep && displacement),
       _session: session, // needed by calculateStructuralSLTP for kill-zone-aware SL cap
