@@ -160,6 +160,8 @@ router.post("/run", verifyToken, async (req, res) => {
 
     await log("info", "backtest",
       `${symbol}: DIAGNOSTIC2 usingPoiM15 count=${result.summary.poiM15Count || 0}/${result.summary.poiTotalChecks || 0} bars evaluated`);
+    await log("info", "backtest",
+      `${symbol}: DIAGNOSTIC3 filterCounts=${JSON.stringify(result.summary.filterCounts)}`);
 
     await log("info", "backtest",
       `Complete (rebuilt engine): ${symbol} | ${result.summary.total_trades} trades | WR:${result.summary.win_rate}% | PF:${result.summary.profit_factor}`);
@@ -198,27 +200,37 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
   let poiM15Count = 0;
   let poiTotalChecks = 0;
 
+  // DIAGNOSTIC (temporary, round 3) - exact breakdown of which filter is
+  // responsible for cutting a 30-day window (~180 H4 bars, ~90 of them
+  // mechanically kill-zone-eligible per the fixed clock-boundary alignment)
+  // down to just 3 bars actually reaching POI detection.
+  const filterCounts = {
+    beforeWindow: 0, inTradeCooldown: 0, weekendOrDead: 0, news: 0,
+    sessionStrength: 0, notKillZone: 0, noIndicators: 0, adrExhausted: 0,
+    reachedPOI: 0
+  };
+
   for (let i = LOOKBACK; i < h4Bars.length - 1; i++) {
     const bar = h4Bars[i];
     const barTime = new Date(bar.time);
-    if (barTime < windowStart) continue;
-    if (i <= lastTradeExitIndex) continue;
+    if (barTime < windowStart) { filterCounts.beforeWindow++; continue; }
+    if (i <= lastTradeExitIndex) { filterCounts.inTradeCooldown++; continue; }
 
     const session = core.getSessionInfo(barTime);
-    if (session.session === "WEEKEND" || session.session === "DEAD_ZONE") continue;
+    if (session.session === "WEEKEND" || session.session === "DEAD_ZONE") { filterCounts.weekendOrDead++; continue; }
 
     const news = core.isNewsBlackout(barTime);
-    if (news.blocked) continue;
+    if (news.blocked) { filterCounts.news++; continue; }
 
     const isPairActive = core.isPairActiveInSession(symbol, session.session);
     const sessionThreshold = (session.sessQuality >= 2) ? 0.2 : 0.4;
-    if (!isPairActive && session.strength < sessionThreshold) continue;
-    if (!session.killZone) continue;
+    if (!isPairActive && session.strength < sessionThreshold) { filterCounts.sessionStrength++; continue; }
+    if (!session.killZone) { filterCounts.notKillZone++; continue; }
 
     const primaryBars = h4Bars.slice(Math.max(0, i - 200 + 1), i + 1);
     const currentATR = core.atrCalc(primaryBars, 14);
     const ind = core.getIndicators(primaryBars, currentATR);
-    if (!ind) continue;
+    if (!ind) { filterCounts.noIndicators++; continue; }
 
     const d1Window = d1Bars.filter(b => new Date(b.time) <= barTime).slice(-100);
     const w1Window = w1Bars.filter(b => new Date(b.time) <= barTime).slice(-60);
@@ -230,7 +242,8 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     const htfBias = core.getHTFBias(primaryBars, d1Window.length ? d1Window : null, w1Window.length ? w1Window : null, h1Window.length ? h1Window : null);
 
     const adrStatus = core.getADRStatus(primaryBars, d1Window, symbol);
-    if (adrStatus.exhausted) continue;
+    if (adrStatus.exhausted) { filterCounts.adrExhausted++; continue; }
+    filterCounts.reachedPOI++;
 
     // ── STAGE 3: POI detection moved to M15, matching the live change ──────
     // Filtered to barTime to avoid lookahead bias, same discipline as
@@ -461,7 +474,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
       avg_loss: losers.length > 0 ? parseFloat((grossLoss / losers.length).toFixed(2)) : 0,
       best_trade: trades.length > 0 ? parseFloat(Math.max(...trades.map(t => t.pnl)).toFixed(2)) : 0,
       worst_trade: trades.length > 0 ? parseFloat(Math.min(...trades.map(t => t.pnl)).toFixed(2)) : 0,
-      poiM15Count, poiTotalChecks, // DIAGNOSTIC (temporary)
+      poiM15Count, poiTotalChecks, filterCounts, // DIAGNOSTIC (temporary)
       total_spread_cost: parseFloat(trades.reduce((s, t) => s + (t.spread_cost || 0), 0).toFixed(2)),
       htf_aligned_trades: htfAligned.length,
       htf_aligned_win_rate: htfAligned.length > 0
