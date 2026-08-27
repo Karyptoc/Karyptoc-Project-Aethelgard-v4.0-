@@ -143,10 +143,23 @@ router.post("/run", verifyToken, async (req, res) => {
         `${symbol}: limited M15/M5 history (${m15Bars.length}/${m5Bars.length} bars) — POI detection window may be sparse until the backfill/ongoing cache accumulates more.`);
     }
 
+    // DIAGNOSTIC (temporary, round 2) - re-added after the row-limit fixes
+    // (code + Supabase Max Rows setting) to directly confirm whether the
+    // M15 date range actually updated, rather than inferring from the
+    // final P&L number again. Also logging H4's range this time, since 2
+    // trades/641 bars for a 30-day GOLD test is itself worth double-checking.
+    await log("info", "backtest",
+      `${symbol}: DIAGNOSTIC2 m15Bars.length=${m15Bars.length}, earliest=${m15Bars[0]?.time || "none"}, latest=${m15Bars[m15Bars.length-1]?.time || "none"}`);
+    await log("info", "backtest",
+      `${symbol}: DIAGNOSTIC2 h4Bars.length=${h4Bars.length}, earliest=${h4Bars[0]?.time || "none"}, latest=${h4Bars[h4Bars.length-1]?.time || "none"}, windowStart=${new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()}`);
+
     const windowStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const result = runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, {
       initialBalance: initial_balance, riskPercent: risk_percent, windowStart, minScoreOverride: min_score_override,
     });
+
+    await log("info", "backtest",
+      `${symbol}: DIAGNOSTIC2 usingPoiM15 count=${result.summary.poiM15Count || 0}/${result.summary.poiTotalChecks || 0} bars evaluated`);
 
     await log("info", "backtest",
       `Complete (rebuilt engine): ${symbol} | ${result.summary.total_trades} trades | WR:${result.summary.win_rate}% | PF:${result.summary.profit_factor}`);
