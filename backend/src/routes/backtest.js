@@ -162,6 +162,8 @@ router.post("/run", verifyToken, async (req, res) => {
       `${symbol}: DIAGNOSTIC2 usingPoiM15 count=${result.summary.poiM15Count || 0}/${result.summary.poiTotalChecks || 0} bars evaluated`);
     await log("info", "backtest",
       `${symbol}: DIAGNOSTIC3 filterCounts=${JSON.stringify(result.summary.filterCounts)}`);
+    await log("info", "backtest",
+      `${symbol}: DIAGNOSTIC4 holdReasons=${JSON.stringify(result.summary.holdReasons)}`);
 
     await log("info", "backtest",
       `Complete (rebuilt engine): ${symbol} | ${result.summary.total_trades} trades | WR:${result.summary.win_rate}% | PF:${result.summary.profit_factor}`);
@@ -208,6 +210,14 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     beforeWindow: 0, inTradeCooldown: 0, weekendOrDead: 0, news: 0,
     sessionStrength: 0, notKillZone: 0, noIndicators: 0, adrExhausted: 0,
     reachedPOI: 0
+  };
+
+  // DIAGNOSTIC (temporary, round 4) - why makePureMathDecision returns HOLD
+  // for bars that reached POI detection - to understand GOLD's drop to
+  // zero trades after the HTF-permission fix.
+  const holdReasons = {
+    noStructure: 0, htfConflict: 0, rsiConflict: 0, emaConflict: 0,
+    scoreTooLow: 0, confidenceTooLow: 0, other: 0
   };
 
   for (let i = LOOKBACK; i < h4Bars.length - 1; i++) {
@@ -325,7 +335,19 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     if (confluence.score < minScore) continue;
 
     const analysis = core.makePureMathDecision(confluence, htfBias, ictSequence, ind, session);
-    if (analysis.direction === "HOLD") continue;
+    if (analysis.direction === "HOLD") {
+      // DIAGNOSTIC (temporary) - categorize why, to understand GOLD's
+      // drop to zero trades after the HTF-permission fix without guessing.
+      const reason = analysis.reason || "unknown";
+      if (reason.includes("No directional signal")) holdReasons.noStructure++;
+      else if (reason.includes("HTF") && reason.includes("conflicts")) holdReasons.htfConflict++;
+      else if (reason.includes("RSI")) holdReasons.rsiConflict++;
+      else if (reason.includes("EMA")) holdReasons.emaConflict++;
+      else if (reason.includes("Score too low")) holdReasons.scoreTooLow++;
+      else if (reason.includes("Confidence")) holdReasons.confidenceTooLow++;
+      else holdReasons.other++;
+      continue;
+    }
 
     const sltp = core.calculateStructuralSLTP(
       analysis.direction, bar.close, ind, currentATR, symbol, ictSequence, analysis.reward_risk_ratio
@@ -483,7 +505,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
       avg_loss: losers.length > 0 ? parseFloat((grossLoss / losers.length).toFixed(2)) : 0,
       best_trade: trades.length > 0 ? parseFloat(Math.max(...trades.map(t => t.pnl)).toFixed(2)) : 0,
       worst_trade: trades.length > 0 ? parseFloat(Math.min(...trades.map(t => t.pnl)).toFixed(2)) : 0,
-      poiM15Count, poiTotalChecks, filterCounts, // DIAGNOSTIC (temporary)
+      poiM15Count, poiTotalChecks, filterCounts, holdReasons, // DIAGNOSTIC (temporary)
       total_spread_cost: parseFloat(trades.reduce((s, t) => s + (t.spread_cost || 0), 0).toFixed(2)),
       htf_aligned_trades: htfAligned.length,
       htf_aligned_win_rate: htfAligned.length > 0
