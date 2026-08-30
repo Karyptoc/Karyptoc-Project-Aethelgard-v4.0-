@@ -217,7 +217,9 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
   // zero trades after the HTF-permission fix.
   const holdReasons = {
     noStructure: 0, htfConflict: 0, rsiConflict: 0, emaConflict: 0,
-    scoreTooLow: 0, confidenceTooLow: 0, other: 0
+    scoreTooLow: 0, confidenceTooLow: 0, other: 0,
+    mandatorySequence: 0, missingSweep: 0, missingMSS: 0,
+    missingDisplacement: 0, missingPOI: 0
   };
 
   for (let i = LOOKBACK; i < h4Bars.length - 1; i++) {
@@ -336,11 +338,20 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
 
     const analysis = core.makePureMathDecision(confluence, htfBias, ictSequence, ind, session);
     if (analysis.direction === "HOLD") {
-      // DIAGNOSTIC (temporary) - categorize why, to understand GOLD's
-      // drop to zero trades after the HTF-permission fix without guessing.
+      // DIAGNOSTIC (temporary, round 5) - categorize why, including precise
+      // breakdown of which mandatory-sequence element(s) are missing, since
+      // GOLD dropped from 8 trades to 0 over the full 90-day window after
+      // the mandatory sequence gate was added.
       const reason = analysis.reason || "unknown";
       if (reason.includes("No directional signal")) holdReasons.noStructure++;
       else if (reason.includes("HTF") && reason.includes("conflicts")) holdReasons.htfConflict++;
+      else if (reason.includes("Mandatory sequence incomplete")) {
+        holdReasons.mandatorySequence++;
+        if (reason.includes("sweep")) holdReasons.missingSweep++;
+        if (reason.includes("MSS")) holdReasons.missingMSS++;
+        if (reason.includes("displacement")) holdReasons.missingDisplacement++;
+        if (reason.includes("POI retest")) holdReasons.missingPOI++;
+      }
       else if (reason.includes("RSI")) holdReasons.rsiConflict++;
       else if (reason.includes("EMA")) holdReasons.emaConflict++;
       else if (reason.includes("Score too low")) holdReasons.scoreTooLow++;
