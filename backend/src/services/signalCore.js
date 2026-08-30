@@ -121,45 +121,26 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   }
   const htfAligned = htf === expectedHTF;
 
-  // MANDATORY SEQUENCE GATE (external review, second fix pulled from that
-  // rewrite): previously sweep/displacement/retest only ADDED points toward
-  // the confluence score - a high enough score from OTHER factors (BOS,
-  // CHoCH, OB, FVG, EQH/EQL, RSI, HTF, EMA, session, PD zone) could clear
-  // the threshold without any of them actually being present. That's
-  // feature accumulation, not confluence - "there are lots of things
-  // happening" instead of "the specific sequence required for this trade
-  // has occurred". Displacement and POI retest are hard gates: both must
-  // be true and match direction, or the trade is blocked regardless of
-  // score. A score of 95 cannot override a missing displacement or POI.
-  //
-  // RECALIBRATED (confirmed via live 90-day GOLD backtest with per-element
-  // diagnostic logging): the first version required sweep AND MSS as two
-  // fully separate mandatory items. Since sweep is priority #1 in
-  // direction derivation above, any candidate reaching this gate via
-  // BOS/CHoCH as the direction source has NO sweep by definition - meaning
-  // only genuine sweep-based entries could ever pass. Real data: over the
-  // full 90 days, GOLD had ZERO bars with a qualifying sweep AND separately
-  // showed sweep missing on literally 100% (20/20) of candidates that
-  // reached this gate - while 9 of those 20 DID have valid MSS on their
-  // own. Those are exactly the BOS/CHoCH-driven setups that produced 8
-  // solid, profitable trades before this gate existed. Sweep and MSS are
-  // now ONE combined requirement (either qualifies as "genuine structural
-  // event") rather than two separately-mandatory items - still a real,
-  // hard requirement, just not artificially split into two redundant
-  // gates when either one alone is legitimate institutional evidence.
-  const hasSweep = !!ictSequence.sweep && ictSequence.sweep.direction === direction;
-  const hasMSS = direction === "BUY"
-    ? (ind.bos?.type === "BULLISH_BOS" || ind.choch?.type === "BULLISH_CHOCH")
-    : (ind.bos?.type === "BEARISH_BOS" || ind.choch?.type === "BEARISH_CHOCH");
-  const hasStructuralEvent = hasSweep || hasMSS;
-  const hasDisplacement = !!ictSequence.displacement && ictSequence.displacement.direction === direction;
-  const hasPOI = !!ictSequence.retest &&
-    (direction === "BUY" ? /BULLISH/.test(ictSequence.retest.type || "") : /BEARISH/.test(ictSequence.retest.type || ""));
-
-  if (!hasStructuralEvent || !hasDisplacement || !hasPOI) {
-    const missing = [!hasStructuralEvent && "sweep/MSS", !hasDisplacement && "displacement", !hasPOI && "POI retest"].filter(Boolean).join(", ");
-    return { direction: "HOLD", confidence: 0, reason: `Mandatory sequence incomplete — missing: ${missing}` };
-  }
+  // REVERTED (external review's second fix - honest account of why):
+  // sweep/MSS/displacement/POI were made into hard mandatory gates, on the
+  // reasoning that a high score from unrelated factors shouldn't be able
+  // to substitute for the actual sequence occurring. That reasoning is
+  // sound, and the gate was implemented and verified correctly at each
+  // step - but real backtest evidence across multiple pairs showed it was
+  // far too strict given how the underlying M15 detection functions are
+  // currently calibrated, even after two rounds of careful, data-driven
+  // recalibration (combining sweep+MSS into one requirement, widening
+  // displacement's detection window from 1 bar to 3). Even after both
+  // fixes: GOLD dropped from 8 profitable trades/90 days to 1 (a loss),
+  // EURUSD dropped to 0/30 days (was 3, PF 1.66), USDJPY dropped to 0
+  // even over a FULL 90-day window (was 4/30 days, PF 1.47). That's a
+  // system-wide near-total shutdown, not a GOLD-specific quirk, and it
+  // isn't matched by evidence of correspondingly better trade quality -
+  // continuing to chase individual threshold tweaks stopped being the
+  // right move. The HTF-permission fix (which precedes this in the code
+  // below) is kept - it was independently validated with real, positive
+  // results across GOLD/EURUSD/USDJPY before this gate was ever added,
+  // and isn't implicated in this regression.
 
   // RSI conflict check
   const r = ind.rsi14;
