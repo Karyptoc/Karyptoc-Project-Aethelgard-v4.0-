@@ -74,32 +74,34 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   const score = confluence.score;
   const htf = htfBias.bias;
 
-  // Determine direction from multiple sources (in priority order)
+  // FIX (external review, confirmed by reading this function): HTF bias
+  // used to be priority #1 in this chain, meaning it could single-handedly
+  // set direction with ZERO structural evidence - a "bullish" HTF read
+  // could generate a BUY even with no sweep, no BOS, no CHoCH at all. HTF
+  // is a directional PERMISSION filter, not an entry trigger - it should
+  // answer "which side am I allowed to trade", never "enter now". Direction
+  // must now originate from actual current-structure evidence only.
   let direction = "HOLD";
   let directionSource = "";
 
-  // 1. Clear HTF bias (strongest signal)
-  if (htf === "bullish") {
-    direction = "BUY"; directionSource = "HTF_BULL";
-  } else if (htf === "bearish") {
-    direction = "SELL"; directionSource = "HTF_BEAR";
-
-  // 2. ICT sweep direction (institutional signal)
-  } else if (ictSequence.sweep) {
+  // 1. ICT sweep direction (institutional signal) - strongest evidence
+  if (ictSequence.sweep) {
     direction = ictSequence.sweep.type === "SSL_SWEEP" ? "BUY" : "SELL";
     directionSource = "ICT_SWEEP";
 
-  // 3. BOS direction (structure break)
+  // 2. BOS direction (structure break)
   } else if (ind.bos) {
     direction = ind.bos.type.includes("BULLISH") ? "BUY" : "SELL";
     directionSource = "BOS";
 
-  // 4. CHoCH direction
+  // 3. CHoCH direction
   } else if (ind.choch) {
     direction = ind.choch.type.includes("BULLISH") ? "BUY" : "SELL";
     directionSource = "CHOCH";
 
-  // 5. RSI extreme as last resort (only in kill zones)
+  // 4. RSI extreme as last resort (only in kill zones) - weakest evidence,
+  // still real (price-based), unlike HTF which was a completely separate
+  // timeframe's trend read being used to justify an entry on THIS chart.
   } else if (session.killZone) {
     const r = ind.rsi14;
     if (r < 35) { direction = "BUY"; directionSource = "RSI_OVERSOLD"; }
@@ -107,8 +109,17 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   }
 
   if (direction === "HOLD") {
-    return { direction: "HOLD", confidence: 0, reason: "No directional signal — HTF neutral, no sweep/BOS/CHoCH" };
+    return { direction: "HOLD", confidence: 0, reason: "No directional signal — no sweep/BOS/CHoCH/RSI extreme" };
   }
+
+  // HTF PERMISSION CHECK: applied AFTER direction comes from real
+  // structure, exactly the "which side am I allowed to trade" role. Can
+  // only ever block or confirm - never originate.
+  const expectedHTF = direction === "BUY" ? "bullish" : "bearish";
+  if (htf !== "neutral" && htf !== expectedHTF) {
+    return { direction: "HOLD", confidence: 0, reason: `HTF ${htf} conflicts with structural ${direction} (source: ${directionSource})` };
+  }
+  const htfAligned = htf === expectedHTF;
 
   // RSI conflict check
   const r = ind.rsi14;
@@ -119,18 +130,19 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
     return { direction: "HOLD", confidence: 0, reason: `RSI oversold: ${r}` };
   }
 
-  // EMA conflict — only block if HTF was neutral (non-HTF direction source)
-  if (directionSource !== "HTF_BULL" && directionSource !== "HTF_BEAR") {
-    if (direction === "BUY" && !ind.bullish && score < 55) {
-      return { direction: "HOLD", confidence: 0, reason: "EMA bearish + no HTF + low score" };
-    }
-    if (direction === "SELL" && ind.bullish && score < 55) {
-      return { direction: "HOLD", confidence: 0, reason: "EMA bullish + no HTF + low score" };
-    }
+  // EMA conflict check - applies to all sources now, since none of them
+  // are HTF-derived anymore (that special case no longer exists)
+  if (direction === "BUY" && !ind.bullish && score < 55) {
+    return { direction: "HOLD", confidence: 0, reason: "EMA bearish + low score" };
+  }
+  if (direction === "SELL" && ind.bullish && score < 55) {
+    return { direction: "HOLD", confidence: 0, reason: "EMA bullish + low score" };
   }
 
-  // Score → confidence mapping — aligned with backtest min_confluence=35
-  const baseScore = directionSource === "HTF_BULL" || directionSource === "HTF_BEAR" ? score : score - 3;
+  // Score → confidence mapping. Real structural sources (sweep/BOS/CHoCH)
+  // use the raw score; RSI-only (weakest, last-resort evidence) keeps the
+  // same -3 penalty it always had.
+  const baseScore = directionSource === "RSI_OVERSOLD" || directionSource === "RSI_OVERBOUGHT" ? score - 3 : score;
   let confidence;
   if (baseScore >= 80) confidence = 0.82;
   else if (baseScore >= 70) confidence = 0.72;
@@ -144,6 +156,10 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   else if (ictSequence.hasPartialSequence) confidence = Math.min(confidence + 0.04, 0.80);
   if (session.entryModel) confidence = Math.min(confidence + 0.05, 0.88);
   if (session.killZone && directionSource === "ICT_SWEEP") confidence = Math.min(confidence + 0.05, 0.85);
+  // NEW: HTF alignment is now purely a confirmation bonus, matching its
+  // permission-only role - it can raise confidence when structure and HTF
+  // agree, but (per the check above) can never be the reason a trade fires.
+  if (htfAligned) confidence = Math.min(confidence + 0.04, 0.90);
 
   // Volatility penalty
   if (ind.atr_ratio >= 2.5) confidence = Math.max(confidence - 0.15, 0.45);
