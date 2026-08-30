@@ -121,6 +121,35 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   }
   const htfAligned = htf === expectedHTF;
 
+  // MANDATORY SEQUENCE GATE (external review, second fix pulled from that
+  // rewrite): previously sweep/displacement/retest only ADDED points toward
+  // the confluence score - a high enough score from OTHER factors (BOS,
+  // CHoCH, OB, FVG, EQH/EQL, RSI, HTF, EMA, session, PD zone) could clear
+  // the threshold without any of them actually being present. That's
+  // feature accumulation, not confluence - "there are lots of things
+  // happening" instead of "the specific sequence required for this trade
+  // has occurred". These four are now hard gates: ALL must be true and
+  // match the trade's direction, or the trade is blocked regardless of how
+  // high the score is. A score of 95 cannot override a missing MSS.
+  //
+  // Direct consequence, stated plainly rather than left implicit: since
+  // sweep is already priority #1 in direction derivation above, reaching
+  // this gate via BOS/CHoCH/RSI as the direction source means no sweep was
+  // found at all - which will always fail hasSweep below. In practice,
+  // only genuine sweep-based entries can ever pass this gate now.
+  const hasSweep = !!ictSequence.sweep && ictSequence.sweep.direction === direction;
+  const hasMSS = direction === "BUY"
+    ? (ind.bos?.type === "BULLISH_BOS" || ind.choch?.type === "BULLISH_CHOCH")
+    : (ind.bos?.type === "BEARISH_BOS" || ind.choch?.type === "BEARISH_CHOCH");
+  const hasDisplacement = !!ictSequence.displacement && ictSequence.displacement.direction === direction;
+  const hasPOI = !!ictSequence.retest &&
+    (direction === "BUY" ? /BULLISH/.test(ictSequence.retest.type || "") : /BEARISH/.test(ictSequence.retest.type || ""));
+
+  if (!hasSweep || !hasMSS || !hasDisplacement || !hasPOI) {
+    const missing = [!hasSweep && "sweep", !hasMSS && "MSS", !hasDisplacement && "displacement", !hasPOI && "POI retest"].filter(Boolean).join(", ");
+    return { direction: "HOLD", confidence: 0, reason: `Mandatory sequence incomplete — missing: ${missing}` };
+  }
+
   // RSI conflict check
   const r = ind.rsi14;
   if (direction === "BUY" && r > 78) {
