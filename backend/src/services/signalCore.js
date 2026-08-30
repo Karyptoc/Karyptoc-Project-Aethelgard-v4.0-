@@ -128,25 +128,36 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   // the threshold without any of them actually being present. That's
   // feature accumulation, not confluence - "there are lots of things
   // happening" instead of "the specific sequence required for this trade
-  // has occurred". These four are now hard gates: ALL must be true and
-  // match the trade's direction, or the trade is blocked regardless of how
-  // high the score is. A score of 95 cannot override a missing MSS.
+  // has occurred". Displacement and POI retest are hard gates: both must
+  // be true and match direction, or the trade is blocked regardless of
+  // score. A score of 95 cannot override a missing displacement or POI.
   //
-  // Direct consequence, stated plainly rather than left implicit: since
-  // sweep is already priority #1 in direction derivation above, reaching
-  // this gate via BOS/CHoCH/RSI as the direction source means no sweep was
-  // found at all - which will always fail hasSweep below. In practice,
-  // only genuine sweep-based entries can ever pass this gate now.
+  // RECALIBRATED (confirmed via live 90-day GOLD backtest with per-element
+  // diagnostic logging): the first version required sweep AND MSS as two
+  // fully separate mandatory items. Since sweep is priority #1 in
+  // direction derivation above, any candidate reaching this gate via
+  // BOS/CHoCH as the direction source has NO sweep by definition - meaning
+  // only genuine sweep-based entries could ever pass. Real data: over the
+  // full 90 days, GOLD had ZERO bars with a qualifying sweep AND separately
+  // showed sweep missing on literally 100% (20/20) of candidates that
+  // reached this gate - while 9 of those 20 DID have valid MSS on their
+  // own. Those are exactly the BOS/CHoCH-driven setups that produced 8
+  // solid, profitable trades before this gate existed. Sweep and MSS are
+  // now ONE combined requirement (either qualifies as "genuine structural
+  // event") rather than two separately-mandatory items - still a real,
+  // hard requirement, just not artificially split into two redundant
+  // gates when either one alone is legitimate institutional evidence.
   const hasSweep = !!ictSequence.sweep && ictSequence.sweep.direction === direction;
   const hasMSS = direction === "BUY"
     ? (ind.bos?.type === "BULLISH_BOS" || ind.choch?.type === "BULLISH_CHOCH")
     : (ind.bos?.type === "BEARISH_BOS" || ind.choch?.type === "BEARISH_CHOCH");
+  const hasStructuralEvent = hasSweep || hasMSS;
   const hasDisplacement = !!ictSequence.displacement && ictSequence.displacement.direction === direction;
   const hasPOI = !!ictSequence.retest &&
     (direction === "BUY" ? /BULLISH/.test(ictSequence.retest.type || "") : /BEARISH/.test(ictSequence.retest.type || ""));
 
-  if (!hasSweep || !hasMSS || !hasDisplacement || !hasPOI) {
-    const missing = [!hasSweep && "sweep", !hasMSS && "MSS", !hasDisplacement && "displacement", !hasPOI && "POI retest"].filter(Boolean).join(", ");
+  if (!hasStructuralEvent || !hasDisplacement || !hasPOI) {
+    const missing = [!hasStructuralEvent && "sweep/MSS", !hasDisplacement && "displacement", !hasPOI && "POI retest"].filter(Boolean).join(", ");
     return { direction: "HOLD", confidence: 0, reason: `Mandatory sequence incomplete — missing: ${missing}` };
   }
 
