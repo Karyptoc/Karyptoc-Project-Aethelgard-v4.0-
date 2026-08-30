@@ -464,28 +464,48 @@ function detectLiquiditySweep(bars, lookback = 15) {
  * Filters out fake breakouts
  */
 function detectDisplacement(bars, atrVal) {
-  if (!bars || bars.length < 3 || !atrVal) return null;
+  if (!bars || bars.length < 5 || !atrVal) return null;
   const len = bars.length;
-  const bar = bars[len-2]; // last confirmed bar
 
-  const bodySize = Math.abs(bar.close - bar.open);
-  const fullRange = bar.high - bar.low;
-  const bodyPct = fullRange > 0 ? bodySize / fullRange : 0;
-  const isBull = bar.close > bar.open;
-  const isBear = bar.close < bar.open;
+  // FIX (confirmed via live 90-day GOLD diagnostic with per-element
+  // logging): this used to check ONLY the single most recent confirmed bar
+  // (bars[len-2]), requiring that exact candle to itself have a large body
+  // (>1.5x ATR) AND a high body-to-range ratio (>0.5). On M15, requiring
+  // one specific 15-minute candle to be this decisive is a narrow,
+  // low-probability timing requirement - unlike sweep/retest, which
+  // naturally scan a window of bars rather than one exact bar. Confirmed
+  // live: even after loosening the sweep/MSS gate, this single-bar
+  // requirement alone was still blocking 19 of 20 candidates that had
+  // already cleared every other mandatory gate. Now scans the last 3
+  // confirmed bars for any qualifying displacement, using the most recent
+  // match - "did displacement happen recently" rather than "did it happen
+  // in this exact 15-minute window".
+  for (let offset = 2; offset <= 4; offset++) {
+    const bar = bars[len - offset];
+    if (!bar) continue;
 
-  const isDisplacement = bodySize > atrVal * 1.5 && bodyPct > 0.5;
+    const bodySize = Math.abs(bar.close - bar.open);
+    const fullRange = bar.high - bar.low;
+    const bodyPct = fullRange > 0 ? bodySize / fullRange : 0;
+    const isBull = bar.close > bar.open;
+    const isBear = bar.close < bar.open;
 
-  if (!isDisplacement) return null;
+    const isDisplacement = bodySize > atrVal * 1.5 && bodyPct > 0.5;
 
-  return {
-    direction: isBull ? "BUY" : "SELL",
-    bodySize,
-    bodyPct: parseFloat(bodyPct.toFixed(2)),
-    atrRatio: parseFloat((bodySize / atrVal).toFixed(2)),
-    displacementLow: bar.low,
-    displacementHigh: bar.high
-  };
+    if (isDisplacement) {
+      return {
+        direction: isBull ? "BUY" : "SELL",
+        bodySize,
+        bodyPct: parseFloat(bodyPct.toFixed(2)),
+        atrRatio: parseFloat((bodySize / atrVal).toFixed(2)),
+        displacementLow: bar.low,
+        displacementHigh: bar.high,
+        barsAgo: offset - 2
+      };
+    }
+  }
+
+  return null;
 }
 
 /**
