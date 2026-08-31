@@ -109,10 +109,14 @@ async function getDuplicateWindow() {
     const { data } = await supabaseAdmin
       .from("platform_settings").select("value")
       .eq("key", "duplicate_signal_minutes").single();
-    return parseInt(data?.value) || 3;
-  } catch { return 3; }
+    return parseInt(data?.value) || 60;
+  } catch { return 60; }
 }
-// FIX: default window reduced from 20 to 3 minutes. This check's job is now
+// FIX (regression found and restored): this had reverted to a 3-minute
+// default at some point - confirmed too tight in this project (GOLD fired
+// the same losing setup 3x in 31 minutes, US30Cash 2x in 17 minutes, both
+// well outside 3 minutes but clearly the same re-qualifying setup, not a
+// new opportunity). Restored to the validated 60-minute default.
 // just to prevent the same 5-minute cycle (or an adjacent one) from firing
 // two near-simultaneous signals for the same setup - the REAL concurrency
 // limit (how many trades can be open on a symbol at once) is now handled
@@ -439,7 +443,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 
     // Step 4: Retest check
     const retestDirection = sweep?.direction || (htfBias.bias === "bullish" ? "BUY" : "SELL");
-    const retest = checkRetest(poiBars, fvgs, obs, retestDirection);
+    const retest = checkRetest(poiBars, fvgs, obs, retestDirection, poiATR);
 
     // Step 5: Equal Highs/Lows (liquidity targets)
     const eqLiquidity = poiATR ? detectEqualHighsLows(poiBars, poiATR, M15_EQHL_LOOKBACK) : null;
@@ -698,10 +702,23 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     // Retest of FVG/OB → limit order (price must come to us).
     // Breakout/sweep momentum → market order.
     // Scalp mode → always market (time-critical).
+    // NEW: high-quality POI (fresh, large relative to ATR) touched right
+    // now in a kill zone → market order too. Matches the user's ICT/SMC
+    // research guide directly (Section 16 - fresh, strong-departure zones;
+    // Section 21 - A+ scoring rewards zone quality). A zone this strong
+    // being touched live has real potential to push price immediately -
+    // waiting for a limit fill at a stale retest price risks missing the
+    // move entirely, the same reasoning already applied to sweep momentum.
     let orderType = "MARKET";
     let pendingOrderPrice = null;
 
-    if (tradingMode !== TRADING_MODES.SCALP && retest) {
+    const poiHighQualityLive = retest?.highQuality && session.killZone;
+
+    if (tradingMode !== TRADING_MODES.SCALP && poiHighQualityLive) {
+      orderType = "MARKET";
+      await log("info", "signalEngine",
+        `${symbol}: High-quality POI (fresh, ${retest.sizeRatio}x ATR) touched live in kill zone — market entry`);
+    } else if (tradingMode !== TRADING_MODES.SCALP && retest) {
       if (analysis.direction === "BUY" && retest.type?.includes("BULLISH")) {
         orderType = "BUY_LIMIT";
         pendingOrderPrice = parseFloat(retest.low.toFixed(5));

@@ -501,10 +501,10 @@ function detectOBs(bars, lookback = 10) {
     const range = b.high - b.low;
     // Bullish OB: bearish candle followed by strong bullish move (1.5x range)
     if (b.close < b.open && n.close > n.open && (n.close-n.open) > range*1.5)
-      obs.push({ type: "BULLISH_OB", high: b.high, low: b.low, idx: i });
+      obs.push({ type: "BULLISH_OB", high: b.high, low: b.low, idx: i, size: range });
     // Bearish OB: bullish candle followed by strong bearish move
     if (b.close > b.open && n.close < n.open && (n.open-n.close) > range*1.5)
-      obs.push({ type: "BEARISH_OB", high: b.high, low: b.low, idx: i });
+      obs.push({ type: "BEARISH_OB", high: b.high, low: b.low, idx: i, size: range });
   }
   return obs.slice(-3); // last 3 OBs
 }
@@ -656,7 +656,36 @@ function calculateStrength(bars, atrVal, lookback = 20) {
  * NEW: Check if price is retesting a FVG or OB (retest entry trigger)
  * Returns the zone being retested and expected entry direction
  */
-function checkRetest(bars, fvgs, obs, direction) {
+// POI QUALITY: matches the user's ICT/SMC research guide (Section 16 -
+// "how to identify high-quality demand", Section 21 - A+ setup scoring) -
+// not every POI touch is equal. A fresh, large-relative-to-volatility zone
+// represents a real imbalance/institutional footprint; a small zone that's
+// already been retested once is weaker and shouldn't be treated the same.
+// Two factors:
+//  - size: zone height relative to current ATR - larger = stronger imbalance
+//  - fresh: whether price has touched this zone's range at ANY point
+//    between its formation and now, EXCLUDING the current touch being
+//    evaluated. A zone visited before is "used up" liquidity/imbalance,
+//    not a fresh one.
+function scorePOIQuality(bars, zone, atrVal) {
+  if (!bars || !zone || !atrVal || atrVal <= 0) return { fresh: true, sizeRatio: 0, highQuality: false };
+  const len = bars.length;
+  const zoneIdx = zone.idx ?? 0;
+  // Scan every bar AFTER the zone formed and BEFORE the current touch
+  // (len-1 is the current/incomplete bar, len-2 is the one just checked
+  // by checkRetest as the touch itself - excluded here on purpose).
+  let touchedBefore = false;
+  for (let i = zoneIdx + 2; i < len - 2; i++) {
+    const b = bars[i];
+    if (!b) continue;
+    if (b.low <= zone.high && b.high >= zone.low) { touchedBefore = true; break; }
+  }
+  const sizeRatio = (zone.size || (zone.high - zone.low)) / atrVal;
+  const highQuality = !touchedBefore && sizeRatio >= 0.4;
+  return { fresh: !touchedBefore, sizeRatio: parseFloat(sizeRatio.toFixed(2)), highQuality };
+}
+
+function checkRetest(bars, fvgs, obs, direction, atrVal) {
   if (!bars || bars.length < 2) return null;
   const currentPrice = bars[bars.length-1].close;
   const prevPrice    = bars[bars.length-2].close;
@@ -665,12 +694,14 @@ function checkRetest(bars, fvgs, obs, direction) {
   for (const fvg of fvgs) {
     if (direction === "BUY" && fvg.type === "BULLISH_FVG") {
       if (currentPrice >= fvg.low && currentPrice <= fvg.high) {
-        return { zone: "FVG", type: "BULLISH_FVG", high: fvg.high, low: fvg.low, size: fvg.size };
+        const quality = scorePOIQuality(bars, fvg, atrVal);
+        return { zone: "FVG", type: "BULLISH_FVG", high: fvg.high, low: fvg.low, size: fvg.size, ...quality };
       }
     }
     if (direction === "SELL" && fvg.type === "BEARISH_FVG") {
       if (currentPrice >= fvg.low && currentPrice <= fvg.high) {
-        return { zone: "FVG", type: "BEARISH_FVG", high: fvg.high, low: fvg.low, size: fvg.size };
+        const quality = scorePOIQuality(bars, fvg, atrVal);
+        return { zone: "FVG", type: "BEARISH_FVG", high: fvg.high, low: fvg.low, size: fvg.size, ...quality };
       }
     }
   }
@@ -679,12 +710,14 @@ function checkRetest(bars, fvgs, obs, direction) {
   for (const ob of obs) {
     if (direction === "BUY" && ob.type === "BULLISH_OB") {
       if (currentPrice >= ob.low && currentPrice <= ob.high) {
-        return { zone: "OB", type: "BULLISH_OB", high: ob.high, low: ob.low };
+        const quality = scorePOIQuality(bars, ob, atrVal);
+        return { zone: "OB", type: "BULLISH_OB", high: ob.high, low: ob.low, size: ob.size, ...quality };
       }
     }
     if (direction === "SELL" && ob.type === "BEARISH_OB") {
       if (currentPrice >= ob.low && currentPrice <= ob.high) {
-        return { zone: "OB", type: "BEARISH_OB", high: ob.high, low: ob.low };
+        const quality = scorePOIQuality(bars, ob, atrVal);
+        return { zone: "OB", type: "BEARISH_OB", high: ob.high, low: ob.low, size: ob.size, ...quality };
       }
     }
   }

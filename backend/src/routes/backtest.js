@@ -296,7 +296,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     const fvgs = poiInd?.fvgs || [];
     const obs = poiInd?.obs || [];
     const retestDirection = sweep?.direction || (htfBias.bias === "bullish" ? "BUY" : "SELL");
-    const retest = core.checkRetest(poiBars, fvgs, obs, retestDirection);
+    const retest = core.checkRetest(poiBars, fvgs, obs, retestDirection, poiATR);
     const eqLiquidity = poiATR ? core.detectEqualHighsLows(poiBars, poiATR, usingPoiM15 ? M15_EQHL_LOOKBACK : 20) : null;
     const strength = poiATR ? core.calculateStrength(poiBars, poiATR, usingPoiM15 ? M15_STRENGTH_LOOKBACK : 20) : null;
     const pdZone = core.getPremiumDiscount(poiBars, usingPoiM15 ? M15_PD_LOOKBACK : 20);
