@@ -164,6 +164,8 @@ router.post("/run", verifyToken, async (req, res) => {
       `${symbol}: DIAGNOSTIC3 filterCounts=${JSON.stringify(result.summary.filterCounts)}`);
     await log("info", "backtest",
       `${symbol}: DIAGNOSTIC4 holdReasons=${JSON.stringify(result.summary.holdReasons)}`);
+    await log("info", "backtest",
+      `${symbol}: FILLSIM orderTypeCounts=${JSON.stringify(result.summary.orderTypeCounts)} limitFillCounts=${JSON.stringify(result.summary.limitFillCounts)}`);
 
     await log("info", "backtest",
       `Complete (rebuilt engine): ${symbol} | ${result.summary.total_trades} trades | WR:${result.summary.win_rate}% | PF:${result.summary.profit_factor}`);
@@ -221,6 +223,11 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     mandatorySequence: 0, missingSweep: 0, missingMSS: 0,
     missingDisplacement: 0, missingPOI: 0
   };
+
+  // Order-type/fill simulation tracking - real fill-price simulation for
+  // limit orders, replacing the previous unconditional bar.close entry.
+  const orderTypeCounts = {};
+  const limitFillCounts = { filled: 0, expired: 0 };
 
   for (let i = LOOKBACK; i < h4Bars.length - 1; i++) {
     const bar = h4Bars[i];
@@ -376,7 +383,72 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     const pipValuePerLot = { GOLD: 1, BTCUSD: 1, US30Cash: 1, GER40Cash: 1 }[symbol] || 10;
     const spreadCost = spreadPips * pipValuePerLot * sizing.lotSize;
 
-    const entryPrice = bar.close;
+    // ── ORDER TYPE + FILL SIMULATION ────────────────────────────────────────
+    // Mirrors signalEngine.js's order-type logic exactly (same priority:
+    // high-quality POI live in kill zone -> MARKET, retest exists ->
+    // LIMIT at the retest price, sweep without retest -> LIMIT slightly
+    // inside current price, otherwise -> MARKET). Previously this backtest
+    // had ZERO order-type awareness - entryPrice was unconditionally
+    // bar.close regardless of what live trading would actually do,
+    // silently assuming every limit order fills instantly at the analysis
+    // price. Now actually simulates whether a limit order would fill: uses
+    // M15 bars within the same 2-hour expiry window live trading uses
+    // (signalEngine.js sets expires_at = +2hrs) to check whether price
+    // genuinely touches the limit level. If it never does, the order is
+    // correctly treated as unfilled/expired - no trade, not a phantom fill
+    // at a price that was never actually reached.
+    let orderType = "MARKET";
+    let pendingOrderPrice = null;
+    const poiHighQualityLive = retest?.highQuality && session.killZone;
+
+    if (poiHighQualityLive) {
+      orderType = "MARKET";
+    } else if (retest) {
+      if (analysis.direction === "BUY" && retest.type?.includes("BULLISH")) {
+        orderType = "BUY_LIMIT";
+        pendingOrderPrice = parseFloat(retest.low.toFixed(5));
+      } else if (analysis.direction === "SELL" && retest.type?.includes("BEARISH")) {
+        orderType = "SELL_LIMIT";
+        pendingOrderPrice = parseFloat(retest.high.toFixed(5));
+      }
+    } else if (sweep && !retest) {
+      if (analysis.direction === "BUY") {
+        orderType = "BUY_LIMIT";
+        pendingOrderPrice = parseFloat((bar.close * 0.9998).toFixed(5));
+      } else {
+        orderType = "SELL_LIMIT";
+        pendingOrderPrice = parseFloat((bar.close * 1.0002).toFixed(5));
+      }
+    }
+
+    orderTypeCounts[orderType] = (orderTypeCounts[orderType] || 0) + 1;
+
+    let entryPrice = bar.close;
+    let fillMissed = false;
+
+    if (pendingOrderPrice !== null) {
+      // Search M15 bars from just after this signal's bar close up to +2hrs
+      // (matching expires_at in signalEngine.js) for a genuine touch of the
+      // limit price.
+      const expiryTime = new Date(barTime.getTime() + 2 * 60 * 60 * 1000);
+      const fillWindow = (m15Bars || []).filter(b => {
+        const t = new Date(b.time);
+        return t > barTime && t <= expiryTime;
+      });
+      const filled = fillWindow.some(b =>
+        orderType === "BUY_LIMIT" ? b.low <= pendingOrderPrice : b.high >= pendingOrderPrice
+      );
+      if (filled) {
+        entryPrice = pendingOrderPrice;
+        limitFillCounts.filled++;
+      } else {
+        fillMissed = true;
+        limitFillCounts.expired++;
+      }
+    }
+
+    if (fillMissed) continue; // pending order never filled - no trade, matches real expiry behavior
+
     let currentSL = sltp.stopLoss;
     let remainingLots = sizing.lotSize;
     let realizedPnl = -spreadCost;
@@ -517,6 +589,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
       best_trade: trades.length > 0 ? parseFloat(Math.max(...trades.map(t => t.pnl)).toFixed(2)) : 0,
       worst_trade: trades.length > 0 ? parseFloat(Math.min(...trades.map(t => t.pnl)).toFixed(2)) : 0,
       poiM15Count, poiTotalChecks, filterCounts, holdReasons, // DIAGNOSTIC (temporary)
+      orderTypeCounts, limitFillCounts, // fill-price simulation results
       total_spread_cost: parseFloat(trades.reduce((s, t) => s + (t.spread_cost || 0), 0).toFixed(2)),
       htf_aligned_trades: htfAligned.length,
       htf_aligned_win_rate: htfAligned.length > 0
