@@ -235,7 +235,7 @@ export default function Backtest() {
 
             {/* Tabs */}
             <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-              {["summary","trades","sessions","grades"].map(tab => (
+              {["summary","trades","sessions","grades","fills"].map(tab => (
                 <button key={tab} className={`btn btn-sm ${activeTab === tab ? "btn-primary" : "btn-ghost"}`}
                   onClick={() => setActiveTab(tab)}>
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -298,6 +298,61 @@ export default function Backtest() {
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Order Type / Fill Simulation */}
+            {activeTab === "fills" && (
+              <div className="card">
+                <div className="card-header"><span className="card-title">Order Type &amp; Fill Simulation</span></div>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "0 0 12px" }}>
+                  MARKET orders fill instantly at the analysis price. BUY_LIMIT/SELL_LIMIT orders only count as
+                  a trade if price genuinely touched the limit level within the same 2-hour window live trading
+                  uses — otherwise the signal expired unfilled and isn't counted here.
+                </p>
+                <table style={{ marginBottom: 16 }}>
+                  <thead>
+                    <tr><th>Order Type</th><th>Signals Generated</th></tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(result.summary.orderTypeCounts || {}).map(([type, count]) => (
+                      <tr key={type}>
+                        <td><span className={`badge ${type === "MARKET" ? "accent" : "warn"}`}>{type}</span></td>
+                        <td className="mono">{count}</td>
+                      </tr>
+                    ))}
+                    {Object.keys(result.summary.orderTypeCounts || {}).length === 0 && (
+                      <tr><td colSpan={2} style={{ color: "var(--text-muted)" }}>No signals generated in this window</td></tr>
+                    )}
+                  </tbody>
+                </table>
+                <div className="card-header"><span className="card-title" style={{ fontSize: 13 }}>Limit Order Fill Outcomes</span></div>
+                <table>
+                  <thead>
+                    <tr><th>Outcome</th><th>Count</th><th>% of Limit Signals</th></tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const filled = result.summary.limitFillCounts?.filled || 0;
+                      const expired = result.summary.limitFillCounts?.expired || 0;
+                      const total = filled + expired;
+                      return (
+                        <>
+                          <tr>
+                            <td><span className="badge bull">Filled</span></td>
+                            <td className="mono">{filled}</td>
+                            <td className="mono">{total > 0 ? ((filled/total)*100).toFixed(0) : 0}%</td>
+                          </tr>
+                          <tr>
+                            <td><span className="badge bear">Expired unfilled</span></td>
+                            <td className="mono">{expired}</td>
+                            <td className="mono">{total > 0 ? ((expired/total)*100).toFixed(0) : 0}%</td>
+                          </tr>
+                        </>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>
