@@ -219,7 +219,7 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
     tp1_logic: "Session level TP1",
     tp2_logic: "2.5R from entry",
     sentiment_score: direction === "BUY" ? parseFloat((confidence - 0.5).toFixed(2)) : parseFloat((0.5 - confidence).toFixed(2)),
-    rationale: `Pure math: ${direction} via ${directionSource} | Score ${score}/100 | ${session.name} | ICT:${ictSequence.hasFullSequence ? "FULL" : ictSequence.hasPartialSequence ? "PARTIAL" : "NONE"}`,
+    rationale: `Pure math: ${direction} via ${directionSource} | Score ${score}/100 | ${session.name}`,
     invalidation: direction === "BUY" ? `Below ${(ind.currentPrice * 0.998).toFixed(5)}` : `Above ${(ind.currentPrice * 1.002).toFixed(5)}`,
     timeframe_primary: "H4",
     position_size_modifier: score >= 75 ? 1.2 : score >= 60 ? 1.0 : 0.7,
