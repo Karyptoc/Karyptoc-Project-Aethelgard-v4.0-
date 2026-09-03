@@ -118,9 +118,19 @@ router.post("/sync", async (req, res) => {
           // it must be "open" regardless of what a prior sync cycle set
           // it to - this is what correctly recovers from the premature-
           // close glitch instead of leaving a stale "closed" row behind.
+          //
+          // FIX (closes a real data gap - live trades were showing
+          // open_price=null despite having real profit data): this update
+          // never touched open_price at all, even though pos.open_price
+          // is genuine, live MT5 data right here. If the ack handler ever
+          // recorded a null placeholder (e.g. acking a pending order
+          // before it filled), nothing downstream ever backfilled it.
+          // Sync runs repeatedly and has the real value, so this gives
+          // every open position a genuine chance to self-correct.
           await supabaseAdmin.from("trades").update({
             profit: pos.profit,
-            status: "open"
+            status: "open",
+            open_price: pos.open_price || undefined,
           }).eq("id", existing.id);
         }
       }
@@ -356,15 +366,24 @@ router.post("/commands/:id/ack", async (req, res) => {
       // every time. Now checks for an existing row by ticket+account first,
       // matching the same safe pattern already used in the sync path.
       const { data: existingTrade } = await supabaseAdmin.from("trades")
-        .select("id").eq("account_id", accountId).eq("ticket", result.ticket).single();
+        .select("id, open_price").eq("account_id", accountId).eq("ticket", result.ticket).single();
 
       if (existingTrade) {
+        // FIX (real data gap confirmed - several live trades showed
+        // open_price=null despite having real profit/close data): this
+        // used to unconditionally write open_price: result.price on every
+        // update, even when result.price was null/0 (e.g. an ack for a
+        // pending limit order before it has actually filled). If that
+        // happened after a prior call had already recorded the real fill
+        // price, it would silently overwrite a correct value with a
+        // missing one. Now only overwrites when result.price is actually
+        // present, otherwise keeps whatever was already recorded.
         await supabaseAdmin.from("trades").update({
           signal_id: signalId || null,
           symbol: result.order?.symbol,
           direction: result.order?.direction,
           volume: result.volume || result.order?.volume,
-          open_price: result.price,
+          open_price: result.price || existingTrade.open_price,
           stop_loss: result.order?.stop_loss,
           take_profit: result.order?.take_profit,
           status: "open",
