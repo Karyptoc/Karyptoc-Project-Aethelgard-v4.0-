@@ -146,6 +146,18 @@ export default function PairControls() {
                   const isActing = acting === p.symbol;
                   const pnl = parseFloat(p.total_pnl || 0);
                   const wr = parseFloat(p.win_rate_pct || 0);
+                  // NEW: distinguish "no trades yet" from a genuine 0% win
+                  // rate - showing "0%" next to "$0.00" reads as "this pair
+                  // always loses", when it usually just means no trades have
+                  // closed yet. Prefers an actual trade-count field if the
+                  // backend provides one (checks a few likely names since
+                  // the exact schema wasn't confirmed); falls back to a
+                  // defensive heuristic (both P&L and win rate exactly
+                  // zero) otherwise - matches the real pattern seen live
+                  // (GOLD: 100%/+$16.01 = real data; every other pair
+                  // showing 0%/+$0.00 = no trades yet).
+                  const totalTrades = p.total_trades ?? p.trade_count ?? p.trades ?? null;
+                  const hasTradeData = totalTrades !== null ? totalTrades > 0 : (wr !== 0 || pnl !== 0);
 
                   return (
                     <tr key={p.symbol} style={{ opacity: isHalted ? 0.65 : 1 }}>
@@ -170,9 +182,13 @@ export default function PairControls() {
 
                       {/* Win Rate */}
                       <td className="mono">
-                        <span style={{ color: wr >= 50 ? "var(--bull)" : wr > 0 ? "var(--warn)" : "var(--text-muted)", fontWeight: 700 }}>
-                          {wr.toFixed(0)}%
-                        </span>
+                        {hasTradeData ? (
+                          <span style={{ color: wr >= 50 ? "var(--bull)" : wr > 0 ? "var(--warn)" : "var(--text-muted)", fontWeight: 700 }}>
+                            {wr.toFixed(0)}%
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)" }} title="No closed trades yet">—</span>
+                        )}
                       </td>
 
                       {/* Total P&L */}
