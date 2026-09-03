@@ -44,7 +44,7 @@ export default function Dashboard() {
       // Load equity curve for first account
       if (r.data.accounts?.length > 0) {
         try {
-          const eq = await api.get(`/api/dashboard/equity-curve/${r.data.accounts[0].id}`);
+          const eq = await api.get(`/api/dashboard/equity-curve/${r.data.accounts[0].id}`, { params: { days: 7 } });
           setEquityCurve((eq.data.snapshots || []).map(s => ({
             time: s.snapshot_time,
             equity: parseFloat(s.equity)
@@ -162,20 +162,41 @@ export default function Dashboard() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {(data?.recent_signals || []).slice(0, 5).map(sig => (
-                  <div key={sig.id} style={{
-                    display: "flex", alignItems: "center", gap: 10,
-                    padding: "10px 12px", background: "var(--bg-elevated)",
-                    borderRadius: "var(--radius)", borderLeft: `3px solid ${sig.direction === "BUY" ? "var(--bull)" : "var(--bear)"}`
-                  }}>
-                    <span style={{ fontWeight: 800, fontSize: 14, minWidth: 60 }}>{sig.symbol}</span>
-                    <span className={`badge ${sig.direction === "BUY" ? "bull" : "bear"}`}>{sig.direction}</span>
-                    <ConfBar value={sig.confidence} />
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>
-                      {(sig.regime || "").replace(/_/g, " ")}
-                    </span>
-                  </div>
-                ))}
+                {(() => {
+                  // Collapse consecutive same symbol+direction signals into
+                  // one card with a count, instead of showing them as
+                  // separate, visually-identical rows - previously this
+                  // just sliced the raw array, so a setup re-qualifying
+                  // repeatedly (e.g. every signal cycle) showed as N
+                  // duplicate-looking cards rather than one clear entry.
+                  const raw = data?.recent_signals || [];
+                  const grouped = [];
+                  for (const sig of raw) {
+                    const last = grouped[grouped.length - 1];
+                    if (last && last.symbol === sig.symbol && last.direction === sig.direction) {
+                      last.count++;
+                    } else {
+                      grouped.push({ ...sig, count: 1 });
+                    }
+                  }
+                  return grouped.slice(0, 5).map(sig => (
+                    <div key={sig.id} style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "10px 12px", background: "var(--bg-elevated)",
+                      borderRadius: "var(--radius)", borderLeft: `3px solid ${sig.direction === "BUY" ? "var(--bull)" : "var(--bear)"}`
+                    }}>
+                      <span style={{ fontWeight: 800, fontSize: 14, minWidth: 60 }}>{sig.symbol}</span>
+                      <span className={`badge ${sig.direction === "BUY" ? "bull" : "bear"}`}>{sig.direction}</span>
+                      {sig.count > 1 && (
+                        <span className="badge muted" title={`${sig.count} signals at similar levels`}>×{sig.count}</span>
+                      )}
+                      <ConfBar value={sig.confidence} />
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>
+                        {(sig.regime || "").replace(/_/g, " ")}
+                      </span>
+                    </div>
+                  ));
+                })()}
               </div>
             )}
           </div>

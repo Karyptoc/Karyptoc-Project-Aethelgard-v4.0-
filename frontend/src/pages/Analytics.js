@@ -16,6 +16,32 @@ export default function Analytics() {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedAccount, setSelectedAccount] = useState(null);
+  // NEW: date-range control for the equity curve. Previously this fetched
+  // with NO date parameters at all, so the user had zero control over
+  // range and the backend's default behavior determined what showed -
+  // matching a real symptom (curve stopping mid-August while "today" was
+  // September) that has the exact signature of a backend query returning
+  // the oldest N rows rather than the most recent ones. rangeDays picks
+  // the window size; windowOffset (in units of rangeDays) shifts that
+  // window backward/forward in time - 0 = current period, 1 = one period
+  // back, etc. "Next" is disabled at 0 since there's no future data.
+  const [rangeDays, setRangeDays] = useState(30);
+  const [windowOffset, setWindowOffset] = useState(0);
+
+  const fetchSnapshotsForRange = async (accountId, days, offset) => {
+    // NOTE: params below (days, before) are a reasonable guess at what the
+    // backend should accept - needs confirming/adjusting against the real
+    // /api/dashboard/equity-curve/:id route, which determines the actual
+    // fix for the root cause. This UI is ready for it either way.
+    const to = new Date();
+    to.setDate(to.getDate() - offset * days);
+    const from = new Date(to);
+    from.setDate(from.getDate() - days);
+    const r = await api.get(`/api/dashboard/equity-curve/${accountId}`, {
+      params: { days, before: to.toISOString(), after: from.toISOString() }
+    });
+    return r.data.snapshots || [];
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -29,8 +55,8 @@ export default function Analytics() {
         if (overviewR.data.accounts?.length > 0) {
           const firstAcc = overviewR.data.accounts[0];
           setSelectedAccount(firstAcc.id);
-          const snapsR = await api.get(`/api/dashboard/equity-curve/${firstAcc.id}`);
-          setSnapshots(snapsR.data.snapshots || []);
+          const snaps = await fetchSnapshotsForRange(firstAcc.id, rangeDays, 0);
+          setSnapshots(snaps);
         }
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
@@ -40,10 +66,30 @@ export default function Analytics() {
 
   const loadSnapshots = async (accountId) => {
     try {
-      const r = await api.get(`/api/dashboard/equity-curve/${accountId}`);
-      setSnapshots(r.data.snapshots || []);
       setSelectedAccount(accountId);
+      setWindowOffset(0);
+      const snaps = await fetchSnapshotsForRange(accountId, rangeDays, 0);
+      setSnapshots(snaps);
     } catch (e) { console.error(e); }
+  };
+
+  const changeRange = async (days) => {
+    setRangeDays(days);
+    setWindowOffset(0);
+    if (selectedAccount) {
+      const snaps = await fetchSnapshotsForRange(selectedAccount, days, 0);
+      setSnapshots(snaps);
+    }
+  };
+
+  const shiftWindow = async (direction) => {
+    // direction: +1 = back in time, -1 = forward toward now
+    const newOffset = Math.max(0, windowOffset + direction);
+    setWindowOffset(newOffset);
+    if (selectedAccount) {
+      const snaps = await fetchSnapshotsForRange(selectedAccount, rangeDays, newOffset);
+      setSnapshots(snaps);
+    }
   };
 
   if (loading) return (
@@ -152,7 +198,26 @@ export default function Analytics() {
             <div className="card" style={{ marginBottom: 16 }}>
               <div className="card-header">
                 <span className="card-title">Equity Curve</span>
-                <span className="badge accent">{snapshots.length} snapshots</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="badge accent">{snapshots.length} snapshots</span>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {[7, 30, 90].map(d => (
+                      <button key={d}
+                        className={`btn btn-sm ${rangeDays === d ? "btn-primary" : "btn-ghost"}`}
+                        onClick={() => changeRange(d)}>
+                        {d}D
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+                    <button className="btn btn-ghost btn-sm" onClick={() => shiftWindow(1)} title="Older">←</button>
+                    <span style={{ fontSize: 11, color: "var(--text-muted)", minWidth: 70, textAlign: "center" }}>
+                      {windowOffset === 0 ? "Current" : `${windowOffset * rangeDays}d ago`}
+                    </span>
+                    <button className="btn btn-ghost btn-sm" onClick={() => shiftWindow(-1)}
+                      disabled={windowOffset === 0} title="Newer">→</button>
+                  </div>
+                </div>
               </div>
               {equityData.length > 1 ? (
                 <ResponsiveContainer width="100%" height={220}>

@@ -42,15 +42,42 @@ router.get("/overview", async (req, res) => {
   }
 });
 
-// GET /api/dashboard/equity-curve/:accountId
+// GET /api/dashboard/equity-curve/:accountId?days=30&before=ISO&after=ISO
 router.get("/equity-curve/:accountId", async (req, res) => {
   try {
-    const { data } = await supabaseAdmin
+    // FIX (confirmed via matching frontend symptom - equity curve stopping
+    // mid-August while "today" was September): this had NO date filtering
+    // and ordered ascending with limit(500), so it always returned the
+    // OLDEST 500 snapshots regardless of what the user wanted - the exact
+    // same bug class fixed earlier in fetchCachedBars (backend/src/routes/
+    // backtest.js). Once an account passes 500 hourly snapshots (~20.8
+    // days), "today" can never appear again. Now accepts days/before/after
+    // and actually returns the requested window, ordered ascending
+    // (correct for a chronological chart) with a generous safety cap.
+    const { days, before, after } = req.query;
+
+    let query = supabaseAdmin
       .from("account_snapshots")
       .select("*")
       .eq("account_id", req.params.accountId)
       .order("snapshot_time", { ascending: true })
-      .limit(500);
+      .limit(3000); // generous enough for 90 days of hourly snapshots (~2160) plus headroom
+
+    if (after) query = query.gte("snapshot_time", after);
+    if (before) query = query.lte("snapshot_time", before);
+
+    // Fallback for callers that don't pass before/after (e.g. an older
+    // frontend build, or a direct API call): default to the most recent
+    // `days` (or 30 if not specified) instead of silently defaulting to
+    // the oldest available data.
+    if (!after && !before) {
+      const windowDays = parseInt(days) || 30;
+      const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+      query = query.gte("snapshot_time", cutoff);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
 
     res.json({ snapshots: data || [] });
   } catch (e) {
