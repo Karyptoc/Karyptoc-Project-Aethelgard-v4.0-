@@ -543,28 +543,34 @@ td.mono { font-family: var(--font-mono); font-size: 12px; }
   align-items: center; justify-content: center;
   background: var(--bg-base); position: relative; overflow: hidden;
 }
-/* A concentric-ring seal motif rather than generic gradient blobs - ties
-   directly to the "fortified vault" concept behind the name Aethelgard.
-   This is the one place in the app spending real visual boldness;
-   everything else stays quiet and disciplined by comparison. */
-.login-bg-pattern {
-  position: absolute; inset: 0; opacity: 1;
-  /* FIX: this rendered as a flat, invisible background - var(--border)
-     and var(--gold-dim) are deliberately low-contrast tokens meant for
-     barely-there UI dividers, the wrong choice for a decorative pattern
-     that actually needs visual presence. Replaced with explicit rgba
-     values at real contrast, and widened the ring strokes from 1px to
-     2-3px so they read clearly rather than anti-aliasing away. */
+
+/* FIX (real root cause, found by checking the actual Login.js JSX): the
+   previous rules targeted .login-bg-pattern and .login-card, neither of
+   which exist anywhere in the real component - the actual elements are
+   .login-bg, .login-grid, and .login-box. No amount of adjusting contrast
+   values could ever have worked, since those selectors matched nothing at
+   all. This means the card container itself never got styled either, not
+   just the ring pattern - fixing both properly now. */
+.login-bg {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 40%, var(--accent-dim) 0%, transparent 55%);
+}
+
+/* Concentric-ring seal motif - ties to the "fortified vault" concept
+   behind the name Aethelgard. The one place in the app spending real
+   visual boldness; everything else stays quiet by comparison. */
+.login-grid {
+  position: absolute; inset: 0;
   background-image:
     repeating-radial-gradient(circle at 50% 40%,
       transparent 0, transparent 63px,
-      rgba(15, 23, 41, 0.09) 65px, transparent 67px,
-      transparent 146px, rgba(201, 162, 39, 0.30) 149px, transparent 152px),
-    radial-gradient(circle at 50% 40%, var(--accent-dim) 0%, transparent 55%);
+      rgba(15, 23, 41, 0.10) 65px, transparent 67px,
+      transparent 146px, rgba(201, 162, 39, 0.32) 149px, transparent 152px);
   mask-image: radial-gradient(circle at 50% 40%, black 0%, transparent 85%);
   -webkit-mask-image: radial-gradient(circle at 50% 40%, black 0%, transparent 85%);
 }
-.login-card {
+
+.login-box {
   position: relative; z-index: 1;
   width: 400px; padding: 44px;
   background: var(--bg-surface);
