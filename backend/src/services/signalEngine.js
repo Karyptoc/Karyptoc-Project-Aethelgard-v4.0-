@@ -847,19 +847,38 @@ async function generateSignalForPair(symbol) {
       // silently returning nothing for every symbol/timeframe, meaning this
       // function — and the manual "Generate Signal" dashboard button that
       // calls it — never actually worked.
+      // FIX (confirmed live - BTCUSD showing "ADR exhausted 826%", every
+      // pair failing ADR on every single cron cycle, "0 signals generated"
+      // every time): this was ordered ascending with limit(250) and no
+      // date filter - the exact same bug class already found and fixed in
+      // fetchCachedBars (backend/src/routes/backtest.js) and the
+      // equity-curve endpoint (backend/src/routes/dashboard.js). For H4
+      // specifically, 250 bars is only ~41 days - once the cache holds
+      // more history than that (which it has for a long time now), this
+      // always returned the OLDEST 250 rows, not the most recent ones.
+      // getADRStatus derives "today" from the LAST bar's own timestamp, so
+      // feeding it stale data broke the calendar-day matching entirely,
+      // comparing an arbitrary old day's range against the ADR average and
+      // producing nonsense percentages. Confirmed this is the CRON path
+      // specifically (generateSignalsForAllPairs -> generateSignalForPair)
+      // - the bridge's direct per-push path supplies its own fresh bars
+      // and was never affected, which is why it showed normal behavior at
+      // the exact same time. Now orders descending to get the genuinely
+      // most recent bars, then reverses back to chronological order for
+      // everything downstream that expects it.
       const { data, error } = await supabaseAdmin
         .from("ohlcv_cache")
         .select("open, high, low, close, volume, time")
         .eq("symbol", symbol)
         .eq("timeframe", tf)
-        .order("time", { ascending: true })
+        .order("time", { ascending: false })
         .limit(250);
       if (error) {
         await log("warning", "signalEngine", `${symbol} ${tf}: ohlcv_cache query error: ${error.message}`);
         continue;
       }
       if (data && data.length >= 30) {
-        ohlcvData[tf] = data.map(b => ({
+        ohlcvData[tf] = data.reverse().map(b => ({
           open:   parseFloat(b.open),
           high:   parseFloat(b.high),
           low:    parseFloat(b.low),
