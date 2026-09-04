@@ -549,14 +549,20 @@ td.mono { font-family: var(--font-mono); font-size: 12px; }
    everything else stays quiet and disciplined by comparison. */
 .login-bg-pattern {
   position: absolute; inset: 0; opacity: 1;
+  /* FIX: this rendered as a flat, invisible background - var(--border)
+     and var(--gold-dim) are deliberately low-contrast tokens meant for
+     barely-there UI dividers, the wrong choice for a decorative pattern
+     that actually needs visual presence. Replaced with explicit rgba
+     values at real contrast, and widened the ring strokes from 1px to
+     2-3px so they read clearly rather than anti-aliasing away. */
   background-image:
     repeating-radial-gradient(circle at 50% 40%,
-      transparent 0, transparent 64px,
-      var(--border) 65px, transparent 66px,
-      transparent 148px, var(--gold-dim) 149px, transparent 150px),
+      transparent 0, transparent 63px,
+      rgba(15, 23, 41, 0.09) 65px, transparent 67px,
+      transparent 146px, rgba(201, 162, 39, 0.30) 149px, transparent 152px),
     radial-gradient(circle at 50% 40%, var(--accent-dim) 0%, transparent 55%);
-  mask-image: radial-gradient(circle at 50% 40%, black 0%, transparent 75%);
-  -webkit-mask-image: radial-gradient(circle at 50% 40%, black 0%, transparent 75%);
+  mask-image: radial-gradient(circle at 50% 40%, black 0%, transparent 85%);
+  -webkit-mask-image: radial-gradient(circle at 50% 40%, black 0%, transparent 85%);
 }
 .login-card {
   position: relative; z-index: 1;
