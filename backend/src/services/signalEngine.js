@@ -356,7 +356,19 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 
     const adrStatus = getADRStatus(h4Bars, d1Bars, symbol);
     if (adrStatus.exhausted) {
-      await log("info", "signalEngine", `${symbol}: ADR exhausted ${adrStatus.consumedPct.toFixed(0)}% — skipping`);
+      // DIAGNOSTIC (temporary) - the staleness fix corrected the absurd
+      // readings (BTCUSD 826% -> sane range), but nearly every pair is
+      // still hitting exhaustion on almost every cycle across multiple
+      // sessions, which isn't normal healthy behavior either. Logging the
+      // raw inputs behind the percentage to see exactly what's driving
+      // this before guessing at a second fix.
+      const d1Latest = d1Bars && d1Bars.length ? d1Bars[d1Bars.length - 1].time : "none";
+      const d1Earliest = d1Bars && d1Bars.length ? d1Bars[0].time : "none";
+      await log("info", "signalEngine",
+        `${symbol}: ADR exhausted ${adrStatus.consumedPct.toFixed(0)}% — skipping | ` +
+        `DIAGNOSTIC adr=${adrStatus.adr} consumed=${adrStatus.consumed} ` +
+        `d1Bars.length=${d1Bars?.length || 0} d1Latest=${d1Latest} d1Earliest=${d1Earliest} ` +
+        `todayHigh=${adrStatus.todayHigh} todayLow=${adrStatus.todayLow}`);
       return null;
     }
     const sessionBias = getSessionBiasProjection(h4Bars, session.session);
