@@ -149,7 +149,7 @@ export default function Layout() {
             <button className="btn-theme" onClick={toggle} title="Toggle theme">
               {dark ? "☀️" : "🌙"}
             </button>
-            <button className="btn-logout" onClick={logout}>DISCONNECT</button>
+            <button className="btn-logout" onClick={logout}>LOGOUT</button>
           </div>
         </div>
       </aside>
