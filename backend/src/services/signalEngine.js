@@ -563,7 +563,18 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     }
 
     if (!analysis || analysis.direction === "HOLD") {
-      await log("info", "signalEngine", `${symbol}: HOLD — ${analysis?.smc_context?.entry_model_quality || "no setup"}`);
+      // FIX (confirmed real gap via live log analysis - 61 genuine
+      // kill-zone evaluations, several with strong scores like 80/35 and
+      // 86/38, ALL logged as a generic "no setup" with zero visibility
+      // into why): this was reading analysis?.smc_context?.entry_model_
+      // quality, a field unrelated to the actual reason makePureMathDecision
+      // computes and returns (analysis.reason - e.g. "HTF conflicts with
+      // structural BUY", "Mandatory sequence incomplete", "No directional
+      // signal"). That real reason was being silently discarded every
+      // single time. Now surfaces it directly, with the old field kept as
+      // a fallback for the AI/Hybrid path which may return a differently-
+      // shaped object without a .reason field.
+      await log("info", "signalEngine", `${symbol}: HOLD — ${analysis?.reason || analysis?.smc_context?.entry_model_quality || "no setup"}`);
       return null;
     }
 
