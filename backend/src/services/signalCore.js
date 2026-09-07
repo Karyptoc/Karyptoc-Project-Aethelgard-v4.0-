@@ -1152,10 +1152,37 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
   // NEW: Use swept level as SL anchor (structural — tighter and more precise)
   if (ictSequence.sweep?.slAnchor) {
     const atrBuffer = atrVal * 0.3; // small buffer beyond swept level
+
+    // FIX (confirmed via real trade evidence - BTCUSD and GER40Cash both
+    // showing a stop-hunt through this exact anchor followed by a genuine
+    // reversal at a wider structural zone): the raw swept level (recentLow/
+    // recentHigh in detectLiquiditySweep) is, by definition, a level that
+    // JUST got breached once - that's what makes it "swept". Anchoring the
+    // stop only 0.3x ATR beyond a level that has already proven vulnerable
+    // once is exactly the kind of shallow liquidity pool a second, deeper
+    // grab commonly runs through before the real reversal. If a real
+    // opposing OB or FVG zone exists further beyond the swept level (in
+    // the stop's direction), anchor there instead - a considered
+    // structural boundary, not just the most recent wick. Falls back to
+    // the exact original behavior when no such zone exists.
+    let effectiveAnchor = ictSequence.sweep.slAnchor;
+    const zones = [...(ictSequence.obs || []), ...(ictSequence.fvgs || [])];
     if (direction === "BUY") {
-      stopLoss = ictSequence.sweep.slAnchor - atrBuffer;
+      const deeperSupport = zones
+        .filter(z => (z.type === "BULLISH_OB" || z.type === "BULLISH_FVG") && z.low < effectiveAnchor)
+        .sort((a, b) => b.low - a.low)[0]; // nearest zone that still extends deeper than the sweep
+      if (deeperSupport) effectiveAnchor = deeperSupport.low;
     } else {
-      stopLoss = ictSequence.sweep.slAnchor + atrBuffer;
+      const deeperResistance = zones
+        .filter(z => (z.type === "BEARISH_OB" || z.type === "BEARISH_FVG") && z.high > effectiveAnchor)
+        .sort((a, b) => a.high - b.high)[0];
+      if (deeperResistance) effectiveAnchor = deeperResistance.high;
+    }
+
+    if (direction === "BUY") {
+      stopLoss = effectiveAnchor - atrBuffer;
+    } else {
+      stopLoss = effectiveAnchor + atrBuffer;
     }
     slPips = Math.abs(price - stopLoss) / pip;
 
