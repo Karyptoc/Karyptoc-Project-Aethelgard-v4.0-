@@ -203,6 +203,27 @@ router.get("/commands", async (req, res) => {
       for (const signal of pendingSignals) {
         if (signal.direction === "HOLD") continue;
 
+        // FIX (confirmed via real log evidence): a bridge restart/reconnect
+        // found 3 still-valid, non-expired MARKET signals queued from
+        // earlier and fired all 3 in a 7-second burst - the broad 2-hour
+        // expires_at ceiling (designed for PENDING/LIMIT orders, which
+        // separately get a price-drift staleness check in bridge.py) is
+        // far too long for a MARKET order, which represents "enter now".
+        // If the bridge was offline and a MARKET signal has been sitting
+        // for more than 20 minutes, the conditions that justified it may
+        // no longer hold - skip it and close it out (not just re-check it
+        // every ~10s poll for up to 2 hours until the broad expiry finally
+        // catches up).
+        const orderType = signal.order_type || "MARKET";
+        if (orderType === "MARKET") {
+          const ageMinutes = (Date.now() - new Date(signal.created_at).getTime()) / 60000;
+          if (ageMinutes > 20) {
+            await supabaseAdmin.from("signals").update({ status: "expired" }).eq("id", signal.id);
+            await log("info", "bridge", `${signal.symbol}: MARKET signal ${signal.id.slice(0,8)} is ${ageMinutes.toFixed(0)}min old — too stale for a market order, expiring`);
+            continue;
+          }
+        }
+
         // Check against platform allowed_pairs setting
         if (!settings.allowedPairs.includes(signal.symbol)) {
           await log("info", "bridge", `${signal.symbol} not in allowed pairs — skipping`);
