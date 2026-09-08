@@ -1137,7 +1137,7 @@ function getIndicators(bars, atrVal, obLookback = 10, fvgLookback = 12, recentHL
 
 // ── Claude AI Analysis ────────────────────────────────────────────────────────
 
-function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSequence, analysisRR) {
+function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSequence, analysisRR, killZoneAtrVal = null) {
   const pip = PIP_SIZES[symbol] || 0.0001;
   const atrMultiplier = ATR_SL_MULTIPLIERS[symbol] || 1.3;
   const minSLPips = symbol === "GOLD" ? 80 :
@@ -1234,9 +1234,19 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
   // absolute ceiling, pip-scale correction) - those stay exactly as they
   // are, this only changes what the "normal" cap value is before those
   // safety nets ever need to engage.
+  // FIX (untested hypothesis, needs backtest validation): the kill-zone
+  // cap used H4 ATR even though POI detection moved to M15 back in Stage
+  // 3 - a real inconsistency DeepSeek's review flagged. H4 ATR reflects
+  // volatility across many hours; a kill-zone trade is scoped to a 1-2
+  // hour session, so sizing its stop off broader H4 volatility can be a
+  // mismatch in either direction. Uses M15 ATR for the cap specifically
+  // when a caller provides it, falling back to the original H4 atrVal
+  // otherwise - existing callers that don't pass killZoneAtrVal see zero
+  // behavior change.
   const inKillZone = !!(ictSequence._session?.killZone);
+  const capAtrVal = (inKillZone && killZoneAtrVal) ? killZoneAtrVal : atrVal;
   const maxSLMult = inKillZone ? 1.0 : 1.5;
-  const maxSLPips = Math.max((atrVal * maxSLMult) / pip, minSLPips);
+  const maxSLPips = Math.max((capAtrVal * maxSLMult) / pip, minSLPips);
   if (slPips > maxSLPips) {
     stopLoss = direction === "BUY"
       ? price - maxSLPips * pip

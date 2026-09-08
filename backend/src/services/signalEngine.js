@@ -698,7 +698,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       // TP still from H4 liquidity targets — same destination, tighter risk = better RR
       const h4sltp = calculateStructuralSLTP(
         analysis.direction, h4Price, primaryInd, currentATR,
-        symbol, ictSequence, rrRatio
+        symbol, ictSequence, rrRatio, poiATR
       );
 
       sltp = {
@@ -716,7 +716,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       // Fall back to H4 structural SL/TP
       sltp = calculateStructuralSLTP(
         analysis.direction, h4Price, primaryInd, currentATR,
-        symbol, ictSequence, analysis.reward_risk_ratio
+        symbol, ictSequence, analysis.reward_risk_ratio, poiATR
       );
       sltp.usedM5Entry = false;
     }
@@ -742,12 +742,21 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       await log("info", "signalEngine",
         `${symbol}: High-quality POI (fresh, ${retest.sizeRatio}x ATR) touched live in kill zone — market entry`);
     } else if (tradingMode !== TRADING_MODES.SCALP && retest) {
+      // FIX (untested hypothesis, needs backtest validation): previously
+      // used the zone's far extreme edge (retest.low for BUY, retest.high
+      // for SELL) - the point requiring price to travel ALL the way
+      // through the zone to fill. If price only wicks partway in before
+      // reversing (exactly the pattern behind several recent stop-hunt
+      // losses), the entry never fills at all. Using the zone's 50%
+      // equilibrium instead is a more realistic fill point - legitimate
+      // ICT practice (Optimal Trade Entry), not yet validated here.
+      const equilibriumPrice = (retest.high + retest.low) / 2;
       if (analysis.direction === "BUY" && retest.type?.includes("BULLISH")) {
         orderType = "BUY_LIMIT";
-        pendingOrderPrice = parseFloat(retest.low.toFixed(5));
+        pendingOrderPrice = parseFloat(equilibriumPrice.toFixed(5));
       } else if (analysis.direction === "SELL" && retest.type?.includes("BEARISH")) {
         orderType = "SELL_LIMIT";
-        pendingOrderPrice = parseFloat(retest.high.toFixed(5));
+        pendingOrderPrice = parseFloat(equilibriumPrice.toFixed(5));
       }
     } else if (tradingMode !== TRADING_MODES.SCALP && ictSequence.sweep && !retest) {
       // Sweep detected but no retest yet — use limit slightly inside current price

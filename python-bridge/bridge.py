@@ -1096,6 +1096,21 @@ def poll_commands():
                 order["signal_id"] = cmd.get("signal_id") or cmd.get("id", "unknown")
                 result = execute_trade(cmd["account_id"], order)
                 result["order"] = order
+                # FIX (untested hypothesis from external review, addresses a
+                # real risk): previously the loop executed every EXECUTE_TRADE
+                # command in the same poll cycle back-to-back with zero delay.
+                # Even for genuinely fresh, independently-valid signals (not
+                # the stale-backlog case the MARKET-order expiry fix
+                # addresses), multiple different symbols firing in the exact
+                # same instant creates correlated basket exposure - if the
+                # market moves against all of them at once, losses compound
+                # simultaneously rather than being spread out. A small pause
+                # after each successful new-trade execution gives the account
+                # sync and risk checks (open position count, daily loss) a
+                # moment to reflect the trade that just happened before the
+                # next one in the batch is considered.
+                if result.get("success"):
+                    time.sleep(2)
             elif cmd_type == "MODIFY_SL":
                 result = modify_sl(cmd["ticket"], cmd["symbol"], cmd["new_sl"], cmd.get("new_tp"))
             elif cmd_type == "PARTIAL_CLOSE":
