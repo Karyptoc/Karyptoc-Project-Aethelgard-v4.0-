@@ -1151,7 +1151,17 @@ function calculateStructuralSLTP(direction, price, ind, atrVal, symbol, ictSeque
 
   // NEW: Use swept level as SL anchor (structural — tighter and more precise)
   if (ictSequence.sweep?.slAnchor) {
-    const atrBuffer = atrVal * 0.3; // small buffer beyond swept level
+    // FIX (evidence: GER40Cash losing trades on Sept 7 and Sept 8, three
+    // stop-hunts each, all with identical SL/TP meaning the same setup
+    // re-evaluated - the zone-widening fix above only helps when a real
+    // opposing OB/FVG exists beyond the swept level. When none does (a
+    // common, real scenario, likely what happened here), the stop still
+    // sits just beyond a level that's already proven vulnerable once,
+    // protected only by this buffer. Increased from 0.3x to 0.6x ATR as a
+    // reasoned but NOT YET PROVEN improvement - unlike the zone-widening
+    // fix, this hasn't been validated against real evidence yet and needs
+    // backtesting before being trusted live.
+    const atrBuffer = atrVal * 0.6; // buffer beyond swept level (or wider zone, if found above)
 
     // FIX (confirmed via real trade evidence - BTCUSD and GER40Cash both
     // showing a stop-hunt through this exact anchor followed by a genuine
