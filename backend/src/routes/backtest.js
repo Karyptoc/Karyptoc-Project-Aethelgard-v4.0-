@@ -368,7 +368,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     }
 
     const sltp = core.calculateStructuralSLTP(
-      analysis.direction, bar.close, ind, currentATR, symbol, ictSequence, analysis.reward_risk_ratio
+      analysis.direction, bar.close, ind, currentATR, symbol, ictSequence, analysis.reward_risk_ratio, poiATR
     );
     if (!sltp.stopLoss || !sltp.takeProfit) continue;
 
@@ -404,12 +404,18 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     if (poiHighQualityLive) {
       orderType = "MARKET";
     } else if (retest) {
+      // Matches the live equilibrium-pricing fix in signalEngine.js - uses
+      // the zone's 50% midpoint instead of its far extreme edge (retest.low
+      // for BUY, retest.high for SELL), which required price to travel all
+      // the way through the zone to fill. Keeping this in sync with live
+      // is what makes the Fills tab's limit-fill rate meaningful.
+      const equilibriumPrice = (retest.high + retest.low) / 2;
       if (analysis.direction === "BUY" && retest.type?.includes("BULLISH")) {
         orderType = "BUY_LIMIT";
-        pendingOrderPrice = parseFloat(retest.low.toFixed(5));
+        pendingOrderPrice = parseFloat(equilibriumPrice.toFixed(5));
       } else if (analysis.direction === "SELL" && retest.type?.includes("BEARISH")) {
         orderType = "SELL_LIMIT";
-        pendingOrderPrice = parseFloat(retest.high.toFixed(5));
+        pendingOrderPrice = parseFloat(equilibriumPrice.toFixed(5));
       }
     } else if (sweep && !retest) {
       if (analysis.direction === "BUY") {
