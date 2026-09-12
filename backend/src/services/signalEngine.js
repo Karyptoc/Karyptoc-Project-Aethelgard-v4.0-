@@ -104,11 +104,21 @@ async function getTradingMode() {
   } catch { return TRADING_MODES.PURE_MATH; }
 }
 
+let _lastDupWindowLog = 0;
 async function getDuplicateWindow() {
   try {
-    const { data } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from("platform_settings").select("value")
       .eq("key", "duplicate_signal_minutes").single();
+    // DIAGNOSTIC (temporary): the user has no dashboard UI field for this
+    // raw DB setting, so logging the actual stored value directly instead
+    // of asking them to query Supabase's SQL editor. Throttled to once per
+    // hour since getDuplicateWindow() runs on every signal evaluation.
+    if (Date.now() - _lastDupWindowLog > 60 * 60 * 1000) {
+      _lastDupWindowLog = Date.now();
+      await log("info", "signalEngine",
+        `DIAGNOSTIC duplicate_signal_minutes: stored value=${JSON.stringify(data?.value)} error=${error?.message || "none"} -> using ${Math.max(parseInt(data?.value) || 60, 30)}min`);
+    }
     // FIX (confirmed via real log evidence): a stored DB value overrides
     // this code's 60-minute default entirely - exactly the risk flagged
     // when that fix first shipped. Confirmed live: GOLD signals generated
