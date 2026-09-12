@@ -109,7 +109,16 @@ async function getDuplicateWindow() {
     const { data } = await supabaseAdmin
       .from("platform_settings").select("value")
       .eq("key", "duplicate_signal_minutes").single();
-    return parseInt(data?.value) || 60;
+    // FIX (confirmed via real log evidence): a stored DB value overrides
+    // this code's 60-minute default entirely - exactly the risk flagged
+    // when that fix first shipped. Confirmed live: GOLD signals generated
+    // only 10 minutes apart (23:21 -> 23:31), which a genuine 60-minute
+    // window should have blocked outright - strongly indicating a stale
+    // short value is still stored in platform_settings, silently
+    // overriding the code. Now enforces a hard 30-minute floor regardless
+    // of what's stored, so this specific failure mode can't silently
+    // regress again even if the dashboard value is wrong.
+    return Math.max(parseInt(data?.value) || 60, 30);
   } catch { return 60; }
 }
 // FIX (regression found and restored): this had reverted to a 3-minute

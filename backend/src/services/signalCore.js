@@ -268,16 +268,26 @@ function isPairActiveInSession(symbol, session) {
 }
 
 function isNewsBlackout(atDate) {
-  // FIX: same optional-date pattern as getSessionInfo, for backtest reuse.
-  // Note (separate from this fix, worth knowing): this checks recurring
-  // day-of-week/time-of-day windows, not an actual economic calendar, so
-  // it blocks every Friday ~12:30 UTC year-round rather than only real
-  // NFP weeks. Fine for a rough filter; not a substitute for a real
-  // calendar feed if you want tighter precision later.
+  // FIX: buffer widened from 15 to 30 minutes per explicit spec - block
+  // new trades 30 minutes before a scheduled release, resume 30 minutes
+  // after, not the entire day. FOMC's wider window (17.5-20.0, 2.5hrs) and
+  // the Friday pre-weekend rule are left unchanged - those are different,
+  // intentional design choices (FOMC press conferences genuinely cause
+  // extended volatility for hours, pre-weekend is a separate category
+  // entirely), not the ±30min pattern being fixed here.
+  //
+  // SEPARATE, LARGER ISSUE (not fixed by this change, worth knowing): this
+  // checks recurring day-of-week/time-of-day windows, not an actual
+  // economic calendar - it blocks every Tuesday/Wednesday ~12:30 UTC
+  // year-round as "US CPI" regardless of whether CPI is actually
+  // scheduled that week. Confirmed live: this blocked Sept 8 as CPI when
+  // the real August CPI release was Sept 11. Narrowing the window (this
+  // fix) does not fix which DAYS get blocked - that needs a real calendar
+  // feed, a separate, larger piece of work.
   const now = atDate || new Date();
   const u = now.getUTCHours() + now.getUTCMinutes() / 60;
   const d = now.getUTCDay();
-  const B=0.25;
+  const B=0.5;
   if (d===5 && u>=(12.5-B) && u<(12.5+B)) return { blocked:true, reason:"NFP (US Jobs)" };
   if ((d===2||d===3) && u>=(12.5-B) && u<(12.5+B)) return { blocked:true, reason:"US CPI" };
   if (d===3 && u>=(18.0-0.5) && u<(18.0+0.5)) return { blocked:true, reason:"FOMC rate decision" };
