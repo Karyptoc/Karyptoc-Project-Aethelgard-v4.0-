@@ -75,8 +75,10 @@ export default function Trades() {
   // still goes through normally since this uses the same authenticated
   // api client as every other request on this page.
   const [exporting, setExporting] = useState(null); // "trades" | "signals" | null
+  const [exportError, setExportError] = useState(null);
   const downloadExport = async (kind) => {
     setExporting(kind);
+    setExportError(null);
     try {
       const r = await api.get(`/api/export/${kind}`, { responseType: "blob" });
       const url = window.URL.createObjectURL(new Blob([r.data]));
@@ -90,6 +92,20 @@ export default function Trades() {
       window.URL.revokeObjectURL(url);
     } catch (e) {
       console.error(e);
+      // FIX: this used to only log to console - a failed request looked
+      // exactly like nothing happening at all, with zero indication of
+      // what actually went wrong. Now shows the real error.
+      let msg = e.message || "Export failed";
+      if (e.response?.data instanceof Blob) {
+        try {
+          const text = await e.response.data.text();
+          const parsed = JSON.parse(text);
+          msg = parsed.error || msg;
+        } catch { /* response wasn't JSON, keep the generic message */ }
+      } else if (e.response?.status) {
+        msg = `Export failed (HTTP ${e.response.status})`;
+      }
+      setExportError(`${kind}: ${msg}`);
     } finally { setExporting(null); }
   };
 
@@ -115,6 +131,15 @@ export default function Trades() {
           <button className="btn btn-ghost btn-sm" onClick={load}>↻ Refresh</button>
         </div>
       </div>
+
+      {exportError && (
+        <div className="page-body" style={{ paddingBottom: 0 }}>
+          <div className="card" style={{ borderColor: "var(--bear)", padding: "10px 16px", marginBottom: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "var(--bear)", fontSize: 13 }}>⚠ Export error — {exportError}</span>
+            <button className="btn btn-ghost btn-xs" onClick={() => setExportError(null)}>✕</button>
+          </div>
+        </div>
+      )}
 
       <div className="page-body">
         {/* Performance Stats */}

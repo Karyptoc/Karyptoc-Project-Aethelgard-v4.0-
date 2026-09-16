@@ -53,9 +53,10 @@ function prefixKeys(obj, prefix) {
 // Optional query params: from, to (ISO dates), symbol, account_id.
 router.get("/trades", async (req, res) => {
   try {
-    const { from, to, symbol, account_id } = req.query;
+    const { from, to, symbol, account_id, limit } = req.query;
+    const rowLimit = Math.min(parseInt(limit) || 2000, 5000);
 
-    let query = supabaseAdmin.from("trades").select("*").order("opened_at", { ascending: false });
+    let query = supabaseAdmin.from("trades").select("*").order("opened_at", { ascending: false }).limit(rowLimit);
     if (from) query = query.gte("opened_at", from);
     if (to) query = query.lte("opened_at", to);
     if (symbol) query = query.eq("symbol", symbol);
@@ -68,10 +69,20 @@ router.get("/trades", async (req, res) => {
     const signalIds = [...new Set(trades.map(t => t.signal_id).filter(Boolean))];
     let signalMap = {};
     if (signalIds.length) {
-      const { data: signals, error: sErr } = await supabaseAdmin
-        .from("signals").select("*").in("id", signalIds);
-      if (sErr) throw sErr;
-      signalMap = Object.fromEntries((signals || []).map(s => [s.id, s]));
+      // FIX (likely real cause of "export trades does nothing"): this used
+      // to be one .in("id", signalIds) call with potentially 1000+ IDs at
+      // once (trades table has 1100+ rows) - a well-known practical limit
+      // with PostgREST/Supabase, since IN-clause filters are encoded in
+      // the request URL for GET requests and can hit length/row limits
+      // silently. Chunked into batches of 150 instead.
+      const CHUNK = 150;
+      for (let i = 0; i < signalIds.length; i += CHUNK) {
+        const batch = signalIds.slice(i, i + CHUNK);
+        const { data: signals, error: sErr } = await supabaseAdmin
+          .from("signals").select("*").in("id", batch);
+        if (sErr) throw sErr;
+        (signals || []).forEach(s => { signalMap[s.id] = s; });
+      }
     }
 
     const merged = trades.map(t => ({
