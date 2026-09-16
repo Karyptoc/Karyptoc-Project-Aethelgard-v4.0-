@@ -41,6 +41,49 @@ log = logging.getLogger("AethelgardBridge")
 
 connected_accounts = {}
 
+# FIX (root cause of the real MT5 P&L vs database P&L discrepancy -
+# confirmed: MT5 showed -$1,889.84 real profit, the database showed
+# +$2,922.73): the sync logic only ever sent CURRENTLY OPEN positions.
+# When a position closed, bridge.js's "no longer in positions -> mark
+# closed" logic had zero real profit data to work with, so the stored
+# "profit" stayed whatever floating P&L was last synced WHILE the
+# position was still open - not the true, final realized result. This
+# tracks which tickets were open on the previous sync cycle per account,
+# so a ticket disappearing can be detected and its REAL closing deal
+# looked up in MT5's own history before reporting it as closed.
+_previously_open_tickets = {}  # account_id -> set of tickets
+
+def get_real_closed_profit(ticket):
+    """
+    Query MT5's actual deal history for a position that just closed, to get
+    the TRUE final realized profit/swap/commission - not a stale floating
+    snapshot. A position can have multiple deals (partial closes, trailing
+    adjustments); sums every deal tied to this position for the true total.
+    """
+    try:
+        deals = mt5.history_deals_get(position=ticket)
+        if not deals:
+            log.warning(f"get_real_closed_profit #{ticket}: no deal history found")
+            return None
+        total_profit = sum(d.profit for d in deals)
+        total_swap = sum(d.swap for d in deals)
+        total_commission = sum(d.commission for d in deals)
+        # DEAL_ENTRY_OUT = 1 (a closing deal, as opposed to the opening IN deal)
+        close_deals = [d for d in deals if d.entry == 1]
+        close_price = close_deals[-1].price if close_deals else None
+        close_time = (datetime.fromtimestamp(close_deals[-1].time, tz=timezone.utc).isoformat()
+                      if close_deals else None)
+        return {
+            "profit": round(total_profit, 2),
+            "swap": round(total_swap, 2),
+            "commission": round(total_commission, 2),
+            "close_price": close_price,
+            "close_time": close_time,
+        }
+    except Exception as e:
+        log.error(f"get_real_closed_profit #{ticket}: {e}")
+        return None
+
 SYMBOL_MAP = {
     "GOLD": "GOLD", "EURUSD": "EURUSD", "GBPUSD": "GBPUSD",
     "USDJPY": "USDJPY", "US30Cash": "US30Cash", "GER40Cash": "GER40Cash",
@@ -253,6 +296,7 @@ def get_positions(login):
         "volume": p.volume, "open_price": p.price_open,
         "current_price": p.price_current, "stop_loss": p.sl,
         "take_profit": p.tp, "profit": round(p.profit, 2),
+        "swap": round(p.swap, 2), "commission": round(getattr(p, "commission", 0.0), 2),
         "open_time": datetime.fromtimestamp(p.time, tz=timezone.utc).isoformat(),
     } for p in positions]
 
@@ -904,9 +948,30 @@ def sync_all():
             if not info:
                 continue
             positions = get_positions(acc["login"])
+            current_tickets = {p["ticket"] for p in positions}
+            prev_tickets = _previously_open_tickets.get(account_id, set())
+
+            # Tickets that were open last cycle but aren't anymore just
+            # closed - look up their real final result in MT5's own deal
+            # history instead of letting bridge.js infer closure with no
+            # real profit data.
+            just_closed_tickets = prev_tickets - current_tickets
+            closed_positions = []
+            for ticket in just_closed_tickets:
+                real = get_real_closed_profit(ticket)
+                if real:
+                    closed_positions.append({"ticket": ticket, **real})
+                    log.info(f"#{ticket} closed - real MT5 profit: ${real['profit']} "
+                             f"(swap: ${real['swap']}, commission: ${real['commission']})")
+                else:
+                    log.warning(f"#{ticket} closed but could not fetch real profit from MT5 history")
+
+            _previously_open_tickets[account_id] = current_tickets
+
             requests.post(f"{BACKEND_URL}/api/bridge/sync", headers=api_headers(),
                 json={"account_id": account_id, "account_info": info,
                       "positions": positions,
+                      "closed_positions": closed_positions,
                       "timestamp": datetime.now(timezone.utc).isoformat()},
                 timeout=30)
             log.info(f"Synced {acc['login']}: ${info['balance']} | P&L ${info['profit']}")

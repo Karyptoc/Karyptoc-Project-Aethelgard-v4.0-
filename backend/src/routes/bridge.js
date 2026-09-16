@@ -79,7 +79,7 @@ router.post("/status", async (req, res) => {
 
 // POST sync
 router.post("/sync", async (req, res) => {
-  const { account_id, account_info, positions, timestamp } = req.body;
+  const { account_id, account_info, positions, closed_positions, timestamp } = req.body;
   try {
     await supabaseAdmin.from("mt5_accounts").update({
       balance: account_info.balance, equity: account_info.equity,
@@ -111,6 +111,7 @@ router.post("/sync", async (req, res) => {
             direction: pos.direction, volume: pos.volume,
             open_price: pos.open_price, stop_loss: pos.stop_loss,
             take_profit: pos.take_profit, profit: pos.profit,
+            swap: pos.swap, commission: pos.commission,
             status: "open", open_time: pos.open_time
           });
         } else {
@@ -127,24 +128,58 @@ router.post("/sync", async (req, res) => {
           // before it filled), nothing downstream ever backfilled it.
           // Sync runs repeatedly and has the real value, so this gives
           // every open position a genuine chance to self-correct.
+          //
+          // FIX (real swap/commission tracking): both were always 0 in
+          // the database across the entire trade history, confirmed
+          // against MT5's own account statement showing real, nonzero
+          // swap. MT5 accrues swap daily even on still-open positions -
+          // now captured on every sync, not just at final close.
           await supabaseAdmin.from("trades").update({
             profit: pos.profit,
+            swap: pos.swap, commission: pos.commission,
             status: "open",
             open_price: pos.open_price || undefined,
           }).eq("id", existing.id);
         }
       }
 
-      // Close trades no longer in positions
+      // Close trades no longer in positions.
+      // FIX (root cause of the real MT5 P&L vs database P&L discrepancy -
+      // confirmed live: MT5 showed -$1,889.84 real profit across the
+      // account's full history, the database showed +$2,922.73): this used
+      // to just mark status="closed" with NO profit update at all - the
+      // stored value stayed whatever floating P&L was last synced WHILE
+      // the position was still open, never the true final realized
+      // result. bridge.py now looks up each closed ticket's real deal
+      // history in MT5 and sends it here as closed_positions - used when
+      // available. Falls back to the old inferential close (status only,
+      // no profit correction) only for tickets real data couldn't be
+      // fetched for, so a lookup failure never silently blocks the close
+      // from being recorded at all.
+      const closedMap = Object.fromEntries((closed_positions || []).map(c => [c.ticket, c]));
       const activeTickets = positions.map(p => p.ticket);
       const { data: openTrades } = await supabaseAdmin.from("trades").select("id, ticket")
         .eq("account_id", account_id).eq("status", "open");
       if (openTrades) {
         for (const trade of openTrades) {
           if (!activeTickets.includes(trade.ticket)) {
-            await supabaseAdmin.from("trades").update({
-              status: "closed", close_time: new Date().toISOString()
-            }).eq("id", trade.id);
+            const real = closedMap[trade.ticket];
+            if (real) {
+              await supabaseAdmin.from("trades").update({
+                status: "closed",
+                close_time: real.close_time || new Date().toISOString(),
+                close_price: real.close_price || undefined,
+                profit: real.profit,
+                swap: real.swap,
+                commission: real.commission,
+              }).eq("id", trade.id);
+            } else {
+              await log("warning", "bridge",
+                `Ticket ${trade.ticket} closed but no real MT5 profit data received - profit may be stale`);
+              await supabaseAdmin.from("trades").update({
+                status: "closed", close_time: new Date().toISOString()
+              }).eq("id", trade.id);
+            }
           }
         }
       }
