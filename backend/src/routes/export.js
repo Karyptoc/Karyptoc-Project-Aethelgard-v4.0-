@@ -56,9 +56,12 @@ router.get("/trades", async (req, res) => {
     const { from, to, symbol, account_id, limit } = req.query;
     const rowLimit = Math.min(parseInt(limit) || 2000, 5000);
 
-    let query = supabaseAdmin.from("trades").select("*").order("opened_at", { ascending: false }).limit(rowLimit);
-    if (from) query = query.gte("opened_at", from);
-    if (to) query = query.lte("opened_at", to);
+    // FIX (confirmed via real error banner): "opened_at" doesn't exist -
+    // the real column is "open_time", confirmed against what Trades.js
+    // itself already renders for this field.
+    let query = supabaseAdmin.from("trades").select("*").order("open_time", { ascending: false }).limit(rowLimit);
+    if (from) query = query.gte("open_time", from);
+    if (to) query = query.lte("open_time", to);
     if (symbol) query = query.eq("symbol", symbol);
     if (account_id) query = query.eq("account_id", account_id);
 
