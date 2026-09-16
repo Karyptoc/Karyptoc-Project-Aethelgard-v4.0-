@@ -23,6 +23,7 @@ const systemRoutes = require("./routes/system");
 const pairsRoutes = require("./routes/pairs");
 const backtestRoutes = require("./routes/backtest");
 const copyTradingRoutes = require("./routes/copyTrading");
+const exportRoutes = require("./routes/export");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -64,6 +65,7 @@ app.use("/api/system", systemRoutes);
 app.use("/api/pairs", pairsRoutes);
 app.use("/api/copy-trading", copyTradingRoutes);
 app.use("/api/backtest", backtestRoutes);
+app.use("/api/export", exportRoutes);
 
 // Health check (used by UptimeRobot)
 app.get("/health", (req, res) => {

@@ -68,6 +68,31 @@ export default function Trades() {
     } finally { setAnalyzing(false); }
   };
 
+  // Export trade history / signal history as CSV, including the full
+  // decision reasoning each trade/signal was based on. Uses responseType
+  // "blob" since the endpoint returns raw CSV text, not JSON - a plain
+  // api.get() would try to parse it as JSON and fail. The auth token
+  // still goes through normally since this uses the same authenticated
+  // api client as every other request on this page.
+  const [exporting, setExporting] = useState(null); // "trades" | "signals" | null
+  const downloadExport = async (kind) => {
+    setExporting(kind);
+    try {
+      const r = await api.get(`/api/export/${kind}`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([r.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      const today = new Date().toISOString().slice(0, 10);
+      a.download = `${kind}_export_${today}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+    } finally { setExporting(null); }
+  };
+
   const SYMBOLS = ["GOLD", "EURUSD", "GBPUSD", "USDJPY", "US30Cash", "SPX500Cash", "GER40Cash", "BTCUSD"];
 
   return (
@@ -78,6 +103,12 @@ export default function Trades() {
           <div className="page-subtitle">EXECUTION LOG & PERFORMANCE ANALYTICS</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => downloadExport("trades")} disabled={exporting !== null}>
+            {exporting === "trades" ? "⬇ Exporting..." : "⬇ Export Trades"}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => downloadExport("signals")} disabled={exporting !== null}>
+            {exporting === "signals" ? "⬇ Exporting..." : "⬇ Export Signals"}
+          </button>
           <button className="btn btn-ghost btn-sm" onClick={requestAiAnalysis} disabled={analyzing || trades.length === 0}>
             {analyzing ? "🤖 Analyzing..." : "🤖 AI Analysis"}
           </button>
