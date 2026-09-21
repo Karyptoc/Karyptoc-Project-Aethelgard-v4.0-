@@ -103,7 +103,7 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   // a direction at all, falling through to RSI (kill zone only) exactly as
   // if no CHoCH had been detected, consistent with the existing
   // priority-chain design rather than returning HOLD outright.
-  } else if (ind.choch) {
+  } else if (ind.choch && ind.choch.barsAgo >= 1) {
     direction = ind.choch.type.includes("BULLISH") ? "BUY" : "SELL";
     directionSource = "CHOCH";
 
