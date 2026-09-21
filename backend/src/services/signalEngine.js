@@ -438,6 +438,19 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     const poiATRraw = poiBars ? atrCalc(poiBars, 14) : null;
     const poiATR = poiATRraw || currentATR;
 
+    // FIX (KHPZ Stage 1 unit-mismatch correction): KHPZ's 3-bar CHoCH
+    // maturity value was proven on M15/M30 continuous evaluation (~45min-
+    // 1.5hr real delay). Aethelgard's BOS/CHoCH direction-sourcing ran on
+    // H4 primary structure, where the same "3 bars" meant 12 hours - a far
+    // stricter requirement than KHPZ ever validated, especially inside a
+    // kill-zone window that only spans 1.5-2 hours to begin with. This
+    // computes a SEPARATE M15-based structure result specifically for
+    // makePureMathDecision's direction-sourcing, matching the timeframe
+    // KHPZ's own value came from. Confluence scoring's existing BOS/CHoCH
+    // bonus deliberately keeps using the original H4 result unchanged -
+    // that's a separate, already-validated mechanism not touched here.
+    const poiStructure = poiBars ? detectMarketStructure(poiBars) : null;
+
     // FIX (confirmed real bug via live A/B test - GOLD went 21->2 trades,
     // EURUSD 21->1 over a comparable window after Stage 3): the OB/FVG/
     // equal-highs/strength/sweep/premium-discount lookback windows below
@@ -559,8 +572,12 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         await log("info", "signalEngine", `${symbol}: SCALP ${analysis.direction} | Conf:${analysis.confidence} | ${session.name}`);
       }
     } else if (tradingMode === TRADING_MODES.PURE_MATH) {
-      // Zero cost — pure ICT math decision
-      analysis = makePureMathDecision(confluence, htfBias, ictSequence, primaryInd, session);
+      // Zero cost — pure ICT math decision. Non-mutating shallow merge:
+      // confluence scoring already used primaryInd's original H4 bos/choch
+      // above this point, unaffected - this override only applies to the
+      // direction-sourcing decision inside makePureMathDecision.
+      const pureMathInd = poiStructure ? { ...primaryInd, bos: poiStructure.bos, choch: poiStructure.choch } : primaryInd;
+      analysis = makePureMathDecision(confluence, htfBias, ictSequence, pureMathInd, session);
       if (analysis.direction !== "HOLD") {
         await log("info", "signalEngine", `${symbol}: PURE_MATH ${analysis.direction} | Score:${confluence.score} | Conf:${analysis.confidence}`);
       }
@@ -572,7 +589,8 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         await log("info", "signalEngine", `${symbol}: HYBRID mode — score ${confluence.score} qualifies for AI analysis`);
         analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence);
       } else {
-        analysis = makePureMathDecision(confluence, htfBias, ictSequence, primaryInd, session);
+        const pureMathInd = poiStructure ? { ...primaryInd, bos: poiStructure.bos, choch: poiStructure.choch } : primaryInd;
+        analysis = makePureMathDecision(confluence, htfBias, ictSequence, pureMathInd, session);
         await log("info", "signalEngine", `${symbol}: HYBRID mode — score ${confluence.score} < 65, using pure math`);
       }
 
