@@ -298,6 +298,14 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
       ? core.getIndicators(poiBars, poiATR, M15_OB_LOOKBACK, M15_FVG_LOOKBACK, M15_EQHL_LOOKBACK)
       : ind;
 
+    // FIX (matches signalEngine.js): CHoCH direction-sourcing was running
+    // on H4 primary structure, making KHPZ's proven 3-bar maturity value
+    // mean 12 hours instead of the ~45min-1.5hr it was actually validated
+    // at. Only overrides when genuinely using M15 (usingPoiM15) - the
+    // pre-backfill H4-only fallback portion of a backtest keeps the
+    // original H4 structure exactly as before, unaffected by this change.
+    const poiStructure = usingPoiM15 ? core.detectMarketStructure(poiBars) : null;
+
     const sweep = core.detectLiquiditySweep(poiBars, usingPoiM15 ? M15_SWEEP_LOOKBACK : 15);
     const displacement = poiATR ? core.detectDisplacement(poiBars, poiATR) : null;
     const fvgs = poiInd?.fvgs || [];
@@ -343,7 +351,8 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
 
     if (confluence.score < minScore) continue;
 
-    const analysis = core.makePureMathDecision(confluence, htfBias, ictSequence, ind, session);
+    const pureMathInd = poiStructure ? { ...ind, bos: poiStructure.bos, choch: poiStructure.choch } : ind;
+    const analysis = core.makePureMathDecision(confluence, htfBias, ictSequence, pureMathInd, session);
     if (analysis.direction === "HOLD") {
       // DIAGNOSTIC (temporary, round 5) - categorize why, including precise
       // breakdown of which mandatory-sequence element(s) are missing, since
