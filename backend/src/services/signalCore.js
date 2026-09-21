@@ -95,7 +95,15 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
     directionSource = "BOS";
 
   // 3. CHoCH direction
-  } else if (ind.choch) {
+  // FIX (KHPZ integration, Stage 1 - confirmed relevant via KHPZ's own
+  // field-tested "falling knife" finding): a CHoCH detected on the exact
+  // current bar (barsAgo=0) means entering the instant structure breaks,
+  // with zero confirmation the reversal is real rather than a brief wick.
+  // Requires at least 1 bar of maturity - an immature CHoCH doesn't source
+  // a direction at all, falling through to RSI (kill zone only) exactly as
+  // if no CHoCH had been detected, consistent with the existing
+  // priority-chain design rather than returning HOLD outright.
+  } else if (ind.choch && ind.choch.barsAgo >= 1) {
     direction = ind.choch.type.includes("BULLISH") ? "BUY" : "SELL";
     directionSource = "CHOCH";
 
@@ -372,25 +380,40 @@ function detectMarketStructure(bars) {
     }
   }
 
-  const currentClose = bars[len-1].close;
-  const prevClose = bars[len-2].close;
-
-  // BOS: current close breaks beyond last swing point
+  // FIX (KHPZ integration, Stage 1): this used to check ONLY the exact
+  // latest bar transition (bars[len-1] vs bars[len-2]) - meaning a
+  // CHoCH-sourced trade could only ever fire with ZERO confirmation delay,
+  // right on the break bar itself. KHPZ's own field-tested fix (see its
+  // "falling knife" comment) found that arming a reversal signal on the
+  // very first touch right after a break, before the market has shown the
+  // move actually stalled, was its main remaining weak point. Aethelgard's
+  // stateless-per-call detection can't persist "CHoCH happened N bars ago"
+  // the way KHPZ does, so this scans a small recent window of bar
+  // transitions instead of only the latest one - same technique already
+  // used in detectDisplacement's widening fix. Swing levels themselves are
+  // relatively stable/slow-moving, so checking whether a break crossed the
+  // CURRENT known level at any of the last few transitions is a safe,
+  // low-risk adaptation, not a full retroactive swing recomputation.
+  const MAX_BREAK_SCAN = 4;
   let bos = null, choch = null, trend = "neutral";
 
-  if (swingHighs.length > 0) {
-    const lastSwingHigh = swingHighs[0].price;
-    if (currentClose > lastSwingHigh && prevClose <= lastSwingHigh) {
-      bos = { type: "BULLISH_BOS", level: lastSwingHigh };
+  const lastSwingHigh = swingHighs.length > 0 ? swingHighs[0].price : null;
+  const lastSwingLow = swingLows.length > 0 ? swingLows[0].price : null;
+
+  for (let offset = 0; offset <= MAX_BREAK_SCAN && offset <= len - 2; offset++) {
+    const curBar = bars[len - 1 - offset];
+    const prevBar = bars[len - 2 - offset];
+    if (!curBar || !prevBar) break;
+
+    if (!bos && lastSwingHigh !== null && curBar.close > lastSwingHigh && prevBar.close <= lastSwingHigh) {
+      bos = { type: "BULLISH_BOS", level: lastSwingHigh, barsAgo: offset };
       trend = "bullish";
     }
-  }
-  if (swingLows.length > 0) {
-    const lastSwingLow = swingLows[0].price;
-    if (currentClose < lastSwingLow && prevClose >= lastSwingLow) {
-      bos = { type: "BEARISH_BOS", level: lastSwingLow };
+    if (!bos && lastSwingLow !== null && curBar.close < lastSwingLow && prevBar.close >= lastSwingLow) {
+      bos = { type: "BEARISH_BOS", level: lastSwingLow, barsAgo: offset };
       trend = "bearish";
     }
+    if (bos) break; // most recent qualifying break wins
   }
 
   // CHoCH detected when BOS occurs against the prevailing trend
