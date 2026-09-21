@@ -95,15 +95,17 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
     directionSource = "BOS";
 
   // 3. CHoCH direction
-  // FIX (KHPZ integration, Stage 1 - confirmed relevant via KHPZ's own
-  // field-tested "falling knife" finding): a CHoCH detected on the exact
-  // current bar (barsAgo=0) means entering the instant structure breaks,
-  // with zero confirmation the reversal is real rather than a brief wick.
-  // Requires at least 1 bar of maturity - an immature CHoCH doesn't source
-  // a direction at all, falling through to RSI (kill zone only) exactly as
-  // if no CHoCH had been detected, consistent with the existing
-  // priority-chain design rather than returning HOLD outright.
-  } else if (ind.choch && ind.choch.barsAgo >= 1) {
+  // FIX (KHPZ integration, Stage 1, refined): a CHoCH detected on the exact
+  // current bar means entering the instant structure breaks, with zero
+  // confirmation the reversal is real rather than a brief wick - KHPZ's
+  // own field-tested "falling knife" finding. Minimum maturity raised from
+  // 1 to 3 bars, matching KHPZ's actual live "Intraday" setting - confirmed
+  // via 5 real screenshots across GOLD, US30 (both M15 and M30), BTCUSD,
+  // and GER30/DAX, all showing this same value consistently, not a single
+  // one-off tuning. An immature CHoCH doesn't source a direction at all,
+  // falling through to RSI (kill zone only) exactly as if no CHoCH had
+  // been detected, consistent with the existing priority-chain design.
+  } else if (ind.choch && ind.choch.barsAgo >= 3) {
     direction = ind.choch.type.includes("BULLISH") ? "BUY" : "SELL";
     directionSource = "CHOCH";
 
@@ -394,7 +396,10 @@ function detectMarketStructure(bars) {
   // relatively stable/slow-moving, so checking whether a break crossed the
   // CURRENT known level at any of the last few transitions is a safe,
   // low-risk adaptation, not a full retroactive swing recomputation.
-  const MAX_BREAK_SCAN = 4;
+  // Widened from 4 to 10 (KHPZ Stage 1 refinement) - a 3-bar minimum
+  // maturity gate needs real room to find a qualifying, still-fresh CHoCH,
+  // not just a 1-2 bar sliver at the edge of the old narrower cap.
+  const MAX_BREAK_SCAN = 10;
   let bos = null, choch = null, trend = "neutral";
 
   const lastSwingHigh = swingHighs.length > 0 ? swingHighs[0].price : null;
