@@ -145,7 +145,16 @@ export default function Signals() {
   // only needs to know WHETHER Telegram is configured, not the credentials.
   const [tgConfigured, setTgConfigured] = useState(false);
   const [autoSend, setAutoSend] = useState(() => localStorage.getItem("tg_auto_send") === "true");
+  // FIX: this set used to start empty on every page load/refresh. Since
+  // toggling autoSend (or just reloading the page while it was already on)
+  // immediately re-fetches, every already-existing "executed" signal looked
+  // brand new against an empty set — so turning Auto-send on blasted out
+  // whatever old signals happened to be on the page. baselinedRef tracks
+  // whether we've done the initial "mark everything currently here as
+  // already-seen, send nothing" pass. Only signals that appear in a LATER
+  // poll, absent from that first snapshot, are ever eligible to send.
   const sentRef = React.useRef(new Set());
+  const baselinedRef = React.useRef(false);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3500); };
 
@@ -166,12 +175,27 @@ export default function Signals() {
     const r = await api.get("/api/signals");
     const newSigs = r.data.signals || [];
     setSignals(newSigs);
+
+    if (!baselinedRef.current) {
+      // First load this page mount has ever seen (whether autoSend is on
+      // or off, whether it was already on from localStorage or not).
+      // Mark every signal currently on the page as already-seen and send
+      // NOTHING — these are "older signals" by definition.
+      newSigs.forEach(s => sentRef.current.add(s.id));
+      baselinedRef.current = true;
+      return;
+    }
+
     if (autoSend && tgConfigured) {
       const newExec = newSigs.filter(s => s.status === "executed" && !sentRef.current.has(s.id));
       for (const sig of newExec.slice(0, 3)) {
         sentRef.current.add(sig.id);
         await sendToTelegram(formatMsg(sig));
       }
+    } else {
+      // autoSend is off right now, but still record these IDs as seen so
+      // that turning autoSend ON later doesn't treat them as new either.
+      newSigs.forEach(s => sentRef.current.add(s.id));
     }
   }, [autoSend, tgConfigured, sendToTelegram]);
 
