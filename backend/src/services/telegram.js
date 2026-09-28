@@ -73,9 +73,17 @@ async function sendTelegramMessage(text) {
   }
 
   try {
+    // FIX: parse_mode "Markdown" uses Telegram's legacy, extremely strict
+    // parser. ANY unmatched _ * ` in the text (e.g. order types like
+    // BUY_LIMIT/SELL_LIMIT, or a symbol/rationale string with those
+    // characters) makes Telegram reject the ENTIRE message with
+    // "can't parse entities" - not a formatting glitch, a total send
+    // failure. Since alert text is built from dynamic trading data we
+    // can't fully control, plain text is the only reliable choice: it
+    // can never fail to parse, no matter what the message contains.
     const r = await axios.post(
       `https://api.telegram.org/bot${botToken}/sendMessage`,
-      { chat_id: chatId, text, parse_mode: "Markdown" },
+      { chat_id: chatId, text },
       { timeout: 10000 }
     );
     if (!r.data.ok) {

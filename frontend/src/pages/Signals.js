@@ -23,20 +23,25 @@ function formatMsg(sig) {
   const isBuy = sig.direction === "BUY";
   const dp = ["GOLD","US30Cash","GER40Cash","BTCUSD","GBPJPY","EURJPY"].includes(sig.symbol) ? 2 : 5;
   const rd = sig.regime_detail || {};
-  return `${isBuy ? "🟢" : "🔴"} *AETHELGARD SIGNAL*
+  // FIX: plain text only — no *, _, ` markdown markers. The backend no
+  // longer sends with parse_mode:"Markdown" (a stray/unmatched _ * ` in
+  // ANY dynamic field — order type, symbol, and especially the free-text
+  // AI rationale below — used to make Telegram reject the whole message
+  // with "can't parse entities"). Plain text can never fail that way.
+  return `${isBuy ? "🟢" : "🔴"} AETHELGARD SIGNAL
 
-*${sig.symbol}* — ${sig.direction} | Grade ${rd.confluence_grade || "B"}
+${sig.symbol} — ${sig.direction} | Grade ${rd.confluence_grade || "B"}
 📊 ${(sig.regime||"").replace(/_/g," ")} | ${rd.session || ""}
 🧠 HTF: ${(rd.htf_bias||"").toUpperCase()} | SMC: ${rd.confluence_score||0}/100
 🎯 Confidence: ${Math.round((sig.confidence||0)*100)}%
 
-💰 *Entry:* \`${sig.entry_price ? parseFloat(sig.entry_price).toFixed(dp) : "MARKET"}\`
-🛑 *Stop Loss:* \`${sig.stop_loss ? parseFloat(sig.stop_loss).toFixed(dp) : "—"}\`
-✅ *Take Profit:* \`${sig.take_profit ? parseFloat(sig.take_profit).toFixed(dp) : "—"}\`
+💰 Entry: ${sig.entry_price ? parseFloat(sig.entry_price).toFixed(dp) : "MARKET"}
+🛑 Stop Loss: ${sig.stop_loss ? parseFloat(sig.stop_loss).toFixed(dp) : "—"}
+✅ Take Profit: ${sig.take_profit ? parseFloat(sig.take_profit).toFixed(dp) : "—"}
 
 📝 ${sig.rationale || "AI-generated signal"}
 
-⚠️ _Risk 1-2% max. Past performance ≠ future results._
+⚠️ Risk 1-2% max. Past performance ≠ future results.
 🤖 Aethelgard v6 | Karyptoc Solutions`;
 }
 

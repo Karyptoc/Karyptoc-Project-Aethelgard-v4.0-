@@ -911,10 +911,13 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     try {
       if (await isTelegramConfigured()) {
         const dir = analysis.direction === "BUY" ? "🟢 BUY" : "🔴 SELL";
+        // Plain text only — no *, _, ` — see FIX note on sendTelegramMessage
+        // for why: those characters used to make Telegram silently drop
+        // every message whose order type was BUY_LIMIT/SELL_LIMIT.
         const msg =
-          `${dir} *${symbol}*\n` +
-          `Entry: \`${data.entry_price}\` (${orderType})\n` +
-          `SL: \`${sltp.stopLoss}\`  |  TP: \`${sltp.takeProfit}\`\n` +
+          `${dir} ${symbol}\n` +
+          `Entry: ${data.entry_price} (${orderType})\n` +
+          `SL: ${sltp.stopLoss}  |  TP: ${sltp.takeProfit}\n` +
           `RR: ${sltp.rrActual}  |  Conf: ${analysis.confidence}\n` +
           `Grade: ${confluence.grade}  |  Session: ${session.name}\n` +
           `ICT: ${ictSequence.hasFullSequence ? "FULL✅" : ictSequence.hasPartialSequence ? "PARTIAL" : "NONE"}`;
