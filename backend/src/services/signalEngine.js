@@ -14,6 +14,12 @@
 
 const Anthropic = require("@anthropic-ai/sdk");
 const { supabaseAdmin, log } = require("./supabase");
+// FIX: Telegram alerts used to depend on the frontend Signals.js page being
+// open in a browser to relay each new signal to /api/system/telegram/send.
+// An autonomous engine fires signals with nobody watching, so that path
+// silently dropped every notification. The engine now sends directly,
+// server-side, the instant a signal is created — no frontend involved.
+const { sendTelegramMessage, isConfigured: isTelegramConfigured } = require("./telegram");
 const {
   calculateATRStopLoss,
   checkVolatilitySpike,
@@ -896,6 +902,31 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     await log("info", "signalEngine",
       `✅ ${analysis.direction} ${symbol} @ ${entryPrice} [${entryTimeframe}] | Conf:${analysis.confidence} | ${session.name} | Grade:${confluence.grade} | SL:${sltp.slPips}pips | RR:${sltp.rrActual} | ICT:${ictSequence.hasFullSequence?"FULL":ictSequence.hasPartialSequence?"PARTIAL":"NONE"} | M5:${sltp.usedM5Entry?"✅":"❌"}`
     );
+
+    // FIX: fire the Telegram alert here, server-side, right as the signal is
+    // born — not from the frontend. This runs whether or not anyone has the
+    // dashboard open, which is the whole point of an autonomous engine.
+    // Best-effort: sendTelegramMessage() never throws, and a failed/absent
+    // config must never block or roll back signal creation.
+    try {
+      if (await isTelegramConfigured()) {
+        const dir = analysis.direction === "BUY" ? "🟢 BUY" : "🔴 SELL";
+        const msg =
+          `${dir} *${symbol}*\n` +
+          `Entry: \`${data.entry_price}\` (${orderType})\n` +
+          `SL: \`${sltp.stopLoss}\`  |  TP: \`${sltp.takeProfit}\`\n` +
+          `RR: ${sltp.rrActual}  |  Conf: ${analysis.confidence}\n` +
+          `Grade: ${confluence.grade}  |  Session: ${session.name}\n` +
+          `ICT: ${ictSequence.hasFullSequence ? "FULL✅" : ictSequence.hasPartialSequence ? "PARTIAL" : "NONE"}`;
+        const tgResult = await sendTelegramMessage(msg);
+        if (!tgResult.ok) {
+          await log("warning", "signalEngine", `${symbol}: Telegram alert not sent — ${tgResult.error}`);
+        }
+      }
+    } catch (tgErr) {
+      await log("warning", "signalEngine", `${symbol}: Telegram alert threw unexpectedly — ${tgErr.message}`);
+    }
+
     return data;
 
   } catch (e) {
