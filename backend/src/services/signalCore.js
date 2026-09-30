@@ -70,7 +70,7 @@ const DXY_DIRECT_PAIRS  = ["USDCAD", "USDCHF", "USDJPY"];
  * - Sweep adds conviction (but not required)
  * - RSI must not be extreme against direction
  */
-function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
+function makePureMathDecision(confluence, htfBias, ictSequence, ind, session, options = {}) {
   const score = confluence.score;
   const htf = htfBias.bias;
 
@@ -144,7 +144,7 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   // real structural evidence outranks a regime read.
   const trendState = ind.trendState || "RANGING";
   const isReversalEvidence = directionSource === "ICT_SWEEP" || directionSource === "CHOCH";
-  if (!isReversalEvidence) {
+  if (!isReversalEvidence && !options.disableTrendGate) {
     if (trendState === "RANGING") {
       return { direction: "HOLD", confidence: 0, reason: `Ranging market (${ind.trendReason || "no clear structure"}) — ${directionSource} continuation entry blocked` };
     }

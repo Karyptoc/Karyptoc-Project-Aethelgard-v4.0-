@@ -49,6 +49,12 @@ export default function Backtest() {
     symbol: "GOLD", days: 30,
     initial_balance: 1000, risk_percent: 1.0,
     min_score_mode: "default", // "default" | "55" (B-grade min) | "75" (A-grade min)
+    // KHPZ Stage 3 A/B toggle: run the exact same backtest with the
+    // trend-state gate (Trending Up/Down/Ranging) switched off, so its
+    // real effect on trade count/PF/WR can be measured directly rather
+    // than guessed at from a single result - same discipline used to
+    // catch the mandatory sequence gate regression before it went live.
+    disable_trend_gate: false,
   });
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
@@ -139,6 +145,17 @@ export default function Backtest() {
                 <option value="55">B-grade minimum (55)</option>
                 <option value="75">A-grade minimum (75)</option>
               </select>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
+              <input type="checkbox" checked={form.disable_trend_gate}
+                onChange={e => setForm({...form, disable_trend_gate: e.target.checked})} />
+              Disable Stage 3 trend-state gate (A/B test)
+            </label>
+            <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2, marginLeft: 24 }}>
+              Run the same pair/window with the Trending Up/Down/Ranging gate switched off, to isolate its real effect — compare against a run with this unchecked.
             </div>
           </div>
 

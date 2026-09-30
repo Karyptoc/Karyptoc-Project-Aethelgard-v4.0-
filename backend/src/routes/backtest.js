@@ -111,7 +111,7 @@ router.get("/availability", verifyToken, async (req, res) => {
 
 router.post("/run", verifyToken, async (req, res) => {
   try {
-    const { symbol, days = 30, initial_balance = 1000, risk_percent = 1.0, min_score_override } = req.body;
+    const { symbol, days = 30, initial_balance = 1000, risk_percent = 1.0, min_score_override, disable_trend_gate } = req.body;
     if (!symbol) return res.status(400).json({ error: "symbol required" });
 
     const fromDate = new Date(Date.now() - (days + 120) * 24 * 60 * 60 * 1000).toISOString();
@@ -156,6 +156,13 @@ router.post("/run", verifyToken, async (req, res) => {
     const windowStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const result = runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, {
       initialBalance: initial_balance, riskPercent: risk_percent, windowStart, minScoreOverride: min_score_override,
+      // KHPZ Stage 3 A/B toggle: lets a backtest run with the trend-state
+      // gate switched off, so its real effect on trade count/PF/WR can be
+      // measured directly against the same pair/window instead of guessed
+      // at - same discipline as minScoreOverride above, and the same
+      // discipline that caught the mandatory sequence gate regression
+      // before it reached live trading.
+      disableTrendGate: !!disable_trend_gate,
     });
 
     await log("info", "backtest",
@@ -184,7 +191,7 @@ router.post("/run", verifyToken, async (req, res) => {
 // its own stage so this data-availability change can be verified
 // independently before the higher-risk logic rewrite happens on top of it.
 function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, params) {
-  const { initialBalance = 1000, riskPercent = 1.0, windowStart, minScoreOverride } = params;
+  const { initialBalance = 1000, riskPercent = 1.0, windowStart, minScoreOverride, disableTrendGate } = params;
   const pipSize = core.PIP_SIZES[symbol] || 0.0001;
   const spreadPips = ASSUMED_SPREAD_PIPS[symbol] || 2.0;
 
@@ -352,7 +359,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     if (confluence.score < minScore) continue;
 
     const pureMathInd = poiStructure ? { ...ind, bos: poiStructure.bos, choch: poiStructure.choch } : ind;
-    const analysis = core.makePureMathDecision(confluence, htfBias, ictSequence, pureMathInd, session);
+    const analysis = core.makePureMathDecision(confluence, htfBias, ictSequence, pureMathInd, session, { disableTrendGate });
     if (analysis.direction === "HOLD") {
       // DIAGNOSTIC (temporary, round 5) - categorize why, including precise
       // breakdown of which mandatory-sequence element(s) are missing, since
