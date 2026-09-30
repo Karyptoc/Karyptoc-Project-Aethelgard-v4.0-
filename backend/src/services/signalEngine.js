@@ -185,7 +185,7 @@ async function hasRecentSignal(symbol, minutes = 3) {
 
 // ── Technical Analysis ────────────────────────────────────────────────────────
 
-async function analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence) {
+async function analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, trendState) {
   const isCross  = ["GBPJPY","EURJPY"].includes(symbol);
   const isCrypto = symbol === "BTCUSD";
   const isIndex  = ["US30Cash","GER40Cash"].includes(symbol);
@@ -205,6 +205,7 @@ async function analyzeWithClaude(symbol, multiTFData, session, confluence, htfBi
 
 SESSION: ${session.name} | Entry Model: ${session.entryModel} | Quality: ${session.sessQuality}/3
 HTF BIAS: ${htfBias.bias.toUpperCase()} (${(htfBias.strength*100).toFixed(0)}%)
+TREND STATE (structural, this timeframe): ${trendState || "RANGING"} — treat a RANGING read as a caution against trend-continuation entries; a counter-trend continuation entry needs real reversal evidence (sweep/CHoCH), not just a good score.
 SMC SCORE: ${confluence.score}/100 (Grade ${confluence.grade})
 ATR RATIO: ${atrInfo?.ratio || 1.0}x normal ${atrInfo?.ratio >= 2.5 ? "⚠️ VOLATILITY SPIKE" : ""}
 TIMEFRAME MODEL: H4 analysis + M5 precision entry
@@ -663,7 +664,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       // Everything else decided by pure math
       if (confluence.score >= 65 || ictSequence.hasFullSequence) {
         await log("info", "signalEngine", `${symbol}: HYBRID mode — score ${confluence.score} qualifies for AI analysis`);
-        analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence);
+        analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, primaryInd?.trendState);
       } else {
         const pureMathInd = poiStructure ? { ...primaryInd, bos: poiStructure.bos, choch: poiStructure.choch } : primaryInd;
         analysis = makePureMathDecision(confluence, htfBias, ictSequence, pureMathInd, session);
@@ -672,7 +673,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 
     } else {
       // AI mode — full Claude analysis (original behavior)
-      analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence);
+      analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, primaryInd?.trendState);
     }
 
     if (!analysis || analysis.direction === "HOLD") {
@@ -990,7 +991,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
           `SL: ${sltp.stopLoss}  |  TP: ${sltp.takeProfit}\n` +
           `RR: ${sltp.rrActual}  |  Conf: ${analysis.confidence}\n` +
           `Grade: ${confluence.grade}  |  Session: ${session.name}\n` +
-          `ICT: ${ictSequence.hasFullSequence ? "FULL✅" : ictSequence.hasPartialSequence ? "PARTIAL" : "NONE"}`;
+          `Trend: ${(primaryInd?.trendState || "RANGING").replace("TRENDING_","")}  |  ICT: ${ictSequence.hasFullSequence ? "FULL✅" : ictSequence.hasPartialSequence ? "PARTIAL" : "NONE"}`;
         const tgResult = await sendTelegramMessage(msg);
         if (!tgResult.ok) {
           await log("warning", "signalEngine", `${symbol}: Telegram alert not sent — ${tgResult.error}`);

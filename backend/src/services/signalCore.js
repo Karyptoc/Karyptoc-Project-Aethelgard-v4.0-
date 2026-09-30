@@ -131,6 +131,31 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
   }
   const htfAligned = htf === expectedHTF;
 
+  // KHPZ Stage 3: trend-state gate. Same role as HTF above - can only
+  // block or confirm a direction already sourced from real structure,
+  // never originate one. RANGING blocks continuation-style entries (BOS,
+  // and the weakest RSI-only evidence), since trend-following logic is
+  // the wrong tool in chop; a real sweep or matured CHoCH reversal is
+  // still allowed through even in RANGING, since ICT reversals AT range
+  // extremes are a legitimate, distinct setup from continuation - not
+  // weaker evidence, just a different one. In a trending state, the same
+  // rule blocks counter-trend BOS/RSI continuation while still letting a
+  // genuine reversal override, matching the HTF permission precedent:
+  // real structural evidence outranks a regime read.
+  const trendState = ind.trendState || "RANGING";
+  const isReversalEvidence = directionSource === "ICT_SWEEP" || directionSource === "CHOCH";
+  if (!isReversalEvidence) {
+    if (trendState === "RANGING") {
+      return { direction: "HOLD", confidence: 0, reason: `Ranging market (${ind.trendReason || "no clear structure"}) — ${directionSource} continuation entry blocked` };
+    }
+    if (trendState === "TRENDING_UP" && direction === "SELL") {
+      return { direction: "HOLD", confidence: 0, reason: `Uptrend — counter-trend SELL via ${directionSource} blocked (no reversal evidence)` };
+    }
+    if (trendState === "TRENDING_DOWN" && direction === "BUY") {
+      return { direction: "HOLD", confidence: 0, reason: `Downtrend — counter-trend BUY via ${directionSource} blocked (no reversal evidence)` };
+    }
+  }
+
   // REVERTED (external review's second fix - honest account of why):
   // sweep/MSS/displacement/POI were made into hard mandatory gates, on the
   // reasoning that a high score from unrelated factors shouldn't be able
@@ -201,9 +226,14 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
     return { direction: "HOLD", confidence, reason: `Confidence ${confidence.toFixed(2)} < ${minConf} (${directionSource})` };
   }
 
+  // FIX: previously fell back to a crude htf==='neutral' check to decide
+  // RANGING vs trending for the display regime - now uses the real Stage 3
+  // classification, which is a direct structural read rather than a
+  // byproduct of the HTF permission check.
   const regime = ind.atr_ratio >= 2.5 ? "HIGH_VOLATILITY" :
     ictSequence.hasFullSequence ? "BREAKOUT" :
-    htf !== "neutral" ? (htf === "bullish" ? "TRENDING_BULL" : "TRENDING_BEAR") : "RANGING";
+    trendState === "TRENDING_UP" ? "TRENDING_BULL" :
+    trendState === "TRENDING_DOWN" ? "TRENDING_BEAR" : "RANGING";
 
   return {
     direction,
@@ -213,7 +243,8 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session) {
       description: `Pure math ICT score ${score}/100 via ${directionSource}`,
       strength: parseFloat((score / 100).toFixed(2)),
       timeframe_alignment: htf !== "neutral" ? "aligned" : "mixed",
-      direction_source: directionSource
+      direction_source: directionSource,
+      trend_state: trendState
     },
     smc_context: {
       structure: direction === "BUY" ? "bullish" : "bearish",
@@ -441,7 +472,33 @@ function detectMarketStructure(bars) {
     }
   }
 
-  return { bos, choch, trend, swingHighs, swingLows };
+  // KHPZ Stage 3: three-state trend classifier (TRENDING_UP / TRENDING_DOWN
+  // / RANGING), reusing the swingHighs/swingLows already computed above so
+  // this can never disagree with the BOS/CHoCH read sitting right next to
+  // it. Classic structural definition: higher highs + higher lows = up,
+  // lower highs + lower lows = down, anything else (including too little
+  // swing data to tell) defaults to RANGING - the conservative read,
+  // consistent with this file's existing rule that weak evidence should
+  // never be treated as a real signal. This fills a real gap: getHTFBias
+  // is EMA20/50-cross-based and only ever returns bullish/bearish/neutral
+  // - it has no concept of "ranging" at all, so a market chopping sideways
+  // just above/below its EMAs still reads as a directional HTF permission.
+  // swingHighs[0]/swingLows[0] are the MOST RECENT swing (see the loop
+  // above - idx decreases as i increases, and pushes happen in that same
+  // order), matching the existing priorTrend logic just above this.
+  let trendState = "RANGING";
+  let trendReason = "insufficient swing data";
+  if (swingHighs.length >= 2 && swingLows.length >= 2) {
+    const higherHighs = swingHighs[0].price > swingHighs[1].price;
+    const higherLows  = swingLows[0].price  > swingLows[1].price;
+    const lowerHighs  = swingHighs[0].price < swingHighs[1].price;
+    const lowerLows   = swingLows[0].price  < swingLows[1].price;
+    if (higherHighs && higherLows) { trendState = "TRENDING_UP"; trendReason = "higher highs + higher lows"; }
+    else if (lowerHighs && lowerLows) { trendState = "TRENDING_DOWN"; trendReason = "lower highs + lower lows"; }
+    else { trendState = "RANGING"; trendReason = "mixed/overlapping swing structure"; }
+  }
+
+  return { bos, choch, trend, swingHighs, swingLows, trendState, trendReason };
 }
 
 /**
@@ -1173,6 +1230,7 @@ function getIndicators(bars, atrVal, obLookback = 10, fvgLookback = 12, recentHL
     atr14_historical: histATR,
     atr_ratio: currentATR && histATR ? parseFloat((currentATR/histATR).toFixed(2)) : 1.0,
     bos: ms.bos, choch: ms.choch, trend: ms.trend,
+    trendState: ms.trendState, trendReason: ms.trendReason,
     obs, fvgs,
     bullish: e20 > e50, aboveEMA20: price > e20,
     recentHigh: Math.max(...bars.slice(-recentHLLookback).map(b=>b.high)),

@@ -32,7 +32,7 @@ function formatMsg(sig) {
 
 ${sig.symbol} — ${sig.direction} | Grade ${rd.confluence_grade || "B"}
 📊 ${(sig.regime||"").replace(/_/g," ")} | ${rd.session || ""}
-🧠 HTF: ${(rd.htf_bias||"").toUpperCase()} | SMC: ${rd.confluence_score||0}/100
+🧠 HTF: ${(rd.htf_bias||"").toUpperCase()} | Trend: ${(rd.trend_state||"").replace("TRENDING_","")} | SMC: ${rd.confluence_score||0}/100
 🎯 Confidence: ${Math.round((sig.confidence||0)*100)}%
 
 💰 Entry: ${sig.entry_price ? parseFloat(sig.entry_price).toFixed(dp) : "MARKET"}
@@ -101,6 +101,16 @@ function SignalCard({ sig, onShare, compact }) {
           {rd.htf_bias && (
             <span className={`badge ${rd.htf_bias === "bullish" ? "bull" : rd.htf_bias === "bearish" ? "bear" : "muted"}`} style={{ fontSize: 9, marginTop: 4, display: "inline-block" }}>
               HTF: {rd.htf_bias.toUpperCase()}
+            </span>
+          )}
+          {/* KHPZ Stage 3: structural trend-state classifier (Up/Down/Ranging),
+              distinct from HTF (which is EMA-cross-based and has no ranging
+              state). Shown so a signal card explains itself the same way the
+              rest of the card does - a BUY that fired against a RANGING read
+              means reversal evidence (sweep/CHoCH) overrode it, worth seeing. */}
+          {rd.trend_state && (
+            <span className={`badge ${rd.trend_state === "TRENDING_UP" ? "bull" : rd.trend_state === "TRENDING_DOWN" ? "bear" : "muted"}`} style={{ fontSize: 9, marginTop: 4, display: "inline-block", marginLeft: 4 }}>
+              TREND: {rd.trend_state.replace("TRENDING_", "")}
             </span>
           )}
         </div>
