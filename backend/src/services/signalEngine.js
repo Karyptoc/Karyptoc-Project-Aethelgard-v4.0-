@@ -20,6 +20,11 @@ const { supabaseAdmin, log } = require("./supabase");
 // silently dropped every notification. The engine now sends directly,
 // server-side, the instant a signal is created — no frontend involved.
 const { sendTelegramMessage, isConfigured: isTelegramConfigured } = require("./telegram");
+// FIX: isNewsBlackout() used to guess news events from a hardcoded day/
+// time table instead of a real calendar (see signalCore.js for the full
+// story). This fetches the actual weekly high-impact schedule (cached
+// 1hr) and hands real events into the now-real isNewsBlackout() check.
+const { getCalendarEvents } = require("./economicCalendar");
 const {
   calculateATRStopLoss,
   checkVolatilitySpike,
@@ -305,7 +310,8 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
     const session = getSessionInfo();
     if (session.session === "WEEKEND" || session.session === "DEAD_ZONE") return null;
 
-    const news = isNewsBlackout();
+    const calendarEvents = await getCalendarEvents();
+    const news = isNewsBlackout(new Date(), calendarEvents);
     if (news.blocked) { await log("info", "signalEngine", `${symbol}: ${news.reason}`); return null; }
 
     const pairCheck = await isPairEnabled(symbol);

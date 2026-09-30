@@ -277,40 +277,49 @@ function isPairActiveInSession(symbol, session) {
   return (PAIR_SESSIONS[symbol] || ["LONDON_OPEN","NY_OPEN"]).includes(session);
 }
 
-function isNewsBlackout(atDate) {
-  // FIX: buffer widened from 15 to 30 minutes per explicit spec - block
-  // new trades 30 minutes before a scheduled release, resume 30 minutes
-  // after, not the entire day. FOMC's wider window (17.5-20.0, 2.5hrs) and
-  // the Friday pre-weekend rule are left unchanged - those are different,
-  // intentional design choices (FOMC press conferences genuinely cause
-  // extended volatility for hours, pre-weekend is a separate category
-  // entirely), not the ±30min pattern being fixed here.
+function isNewsBlackout(atDate, calendarEvents) {
+  // FIX: this used to be a hardcoded table of recurring day-of-week/
+  // time-of-day windows guessing "Tuesday/Wednesday ~12:30 UTC = US CPI"
+  // etc, regardless of whether that event was actually scheduled that
+  // week. Confirmed live: it blocked ordinary Tuesdays with nothing on
+  // the real calendar as "US CPI" / "US data 12:30 UTC" - a false
+  // positive nearly every single week, which was quietly suppressing
+  // signal generation far more than any real news event would.
   //
-  // SEPARATE, LARGER ISSUE (not fixed by this change, worth knowing): this
-  // checks recurring day-of-week/time-of-day windows, not an actual
-  // economic calendar - it blocks every Tuesday/Wednesday ~12:30 UTC
-  // year-round as "US CPI" regardless of whether CPI is actually
-  // scheduled that week. Confirmed live: this blocked Sept 8 as CPI when
-  // the real August CPI release was Sept 11. Narrowing the window (this
-  // fix) does not fix which DAYS get blocked - that needs a real calendar
-  // feed, a separate, larger piece of work.
+  // Now: when a real calendarEvents array is supplied (populated from
+  // economicCalendar.js, which fetches the actual weekly high-impact
+  // schedule), block only ±30 minutes around each REAL scheduled event -
+  // ±2.5 hours for anything whose title mentions a rate decision/FOMC/
+  // press conference, since those genuinely cause extended volatility.
+  // signalCore.js stays pure (no fetch here) - signalEngine.js fetches
+  // the calendar once per cycle and passes it in.
+  //
+  // When calendarEvents is NOT supplied (e.g. backtest.js, which has no
+  // historical calendar source available), this returns not-blocked
+  // rather than falling back to the old fake pattern table - a table
+  // that was wrong often enough to do more harm than good. Backtests
+  // currently do not simulate news avoidance; see economicCalendar.js
+  // for the full reasoning.
   const now = atDate || new Date();
-  const u = now.getUTCHours() + now.getUTCMinutes() / 60;
-  const d = now.getUTCDay();
-  const B=0.5;
-  if (d===5 && u>=(12.5-B) && u<(12.5+B)) return { blocked:true, reason:"NFP (US Jobs)" };
-  if ((d===2||d===3) && u>=(12.5-B) && u<(12.5+B)) return { blocked:true, reason:"US CPI" };
-  if (d===3 && u>=(18.0-0.5) && u<(18.0+0.5)) return { blocked:true, reason:"FOMC rate decision" };
-  if (d===3 && u>=17.5 && u<20.0) return { blocked:true, reason:"FOMC window" };
-  if ((d===2||d===4) && u>=(12.5-B) && u<(12.5+B)) return { blocked:true, reason:"US data 12:30 UTC" };
-  if (d===4 && u>=(12.25-B) && u<13.5) return { blocked:true, reason:"ECB decision+presser" };
-  if (d===4 && u>=(12.0-B) && u<(12.0+B)) return { blocked:true, reason:"BOE rate decision" };
-  if (d===3 && u>=(7.0-B) && u<(7.0+B)) return { blocked:true, reason:"UK CPI" };
-  if ((d===4||d===5) && u>=(3.0-B) && u<(3.0+B)) return { blocked:true, reason:"BOJ rate decision" };
-  if (d===2 && u>=(3.5-B) && u<(3.5+B)) return { blocked:true, reason:"RBA rate decision" };
-  if ((d===4||d===5) && u>=(12.5-B) && u<(12.5+B)) return { blocked:true, reason:"US GDP/major data" };
-  if (d===5 && u>=20.0) return { blocked:true, reason:"Pre-weekend" };
-  return { blocked:false };
+
+  if (!Array.isArray(calendarEvents)) {
+    return { blocked: false };
+  }
+
+  const nowMs = now.getTime();
+  const STANDARD_BUFFER_MS = 30 * 60 * 1000;       // ±30 min for ordinary data releases
+  const CENTRAL_BANK_BUFFER_MS = 150 * 60 * 1000;  // ±2.5 hrs for rate decisions/press conferences
+
+  for (const ev of calendarEvents) {
+    if (!ev || typeof ev.timestamp !== "number") continue;
+    const isCentralBank = /rate decision|fomc|press conference|interest rate/i.test(ev.title || "");
+    const buffer = isCentralBank ? CENTRAL_BANK_BUFFER_MS : STANDARD_BUFFER_MS;
+    if (Math.abs(nowMs - ev.timestamp) < buffer) {
+      return { blocked: true, reason: `${ev.country} ${ev.title}` };
+    }
+  }
+
+  return { blocked: false };
 }
 
 // ── Duplicate Prevention ──────────────────────────────────────────────────────
