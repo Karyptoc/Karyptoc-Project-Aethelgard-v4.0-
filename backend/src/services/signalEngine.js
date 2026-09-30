@@ -259,26 +259,48 @@ JSON response:
     "htf_aligned":true|false,
     "entry_model_quality":"A+"|"A"|"B"|"C"|"no_setup"
   },
-  "entry_logic": "describe sweep level, MSS level, FVG/OB being retested with specific prices",
-  "sl_reasoning": "structural SL using swept level or ATR — give specific price",
+  "entry_logic": "ONE sentence max, ~15 words, specific prices only — no filler",
+  "sl_reasoning": "ONE sentence max, ~15 words, specific price only",
   "stop_loss_pips": number,
   "reward_risk_ratio": number,
-  "tp1_logic": "first target: EQH/EQL or session level with specific price",
-  "tp2_logic": "second target: opposite session extreme",
+  "tp1_logic": "ONE short phrase with specific price, ~10 words",
+  "tp2_logic": "ONE short phrase with specific price, ~10 words",
   "sentiment_score": -1.0 to 1.0,
-  "rationale": "2-3 sentences: sweep context + HTF + session quality + expected move",
-  "invalidation": "specific price level that invalidates the setup",
+  "rationale": "MAX 2 short sentences, ~30 words total — sweep+HTF+session, no repetition of the above fields",
+  "invalidation": "ONE specific price level, no explanation, ~8 words",
   "timeframe_primary": "H4",
   "position_size_modifier": 0.5-1.5
-}`;
+}
+Keep every string field terse and specific — prices and levels, not prose. Do not repeat the same information across multiple fields.`;
 
   try {
     const resp = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 1100,
+      // FIX: was 1100. The schema above has ~9 free-text fields plus
+      // structural JSON overhead - 1100 was frequently too tight, so
+      // Claude ran out of budget mid-field and the response got cut off
+      // before the closing brace. That's what "Unterminated string in
+      // JSON" actually was: a truncated response, not malformed JSON -
+      // confirmed by the error consistently landing near the END of the
+      // schema (line 25, the last couple fields). Every one of those
+      // calls was billed in full (input + ~1100 output tokens) for a
+      // signal that got thrown away and logged as HOLD/no-setup - this
+      // was likely the single largest source of the $10/3-day HYBRID
+      // cost, well above the ~$1.50/day design target. Raised to 2000
+      // for headroom, AND the prompt above now caps each field's length
+      // explicitly so successful calls also use fewer output tokens on
+      // average, not just fewer failures.
+      max_tokens: 2000,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }]
     });
+    const stopReason = resp.stop_reason;
+    if (stopReason === "max_tokens") {
+      // Belt-and-suspenders: even with the higher budget and terser
+      // prompt, log loudly if truncation ever happens again so this
+      // doesn't silently regress into a cost leak a second time.
+      await log("warning", "signalEngine", `${symbol}: Claude response hit max_tokens (${resp.usage?.output_tokens} output tokens) — likely truncated`);
+    }
     return JSON.parse(resp.content[0].text.trim().replace(/```json|```/g,"").trim());
   } catch (e) {
     await log("error", "signalEngine", `Claude failed for ${symbol}: ${e.message}`);
