@@ -245,63 +245,105 @@ DATA: ${JSON.stringify(multiTFData, null, 2)}
 ATR_INFO: current=${atrInfo?.current?.toFixed(5)}, historical=${atrInfo?.historical?.toFixed(5)}, ratio=${atrInfo?.ratio}
 ${perf ? `PERFORMANCE: WR ${perf.win_rate}% | ${perf.on_losing_streak ? "⚠️ LOSING STREAK — be conservative" : "Normal"}` : ""}
 
-JSON response:
-{
-  "symbol": "${symbol}",
-  "direction": "BUY"|"SELL"|"HOLD",
-  "confidence": 0.0-1.0,
-  "regime": "TRENDING_BULL"|"TRENDING_BEAR"|"RANGING"|"HIGH_VOLATILITY"|"BREAKOUT",
-  "regime_detail": {"description":"brief","strength":0.0-1.0,"timeframe_alignment":"aligned"|"mixed"|"conflicted"},
-  "smc_context": {
-    "structure":"bullish"|"bearish"|"consolidating",
-    "ict_sequence_quality":"full"|"partial"|"none",
-    "liquidity_target":"describe nearest EQH/EQL or session level",
-    "htf_aligned":true|false,
-    "entry_model_quality":"A+"|"A"|"B"|"C"|"no_setup"
-  },
-  "entry_logic": "ONE sentence max, ~15 words, specific prices only — no filler",
-  "sl_reasoning": "ONE sentence max, ~15 words, specific price only",
-  "stop_loss_pips": number,
-  "reward_risk_ratio": number,
-  "tp1_logic": "ONE short phrase with specific price, ~10 words",
-  "tp2_logic": "ONE short phrase with specific price, ~10 words",
-  "sentiment_score": -1.0 to 1.0,
-  "rationale": "MAX 2 short sentences, ~30 words total — sweep+HTF+session, no repetition of the above fields",
-  "invalidation": "ONE specific price level, no explanation, ~8 words",
-  "timeframe_primary": "H4",
-  "position_size_modifier": 0.5-1.5
-}
-Keep every string field terse and specific — prices and levels, not prose. Do not repeat the same information across multiple fields.`;
+Call submit_ict_analysis with your analysis. Keep every text field terse and
+specific — prices and levels, not prose. Do not repeat the same information
+across multiple fields.`;
+
+  // FIX: the previous approach asked Claude to hand-write a JSON object as
+  // plain text, then ran JSON.parse() on it. That failed constantly with
+  // "Unterminated string in JSON" — and NOT from hitting max_tokens (a
+  // truncation would log the "hit max_tokens" warning below; that warning
+  // was never observed firing alongside these failures in production logs,
+  // confirming stop_reason was "end_turn", i.e. Claude finished normally).
+  // The real cause: free-text JSON is fragile - a single unescaped quote
+  // or stray newline inside any of the ~9 prose fields (entry_logic,
+  // rationale, etc) breaks JSON.parse, and there's no way to fully
+  // prevent a model from ever doing that via prompt wording alone. Every
+  // one of those failed calls was still billed in full for zero usable
+  // output - the actual driver of the $10/3-day HYBRID cost, well above
+  // the ~$1.50/day design target, since it was happening on a large
+  // fraction of AI-qualified signals, not an edge case.
+  //
+  // Real fix: forced tool-use. The API enforces the schema server-side
+  // and returns already-parsed structured data in a tool_use block - no
+  // JSON.parse, no code-fence stripping, no way for prose content to
+  // produce invalid syntax, because it was never serialized as text in
+  // the first place.
+  const analysisTool = {
+    name: "submit_ict_analysis",
+    description: "Submit the structured ICT/SMC signal analysis for this symbol.",
+    input_schema: {
+      type: "object",
+      properties: {
+        direction: { type: "string", enum: ["BUY", "SELL", "HOLD"] },
+        confidence: { type: "number", minimum: 0, maximum: 1 },
+        regime: { type: "string", enum: ["TRENDING_BULL", "TRENDING_BEAR", "RANGING", "HIGH_VOLATILITY", "BREAKOUT"] },
+        regime_detail: {
+          type: "object",
+          properties: {
+            description: { type: "string" },
+            strength: { type: "number", minimum: 0, maximum: 1 },
+            timeframe_alignment: { type: "string", enum: ["aligned", "mixed", "conflicted"] }
+          },
+          required: ["description", "strength", "timeframe_alignment"]
+        },
+        smc_context: {
+          type: "object",
+          properties: {
+            structure: { type: "string", enum: ["bullish", "bearish", "consolidating"] },
+            ict_sequence_quality: { type: "string", enum: ["full", "partial", "none"] },
+            liquidity_target: { type: "string", description: "Nearest EQH/EQL or session level, terse" },
+            htf_aligned: { type: "boolean" },
+            entry_model_quality: { type: "string", enum: ["A+", "A", "B", "C", "no_setup"] }
+          },
+          required: ["structure", "ict_sequence_quality", "liquidity_target", "htf_aligned", "entry_model_quality"]
+        },
+        entry_logic: { type: "string", description: "ONE sentence max, ~15 words, specific prices only — no filler" },
+        sl_reasoning: { type: "string", description: "ONE sentence max, ~15 words, specific price only" },
+        stop_loss_pips: { type: "number" },
+        reward_risk_ratio: { type: "number" },
+        tp1_logic: { type: "string", description: "ONE short phrase with specific price, ~10 words" },
+        tp2_logic: { type: "string", description: "ONE short phrase with specific price, ~10 words" },
+        sentiment_score: { type: "number", minimum: -1, maximum: 1 },
+        rationale: { type: "string", description: "MAX 2 short sentences, ~30 words total — sweep+HTF+session, no repetition of other fields" },
+        invalidation: { type: "string", description: "ONE specific price level, no explanation, ~8 words" },
+        timeframe_primary: { type: "string" },
+        position_size_modifier: { type: "number", minimum: 0.5, maximum: 1.5 }
+      },
+      required: [
+        "direction", "confidence", "regime", "regime_detail", "smc_context",
+        "entry_logic", "sl_reasoning", "stop_loss_pips", "reward_risk_ratio",
+        "tp1_logic", "tp2_logic", "sentiment_score", "rationale",
+        "invalidation", "timeframe_primary", "position_size_modifier"
+      ]
+    }
+  };
 
   try {
     const resp = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      // FIX: was 1100. The schema above has ~9 free-text fields plus
-      // structural JSON overhead - 1100 was frequently too tight, so
-      // Claude ran out of budget mid-field and the response got cut off
-      // before the closing brace. That's what "Unterminated string in
-      // JSON" actually was: a truncated response, not malformed JSON -
-      // confirmed by the error consistently landing near the END of the
-      // schema (line 25, the last couple fields). Every one of those
-      // calls was billed in full (input + ~1100 output tokens) for a
-      // signal that got thrown away and logged as HOLD/no-setup - this
-      // was likely the single largest source of the $10/3-day HYBRID
-      // cost, well above the ~$1.50/day design target. Raised to 2000
-      // for headroom, AND the prompt above now caps each field's length
-      // explicitly so successful calls also use fewer output tokens on
-      // average, not just fewer failures.
       max_tokens: 2000,
       system: systemPrompt,
-      messages: [{ role: "user", content: userPrompt }]
+      messages: [{ role: "user", content: userPrompt }],
+      tools: [analysisTool],
+      tool_choice: { type: "tool", name: "submit_ict_analysis" }
     });
     const stopReason = resp.stop_reason;
     if (stopReason === "max_tokens") {
-      // Belt-and-suspenders: even with the higher budget and terser
-      // prompt, log loudly if truncation ever happens again so this
-      // doesn't silently regress into a cost leak a second time.
+      // Kept as a safety net: forced tool-use makes structural truncation
+      // far less likely (the API streams structured fields, not free
+      // prose), but if it ever happens, log it loudly rather than let it
+      // silently become a cost leak again.
       await log("warning", "signalEngine", `${symbol}: Claude response hit max_tokens (${resp.usage?.output_tokens} output tokens) — likely truncated`);
     }
-    return JSON.parse(resp.content[0].text.trim().replace(/```json|```/g,"").trim());
+    const toolUse = resp.content.find(b => b.type === "tool_use" && b.name === "submit_ict_analysis");
+    if (!toolUse) {
+      await log("error", "signalEngine", `${symbol}: Claude did not return the expected tool_use block (stop_reason: ${stopReason})`);
+      return null;
+    }
+    // toolUse.input is already a parsed, schema-validated object - no
+    // JSON.parse, nothing to break.
+    return { symbol, ...toolUse.input };
   } catch (e) {
     await log("error", "signalEngine", `Claude failed for ${symbol}: ${e.message}`);
     return null;
