@@ -51,7 +51,7 @@ export default function PairControls() {
   const resumePair = async (symbol) => {
     setActing(symbol);
     try {
-      await api.put(`/api/pairs/controls/${symbol}`, { enabled: true, auto_halted: false, auto_halt_reason: null });
+      await api.put(`/api/pairs/controls/${symbol}`, { enabled: true, auto_halted: false, auto_halt_reason: null, auto_halted_at: null });
       showToast(`✅ ${symbol} resumed`);
     } catch (e) {
       showToast("❌ " + (e.response?.data?.error || e.message));
@@ -118,11 +118,27 @@ export default function PairControls() {
           ))}
         </div>
 
-        {haltedCount > 0 && (
-          <div className="alert alert-warn" style={{ marginBottom: 16, fontSize: 13 }}>
-            ⚠️ <strong>{haltedCount} pair{haltedCount > 1 ? "s" : ""} halted.</strong> EURUSD halted due to 0% win rate and -$11.64 cumulative loss. Re-enable only after diagnosing the root cause.
-          </div>
-        )}
+        {haltedCount > 0 && (() => {
+          // FIX: this banner used to hardcode one pair's name and stale
+          // numbers ("EURUSD halted due to 0% win rate and -$11.64") no
+          // matter which pairs were actually halted or why — a GOLD
+          // auto-halt from a real daily-loss trip would still show the
+          // old EURUSD sentence. Now it lists the actual halted pairs and
+          // each one's real reason straight from pair_controls.
+          const halted = pairs.filter(p => !p.enabled || p.auto_halted);
+          return (
+            <div className="alert alert-warn" style={{ marginBottom: 16, fontSize: 13 }}>
+              ⚠️ <strong>{haltedCount} pair{haltedCount > 1 ? "s" : ""} halted:</strong>{" "}
+              {halted.map((p, i) => (
+                <span key={p.symbol}>
+                  {i > 0 && ", "}
+                  <strong>{p.symbol}</strong> ({p.auto_halted ? (p.auto_halt_reason || "auto-halted") : "manually halted"})
+                </span>
+              ))}
+              . Re-enable only after diagnosing the root cause.
+            </div>
+          );
+        })()}
 
         <div className="card">
           <div className="table-wrap">

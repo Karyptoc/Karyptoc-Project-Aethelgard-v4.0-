@@ -297,16 +297,45 @@ async function isPairEnabled(symbol) {
   try {
     const { data } = await supabaseAdmin
       .from("pair_controls")
-      .select("enabled, auto_halted, auto_halt_reason, max_daily_loss_usd, max_trades_per_day")
+      .select("enabled, auto_halted, auto_halt_reason, auto_halted_at, max_daily_loss_usd, max_trades_per_day")
       .eq("symbol", symbol)
       .single();
 
     if (!data) return { allowed: true };
     if (!data.enabled) return { allowed: false, reason: `${symbol} manually halted` };
-    if (data.auto_halted) return { allowed: false, reason: `${symbol} auto-halted: ${data.auto_halt_reason}` };
 
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
+
+    // ── Fix: auto-halt never expired ───────────────────────────────────────
+    // BUG WAS: once a pair hit its daily loss limit, auto_halted was set to
+    // true and NOTHING ever cleared it — not at midnight, not on a new UTC
+    // day, never. A pair that breached its limit once stayed dead forever
+    // until a human opened Pair Controls and clicked "Resume". For a system
+    // sold as autonomous, that means every bad day permanently removes a
+    // pair unless someone is watching the dashboard — confirmed live today:
+    // GOLD auto-halted this morning (-$58.35 > $50 limit) and was still
+    // halted hours later with a brand new UTC day already under way.
+    // Fix: if the halt was recorded before today started, clear it and let
+    // the pair trade again — it will auto-halt again today if it re-breaches
+    // the same limit today. auto_halted_at is stamped the moment the halt is
+    // set (see below) so this never depends on an unrelated settings edit
+    // bumping updated_at and silently "resetting the clock".
+    if (data.auto_halted) {
+      const haltedAt = data.auto_halted_at ? new Date(data.auto_halted_at) : null;
+      if (haltedAt && haltedAt < todayStart) {
+        await supabaseAdmin.from("pair_controls").update({
+          auto_halted: false,
+          auto_halt_reason: null,
+          auto_halted_at: null,
+          updated_at: new Date().toISOString()
+        }).eq("symbol", symbol);
+        await log("info", "riskEngine", `${symbol}: auto-halt cleared — new trading day`);
+        data.auto_halted = false;
+      } else {
+        return { allowed: false, reason: `${symbol} auto-halted: ${data.auto_halt_reason}` };
+      }
+    }
 
     // ── Fix 1: Max trades per day — count ALL trades (open + closed) opened today
     // BUG WAS: check was nested inside "if (closedTrades.length)" so it was skipped
@@ -329,10 +358,12 @@ async function isPairEnabled(symbol) {
       const dailyPnL = closedTodayTrades.reduce((s, t) => s + (t.profit || 0), 0);
       const maxLoss = data.max_daily_loss_usd || 10;
       if (dailyPnL <= -maxLoss) {
+        const haltedNow = new Date().toISOString();
         await supabaseAdmin.from("pair_controls").update({
           auto_halted: true,
           auto_halt_reason: `Daily loss $${Math.abs(dailyPnL).toFixed(2)} exceeded limit $${maxLoss}`,
-          updated_at: new Date().toISOString()
+          auto_halted_at: haltedNow,
+          updated_at: haltedNow
         }).eq("symbol", symbol);
         await log("warning", "riskEngine", `${symbol} auto-halted: daily loss $${Math.abs(dailyPnL).toFixed(2)}`);
         return { allowed: false, reason: `${symbol} daily loss limit reached` };
