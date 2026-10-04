@@ -185,6 +185,57 @@ async function hasRecentSignal(symbol, minutes = 3) {
 
 // ── Technical Analysis ────────────────────────────────────────────────────────
 
+// NEW (Oct 4 — Roadmap Phase 2, "compress the Claude prompt payload"):
+// builds a Claude-facing copy of multiTFData instead of JSON.stringify-ing
+// the raw object directly. Two concrete, provable wastes this removes —
+// not a guess at "probably redundant," confirmed by tracing where each
+// piece of data is actually consumed:
+//
+//   1. multiTFData.USDCHF — up to 60 raw OHLC bars plus ISO timestamps —
+//      is added purely so getDXYConflict() can run its server-side check
+//      AFTER analyzeWithClaude() returns (see the call order: line ~745
+//      runs strictly after the analyzeWithClaude() calls at ~716/725).
+//      Claude's system/user prompt text never mentions USDCHF or DXY
+//      anywhere. Every DXY-sensitive pair (most USD majors) was paying to
+//      ship and have Claude read ~60 bars it had no instructions to use
+//      and that had zero effect on the analysis.
+//   2. JSON.stringify(data, null, 2) pretty-prints the whole blob with
+//      2-space indentation. Every indent/newline is a token billed to the
+//      request with no meaning to a model — only to a human reading it in
+//      an editor, which nothing downstream of this does.
+//
+// Also drops `idx` (a bars-array index — meaningless once outside that
+// array) and `trendReason` (a short fixed phrase like "higher highs +
+// lower lows" that only restates `trendState`/`trend`, already surfaced in
+// the system prompt's own "TREND STATE" line — the user prompt explicitly
+// tells Claude not to repeat information across its OWN output fields;
+// the same discipline applies to what we hand it as input). Rounds every
+// price-derived number to 5 decimals so arithmetic artifacts like
+// 1900.12340000000002 aren't shipped as 17-character tokens for a value
+// that means 1900.1234.
+function buildCompactPromptData(multiTFData) {
+  const round5 = (n) => (typeof n === "number" ? parseFloat(n.toFixed(5)) : n);
+  const trimZone = (z) => ({ type: z.type, high: round5(z.high), low: round5(z.low), size: round5(z.size) });
+
+  const compact = {};
+  for (const [tf, data] of Object.entries(multiTFData || {})) {
+    if (tf === "USDCHF") continue; // DXY proxy — server-side only, see comment above
+    const ind = data?.indicators;
+    if (!ind) continue; // defensive: skip any non-indicator entry (e.g. a future bars-only addition)
+    compact[tf] = {
+      latest_close: round5(data.latest_close),
+      currentPrice: round5(ind.currentPrice),
+      ema20: ind.ema20, ema50: ind.ema50, rsi14: ind.rsi14,
+      atr14: ind.atr14, atr_ratio: ind.atr_ratio,
+      bos: ind.bos, choch: ind.choch, trend: ind.trend, trendState: ind.trendState,
+      obs: (ind.obs || []).map(trimZone),
+      fvgs: (ind.fvgs || []).map(trimZone),
+      recentHigh: round5(ind.recentHigh), recentLow: round5(ind.recentLow),
+    };
+  }
+  return compact;
+}
+
 async function analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, trendState) {
   const isCross  = ["GBPJPY","EURJPY"].includes(symbol);
   const isCrypto = symbol === "BTCUSD";
@@ -242,7 +293,7 @@ TRADING RULES:
 Respond in JSON only.`;
 
   const userPrompt = `Analyze ${symbol} for ICT execution signal.
-DATA: ${JSON.stringify(multiTFData, null, 2)}
+DATA: ${JSON.stringify(buildCompactPromptData(multiTFData))}
 ATR_INFO: current=${atrInfo?.current?.toFixed(5)}, historical=${atrInfo?.historical?.toFixed(5)}, ratio=${atrInfo?.ratio}
 ${perf ? `PERFORMANCE: WR ${perf.win_rate}% | ${perf.on_losing_streak ? "⚠️ LOSING STREAK — be conservative" : "Normal"}` : ""}
 
