@@ -13,6 +13,7 @@ const crypto = require("crypto");
 const { supabaseAdmin, log } = require("../services/supabase");
 const { verifyToken } = require("../middleware/auth");
 const { encryptSecret, decryptSecret } = require("../services/crypto");
+const { checkClientRiskCircuitBreaker } = require("../services/clientRiskEngine");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -417,22 +418,36 @@ router.post("/bridge/lot-sizes", verifyBridgeSecret, async (req, res) => {
 
     const { data: clients } = await supabaseAdmin
       .from("client_accounts")
-      .select("id, name, balance, risk_percent, lot_multiplier, mt5_login, mt5_password, mt5_server")
+      .select("id, name, status, copy_enabled, balance, equity, starting_balance, risk_percent, lot_multiplier, mt5_login, mt5_password, mt5_server")
       .eq("status", "active")
       .eq("copy_enabled", true)
       .eq("is_connected", true)
       .eq("connection_type", "credentials");
 
-    const lotSizes = (clients || []).map(client => ({
-      client_id: client.id,
-      client_name: client.name,
-      mt5_login: client.mt5_login,
-      // FIX: decrypt here — this is bridge-secret-protected and the
-      // bridge needs the real password to place the copy trade.
-      mt5_password: decryptSecret(client.mt5_password),
-      mt5_server: client.mt5_server,
-      lot_size: calculateClientLot(master_lot, client.balance, master_balance, client.risk_percent, 1.0),
-    }));
+    // NEW (Oct 4 — Roadmap Phase 2, "per-client risk circuit breakers"):
+    // this used to hand every matching client straight to the bridge with
+    // no risk check of its own — a client deep in a bad day got the same
+    // next trade as a client having a great one. checkClientRiskCircuitBreaker
+    // (clientRiskEngine.js) gates on that client's own daily loss %, trade
+    // count, and losing streak before they're included below.
+    const lotSizes = [];
+    for (const client of (clients || [])) {
+      const riskCheck = await checkClientRiskCircuitBreaker(client);
+      if (!riskCheck.allowed) {
+        await log("info", "copyTrading", `${client.name} (${client.id.slice(0,8)}): skipping copy — ${riskCheck.reason}`);
+        continue;
+      }
+      lotSizes.push({
+        client_id: client.id,
+        client_name: client.name,
+        mt5_login: client.mt5_login,
+        // FIX: decrypt here — this is bridge-secret-protected and the
+        // bridge needs the real password to place the copy trade.
+        mt5_password: decryptSecret(client.mt5_password),
+        mt5_server: client.mt5_server,
+        lot_size: calculateClientLot(master_lot, client.balance, master_balance, client.risk_percent, 1.0),
+      });
+    }
 
     res.json({ lot_sizes: lotSizes });
   } catch (e) { res.status(500).json({ error: e.message }); }
