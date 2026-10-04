@@ -53,12 +53,35 @@ connected_accounts = {}
 # looked up in MT5's own history before reporting it as closed.
 _previously_open_tickets = {}  # account_id -> set of tickets
 
+# NEW (Roadmap Phase 4, TP/SL-hit notifier): MT5's deal.reason field tells us
+# WHY a position closed - something nothing in this pipeline tracked before.
+# MT5 ENUM_DEAL_REASON values (per the MetaTrader5 Python API):
+#   0 DEAL_REASON_CLIENT  - manual close, desktop terminal
+#   1 DEAL_REASON_MOBILE  - manual close, mobile app
+#   2 DEAL_REASON_WEB     - manual close, web terminal
+#   3 DEAL_REASON_EXPERT  - closed by an EA/API call (this bridge's own closes)
+#   4 DEAL_REASON_SL      - stop loss hit
+#   5 DEAL_REASON_TP      - take profit hit
+#   6 DEAL_REASON_SO      - margin stop-out (broker force-close)
+# 0/1/2/3 all collapse to "manual" here - what matters for the notifier is
+# tp vs sl vs stop_out vs "something else closed it", not which UI did it.
+DEAL_REASON_LABELS = {4: "sl", 5: "tp", 6: "stop_out"}
+
+def close_reason_from_deals(close_deals):
+    if not close_deals:
+        return "unknown"
+    reason = getattr(close_deals[-1], "reason", None)
+    return DEAL_REASON_LABELS.get(reason, "manual")
+
 def get_real_closed_profit(ticket):
     """
     Query MT5's actual deal history for a position that just closed, to get
     the TRUE final realized profit/swap/commission - not a stale floating
     snapshot. A position can have multiple deals (partial closes, trailing
     adjustments); sums every deal tied to this position for the true total.
+    Also classifies WHY it closed (tp/sl/stop_out/manual/unknown) via
+    close_reason_from_deals(), so the backend can notify differently for a
+    TP hit vs an SL hit instead of treating every close the same way.
     """
     try:
         deals = mt5.history_deals_get(position=ticket)
@@ -79,6 +102,7 @@ def get_real_closed_profit(ticket):
             "commission": round(total_commission, 2),
             "close_price": close_price,
             "close_time": close_time,
+            "close_reason": close_reason_from_deals(close_deals),
         }
     except Exception as e:
         log.error(f"get_real_closed_profit #{ticket}: {e}")

@@ -16,6 +16,32 @@ const signalEngine = require("../services/signalEngine");
 // names) that checkCorrelation was specifically built to catch. Now wired
 // into the same per-account gate sequence as checkCircuitBreaker, below.
 const { checkCircuitBreaker, calculatePositionSize, checkCorrelation, checkCurrencyExposure, getEquityCurveMultiplier, checkConsecutiveLossProtection } = require("../services/riskEngine");
+const { sendTelegramMessage, isConfigured: isTelegramConfigured } = require("../services/telegram");
+
+// NEW (Roadmap Phase 4, TP/SL-hit notifier): fire-and-forget Telegram alert
+// when a trade closes with a known reason. Mirrors the exact pattern
+// signalEngine.js already uses for new-signal alerts (best-effort,
+// sendTelegramMessage() never throws, a failed/absent config must never
+// block or roll back the trade-close update it's reporting on).
+async function notifyTradeClose(trade, closeReason) {
+  if (closeReason !== "tp" && closeReason !== "sl") return; // stop_out/manual/unknown: no alert
+  try {
+    if (!(await isTelegramConfigured())) return;
+    const label = closeReason === "tp" ? "🎯 TAKE PROFIT HIT" : "🛑 STOP LOSS HIT";
+    const profit = typeof trade.profit === "number" ? trade.profit : null;
+    const msg =
+      `${label}\n` +
+      `${trade.direction} ${trade.symbol}  (ticket #${trade.ticket})\n` +
+      `Entry: ${trade.open_price}  |  Close: ${trade.close_price ?? "—"}\n` +
+      (profit !== null ? `P&L: ${profit >= 0 ? "+" : ""}${profit.toFixed(2)}\n` : "");
+    const tgResult = await sendTelegramMessage(msg);
+    if (!tgResult.ok) {
+      await log("warning", "bridge", `Trade #${trade.ticket} close alert not sent — ${tgResult.error}`);
+    }
+  } catch (tgErr) {
+    await log("warning", "bridge", `Trade #${trade.ticket} close alert threw unexpectedly — ${tgErr.message}`);
+  }
+}
 
 function verifyBridgeSecret(req, res, next) {
   const secret = req.headers["x-bridge-secret"];
@@ -165,13 +191,17 @@ router.post("/sync", async (req, res) => {
       // from being recorded at all.
       const closedMap = Object.fromEntries((closed_positions || []).map(c => [c.ticket, c]));
       const activeTickets = positions.map(p => p.ticket);
-      const { data: openTrades } = await supabaseAdmin.from("trades").select("id, ticket")
+      const { data: openTrades } = await supabaseAdmin.from("trades").select("id, ticket, direction, symbol, open_price")
         .eq("account_id", account_id).eq("status", "open");
       if (openTrades) {
         for (const trade of openTrades) {
           if (!activeTickets.includes(trade.ticket)) {
             const real = closedMap[trade.ticket];
             if (real) {
+              // NEW (Roadmap Phase 4): close_reason comes from bridge.py's
+              // get_real_closed_profit(), which now reads MT5's deal.reason -
+              // "unknown" only if real data existed but somehow lacked it.
+              const closeReason = real.close_reason || "unknown";
               await supabaseAdmin.from("trades").update({
                 status: "closed",
                 close_time: real.close_time || new Date().toISOString(),
@@ -179,12 +209,14 @@ router.post("/sync", async (req, res) => {
                 profit: real.profit,
                 swap: real.swap,
                 commission: real.commission,
+                close_reason: closeReason,
               }).eq("id", trade.id);
+              await notifyTradeClose({ ...trade, close_price: real.close_price, profit: real.profit }, closeReason);
             } else {
               await log("warning", "bridge",
                 `Ticket ${trade.ticket} closed but no real MT5 profit data received - profit may be stale`);
               await supabaseAdmin.from("trades").update({
-                status: "closed", close_time: new Date().toISOString()
+                status: "closed", close_time: new Date().toISOString(), close_reason: "unknown"
               }).eq("id", trade.id);
             }
           }
@@ -192,7 +224,7 @@ router.post("/sync", async (req, res) => {
       }
     } else {
       await supabaseAdmin.from("trades").update({
-        status: "closed", close_time: new Date().toISOString()
+        status: "closed", close_time: new Date().toISOString(), close_reason: "unknown"
       }).eq("account_id", account_id).eq("status", "open");
     }
 
