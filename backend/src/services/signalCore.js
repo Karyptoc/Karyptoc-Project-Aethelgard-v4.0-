@@ -1128,7 +1128,7 @@ function makeScalpDecision(symbol, m5Bars, m5Atr, session, htfBias) {
  * UPGRADED Confluence Scoring — incorporates ICT sequence quality
  * Now rewards: sweep detection, displacement, retest, EQH/EQL, strength engine
  */
-function scoreConfluence(ind, session, htfBias, isPairActive, ictSequence) {
+function scoreConfluence(ind, session, htfBias, isPairActive, ictSequence, fundamentalBias = null) {
   let score = 0;
   const factors = [];
 
@@ -1186,6 +1186,30 @@ function scoreConfluence(ind, session, htfBias, isPairActive, ictSequence) {
 
   // Volatility spike penalty
   if (ind.atr_ratio >= 2.5) { score -= 15; factors.push(`⚠️ Volatility spike: ${ind.atr_ratio}x`); }
+
+  // NEW (Oct 4 — Roadmap Phase 2, "fundamental bias module"): modest,
+  // bounded credit/penalty from this week's released high-impact economic
+  // surprises (economicCalendar.js's getFundamentalBias()), same philosophy
+  // as the HTF bias credit above — it nudges the score, it never gates a
+  // trade outright. Live-only: backtest.js has no historical calendar feed
+  // (see economicCalendar.js's header comment) and never passes this
+  // argument, so fundamentalBias stays null there and this block is a
+  // complete no-op — identical to how isNewsBlackout already handles the
+  // same backtest limitation.
+  if (fundamentalBias && fundamentalBias.label !== "neutral") {
+    const alignedBuy  = ind.direction === "BUY"  && fundamentalBias.label === "bullish";
+    const alignedSell = ind.direction === "SELL" && fundamentalBias.label === "bearish";
+    if (alignedBuy || alignedSell) {
+      score += 6;
+      factors.push(`Fundamental: ${fundamentalBias.label} (${fundamentalBias.eventsUsed} event${fundamentalBias.eventsUsed === 1 ? "" : "s"})`);
+    } else {
+      // Conflicts with the technical direction — small penalty, same
+      // "surface the conflict, don't block on it alone" treatment as the
+      // volatility-spike penalty above.
+      score -= 4;
+      factors.push(`⚠️ Fundamental conflict: ${fundamentalBias.label}`);
+    }
+  }
 
   return {
     score: Math.min(Math.max(score, 0), 100), factors,

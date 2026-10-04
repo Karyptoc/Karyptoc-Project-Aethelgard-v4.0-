@@ -24,7 +24,7 @@ const { sendTelegramMessage, isConfigured: isTelegramConfigured } = require("./t
 // time table instead of a real calendar (see signalCore.js for the full
 // story). This fetches the actual weekly high-impact schedule (cached
 // 1hr) and hands real events into the now-real isNewsBlackout() check.
-const { getCalendarEvents } = require("./economicCalendar");
+const { getCalendarEvents, getFundamentalBias, getFundamentalBiasForSymbol } = require("./economicCalendar");
 const {
   calculateATRStopLoss,
   checkVolatilitySpike,
@@ -236,7 +236,7 @@ function buildCompactPromptData(multiTFData) {
   return compact;
 }
 
-async function analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, trendState) {
+async function analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, trendState, fundamentalBias = null) {
   const isCross  = ["GBPJPY","EURJPY"].includes(symbol);
   const isCrypto = symbol === "BTCUSD";
   const isIndex  = ["US30Cash","GER40Cash"].includes(symbol);
@@ -256,6 +256,7 @@ async function analyzeWithClaude(symbol, multiTFData, session, confluence, htfBi
 
 SESSION: ${session.name} | Entry Model: ${session.entryModel} | Quality: ${session.sessQuality}/3
 HTF BIAS: ${htfBias.bias.toUpperCase()} (${(htfBias.strength*100).toFixed(0)}%)
+FUNDAMENTAL BIAS: ${(fundamentalBias?.label || "neutral").toUpperCase()} — ${fundamentalBias?.detail || "No fundamental data"}
 TREND STATE (structural, this timeframe): ${trendState || "RANGING"} — treat a RANGING read as a caution against trend-continuation entries; a counter-trend continuation entry needs real reversal evidence (sweep/CHoCH), not just a good score.
 SMC SCORE: ${confluence.score}/100 (Grade ${confluence.grade})
 ATR RATIO: ${atrInfo?.ratio || 1.0}x normal ${atrInfo?.ratio >= 2.5 ? "⚠️ VOLATILITY SPIKE" : ""}
@@ -429,6 +430,12 @@ async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
     const calendarEvents = await getCalendarEvents();
     const news = isNewsBlackout(new Date(), calendarEvents);
     if (news.blocked) { await log("info", "signalEngine", `${symbol}: ${news.reason}`); return null; }
+
+    // NEW (Oct 4 — Roadmap Phase 2, "fundamental bias module"): fetched
+    // once per signal cycle, same pattern as calendarEvents just above —
+    // getFundamentalBias() internally reuses getCalendarEvents()'s own
+    // 1-hour cache, so this costs nothing extra on the feed itself.
+    const fundamentalBias = getFundamentalBiasForSymbol(symbol, await getFundamentalBias());
 
     const pairCheck = await isPairEnabled(symbol);
     if (!pairCheck.allowed) { await log("info", "signalEngine", `${symbol}: ${pairCheck.reason}`); return null; }
@@ -699,7 +706,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
 
     // Confluence scoring with ICT sequence
     primaryInd.direction = retestDirection;
-    const confluence = scoreConfluence(primaryInd, session, htfBias, isPairActive, ictSequence);
+    const confluence = scoreConfluence(primaryInd, session, htfBias, isPairActive, ictSequence, fundamentalBias);
 
     // Minimum tradeable threshold — significantly lowered per pair type
     // Full ICT sequence (sweep+displacement+retest) = lowest bar (35)
@@ -764,7 +771,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
       // Everything else decided by pure math
       if (confluence.score >= 65 || ictSequence.hasFullSequence) {
         await log("info", "signalEngine", `${symbol}: HYBRID mode — score ${confluence.score} qualifies for AI analysis`);
-        analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, primaryInd?.trendState);
+        analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, primaryInd?.trendState, fundamentalBias);
       } else {
         const pureMathInd = poiStructure ? { ...primaryInd, bos: poiStructure.bos, choch: poiStructure.choch } : primaryInd;
         analysis = makePureMathDecision(confluence, htfBias, ictSequence, pureMathInd, session);
@@ -773,7 +780,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
 
     } else {
       // AI mode — full Claude analysis (original behavior)
-      analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, primaryInd?.trendState);
+      analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, primaryInd?.trendState, fundamentalBias);
     }
 
     if (!analysis || analysis.direction === "HOLD") {
