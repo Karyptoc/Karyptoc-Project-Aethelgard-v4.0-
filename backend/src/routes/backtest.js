@@ -184,6 +184,154 @@ router.post("/run", verifyToken, async (req, res) => {
   }
 });
 
+// NEW (Oct 4 — Prioritized Improvement Roadmap, Phase 1 item 4): walk-forward
+// + out-of-sample testing. /run above is a single-pass replay over one
+// window — it cannot tell you whether a result (or a threshold/gate
+// comparison via min_score_override/disable_trend_gate) reflects a real,
+// time-consistent edge or just got lucky in one stretch of history. This
+// splits the requested period into several sequential, non-overlapping
+// windows, replays the SAME unmodified strategy independently in each
+// (each window starts fresh at initial_balance — deliberately not a single
+// compounding equity curve, so one strong window can't paper over a weak
+// one), and reserves the most recent `holdout_windows` windows as an
+// out-of-sample holdout that must not be used when comparing parameters —
+// decide on a threshold/gate change from the in-sample windows only, then
+// run this once more to see whether the untouched holdout agrees.
+router.post("/walk-forward", verifyToken, async (req, res) => {
+  try {
+    const {
+      symbol, days = 180, windows = 6, holdout_windows = 1,
+      initial_balance = 1000, risk_percent = 1.0,
+      min_score_override, disable_trend_gate
+    } = req.body;
+    if (!symbol) return res.status(400).json({ error: "symbol required" });
+    if (!Number.isInteger(windows) || windows < 2) {
+      return res.status(400).json({ error: "windows must be an integer >= 2 (at least one in-sample + one holdout window)" });
+    }
+    if (!Number.isInteger(holdout_windows) || holdout_windows < 1 || holdout_windows >= windows) {
+      return res.status(400).json({ error: "holdout_windows must be an integer >= 1 and < windows" });
+    }
+
+    const fromDate = new Date(Date.now() - (days + 120) * 24 * 60 * 60 * 1000).toISOString();
+    const [h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars] = await Promise.all([
+      fetchCachedBars(symbol, "H4", fromDate),
+      fetchCachedBars(symbol, "D1"),
+      fetchCachedBars(symbol, "W1"),
+      fetchCachedBars(symbol, "H1", fromDate),
+      fetchCachedBars(symbol, "M15", fromDate),
+      fetchCachedBars(symbol, "M5", fromDate),
+    ]);
+
+    if (h4Bars.length < 100) {
+      return res.status(400).json({ error: `Insufficient H4 data: need 100+ bars, got ${h4Bars.length} for ${symbol}.` });
+    }
+
+    // Equal-length, sequential, non-overlapping time windows covering
+    // [now - days, now], oldest first. The last `holdout_windows` of them
+    // are the out-of-sample holdout.
+    const now = Date.now();
+    const periodMs = days * 24 * 60 * 60 * 1000;
+    const windowMs = periodMs / windows;
+    const windowDefs = [];
+    for (let w = 0; w < windows; w++) {
+      windowDefs.push({
+        index: w,
+        windowStart: new Date(now - periodMs + w * windowMs),
+        windowEnd: new Date(now - periodMs + (w + 1) * windowMs),
+        isHoldout: w >= windows - holdout_windows,
+      });
+    }
+
+    const perWindow = windowDefs.map(wd => {
+      const r = runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, {
+        initialBalance: initial_balance,
+        riskPercent: risk_percent,
+        windowStart: wd.windowStart,
+        windowEnd: wd.windowEnd,
+        minScoreOverride: min_score_override,
+        disableTrendGate: !!disable_trend_gate,
+      });
+      return {
+        window: wd.index + 1,
+        is_holdout: wd.isHoldout,
+        period_start: wd.windowStart.toISOString(),
+        period_end: wd.windowEnd.toISOString(),
+        ...r.summary,
+      };
+    });
+
+    const inSample = perWindow.filter(r => !r.is_holdout);
+    const holdout = perWindow.filter(r => r.is_holdout);
+
+    const mean = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+    const stddev = (a) => {
+      if (a.length < 2) return null;
+      const m = mean(a);
+      return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / (a.length - 1));
+    };
+    const round = (x, d = 2) => x === null || x === undefined ? null : parseFloat(x.toFixed(d));
+
+    function aggregate(rows) {
+      const totalTrades = rows.reduce((s, r) => s + r.total_trades, 0);
+      const totalWins = rows.reduce((s, r) => s + r.winners, 0);
+      const grossProfit = rows.reduce((s, r) => s + r.gross_profit, 0);
+      const grossLoss = rows.reduce((s, r) => s + r.gross_loss, 0);
+      const pfs = rows.map(r => r.profit_factor).filter(x => x !== null && x !== undefined);
+      const pnls = rows.map(r => r.total_pnl);
+      return {
+        windows: rows.length,
+        total_trades: totalTrades,
+        win_rate: totalTrades > 0 ? round(totalWins / totalTrades * 100, 1) : 0,
+        profit_factor: grossLoss > 0 ? round(grossProfit / grossLoss) : null,
+        total_pnl: round(pnls.reduce((s, x) => s + x, 0)),
+        avg_window_pnl: round(mean(pnls)),
+        pnl_stddev: round(stddev(pnls)),
+        profitable_windows: rows.filter(r => r.total_pnl > 0).length,
+        losing_windows: rows.filter(r => r.total_pnl <= 0).length,
+        profit_factor_mean: pfs.length ? round(mean(pfs)) : null,
+        profit_factor_stddev: pfs.length > 1 ? round(stddev(pfs)) : null,
+        win_rate_stddev: round(stddev(rows.map(r => r.win_rate)), 1),
+      };
+    }
+
+    const inSampleAgg = aggregate(inSample);
+    const holdoutAgg = aggregate(holdout);
+
+    // Plain, non-magic observations — not a pass/fail verdict. Reading
+    // whether a strategy/gate choice actually generalizes is a judgment
+    // call for the person looking at the numbers; this just surfaces the
+    // two failure patterns walk-forward + holdout testing exists to catch.
+    const flags = [];
+    if (inSample.length && inSampleAgg.profitable_windows < inSample.length / 2) {
+      flags.push(`Only ${inSampleAgg.profitable_windows}/${inSample.length} in-sample windows were profitable — performance may be concentrated in one stretch rather than consistent.`);
+    }
+    if (inSampleAgg.total_trades > 0 && holdoutAgg.total_trades === 0) {
+      flags.push("Holdout window(s) produced zero trades — not enough holdout data yet to judge generalization.");
+    }
+    if (holdoutAgg.total_trades > 0 && inSampleAgg.total_pnl > 0 && holdoutAgg.total_pnl <= 0) {
+      flags.push("In-sample was profitable but the untouched holdout was not — possible overfitting to the in-sample period (or just a genuinely hard holdout stretch; more holdout data would distinguish the two).");
+    }
+
+    await log("info", "backtest",
+      `${symbol}: Walk-forward complete — ${windows} windows (${holdout_windows} holdout) | in-sample PF:${inSampleAgg.profit_factor} WR:${inSampleAgg.win_rate}% | holdout PF:${holdoutAgg.profit_factor} WR:${holdoutAgg.win_rate}%`);
+
+    res.json({
+      ok: true, symbol, days, windows, holdout_windows,
+      params: {
+        initial_balance, risk_percent,
+        min_score_override: min_score_override ?? null,
+        disable_trend_gate: !!disable_trend_gate,
+      },
+      in_sample: { windows: inSample, aggregate: inSampleAgg },
+      holdout: { windows: holdout, aggregate: holdoutAgg },
+      flags,
+    });
+  } catch (e) {
+    await log("error", "backtest", `Walk-forward error: ${e.message}`);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // STAGE 1 (data plumbing only): h1Bars/m15Bars/m5Bars now reach this
 // function and are available for the POI-detection rewrite (moving
 // sweep/OB/FVG from H4 to M15/M5, and adding H1 to HTF bias) - the replay
@@ -191,7 +339,17 @@ router.post("/run", verifyToken, async (req, res) => {
 // its own stage so this data-availability change can be verified
 // independently before the higher-risk logic rewrite happens on top of it.
 function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, params) {
-  const { initialBalance = 1000, riskPercent = 1.0, windowStart, minScoreOverride, disableTrendGate } = params;
+  // NEW (walk-forward support, Oct 4): windowEnd is optional and only
+  // gates new ENTRIES (barTime > windowEnd is skipped, same as
+  // barTime < windowStart already was) — it does not cut off an
+  // already-opened trade's exit/management loop below, which is allowed
+  // to read bars past windowEnd exactly as it always could read bars past
+  // "now" minus MAX_HOLD_BARS. This keeps each walk-forward window's
+  // trade *outcomes* realistic (no artificially truncated exits at the
+  // window boundary) while still confining which bars are allowed to
+  // originate a new trade to that window. Single-window calls (the /run
+  // route) simply never pass windowEnd, so behavior there is unchanged.
+  const { initialBalance = 1000, riskPercent = 1.0, windowStart, windowEnd = null, minScoreOverride, disableTrendGate } = params;
   const pipSize = core.PIP_SIZES[symbol] || 0.0001;
   const spreadPips = ASSUMED_SPREAD_PIPS[symbol] || 2.0;
 
@@ -216,7 +374,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
   // mechanically kill-zone-eligible per the fixed clock-boundary alignment)
   // down to just 3 bars actually reaching POI detection.
   const filterCounts = {
-    beforeWindow: 0, inTradeCooldown: 0, weekendOrDead: 0, news: 0,
+    beforeWindow: 0, afterWindow: 0, inTradeCooldown: 0, weekendOrDead: 0, news: 0,
     sessionStrength: 0, notKillZone: 0, noIndicators: 0, adrExhausted: 0,
     reachedPOI: 0
   };
@@ -240,6 +398,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     const bar = h4Bars[i];
     const barTime = new Date(bar.time);
     if (barTime < windowStart) { filterCounts.beforeWindow++; continue; }
+    if (windowEnd && barTime > windowEnd) { filterCounts.afterWindow++; continue; }
     if (i <= lastTradeExitIndex) { filterCounts.inTradeCooldown++; continue; }
 
     const session = core.getSessionInfo(barTime);
