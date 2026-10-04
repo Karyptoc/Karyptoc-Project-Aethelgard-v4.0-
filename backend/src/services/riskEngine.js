@@ -377,6 +377,116 @@ async function isPairEnabled(symbol) {
   }
 }
 
+// ── Account-Level Consecutive-Loss Protection ────────────────────────────────
+/**
+ * NEW (Oct 4 — Roadmap Phase 2, "account-level consecutive-loss protection"):
+ * pauses ALL new entries on an account after N losing trades in a row,
+ * ACROSS EVERY SYMBOL — a gap none of the existing safeguards cover.
+ * isPairEnabled()'s daily-loss halt only ever looks at one symbol, so a
+ * string of losses spread across different pairs (one loser each on GOLD,
+ * EURUSD, GBPJPY, USDJPY) never trips it. checkCircuitBreaker()'s %-based
+ * daily/weekly/monthly limits miss it too: several small losses well under
+ * the dollar threshold can still mean the system is in a bad patch long
+ * before that limit is reached.
+ *
+ * Halt state lives in a platform_settings row keyed per account — the same
+ * flexible key/value table circuit_breaker_daily_loss_pct etc. already use,
+ * so no schema change is needed. On trip, the account is paused for a
+ * configurable cooldown. The important part: once the cooldown elapses with
+ * no new trade having closed, the halt is cleared and the account gets
+ * exactly one fresh attempt — it is NOT re-judged against the same stale
+ * losing streak, which would just re-trip it instantly on the very next
+ * bridge poll and make the cooldown meaningless. Only trades that close
+ * after that reset point count toward a new streak.
+ *
+ * Configurable via platform_settings (same PUT /api/dashboard/settings
+ * endpoint used for every other tunable here): max_consecutive_losses
+ * (default 4), consecutive_loss_cooldown_hours (default 4).
+ */
+async function checkConsecutiveLossProtection(accountId) {
+  try {
+    let maxLosses = 4, cooldownHours = 4;
+    try {
+      const { data: settingsRows } = await supabaseAdmin
+        .from("platform_settings")
+        .select("key, value")
+        .in("key", ["max_consecutive_losses", "consecutive_loss_cooldown_hours"]);
+      (settingsRows || []).forEach(s => {
+        if (s.key === "max_consecutive_losses") maxLosses = parseInt(s.value) || maxLosses;
+        if (s.key === "consecutive_loss_cooldown_hours") cooldownHours = parseFloat(s.value) || cooldownHours;
+      });
+    } catch {}
+
+    const haltKey = `consecutive_loss_halt_${accountId}`;
+    const { data: haltRow } = await supabaseAdmin
+      .from("platform_settings").select("value").eq("key", haltKey).single();
+    let halt = null;
+    try { halt = haltRow?.value ? JSON.parse(haltRow.value) : null; } catch { halt = null; }
+
+    const now = Date.now();
+    let anchorCloseTime = null;
+
+    if (halt) {
+      if (now < new Date(halt.cooldownUntil).getTime()) {
+        const remainingMin = Math.ceil((new Date(halt.cooldownUntil).getTime() - now) / 60000);
+        return {
+          allowed: false,
+          reason: `Account paused after ${halt.streak} consecutive losses — ${remainingMin}min left in cooldown`
+        };
+      }
+      // Cooldown elapsed — don't re-judge the same stale losing streak.
+      anchorCloseTime = halt.anchorCloseTime;
+    }
+
+    let query = supabaseAdmin
+      .from("trades").select("profit, close_time")
+      .eq("account_id", accountId).eq("status", "closed")
+      .order("close_time", { ascending: false })
+      .limit(Math.max(maxLosses + 5, 20));
+    if (anchorCloseTime) query = query.gt("close_time", anchorCloseTime);
+    const { data: recentTrades } = await query;
+
+    if (halt && (!recentTrades || recentTrades.length === 0)) {
+      // Cooldown's over but nothing has traded yet since the halt — clear
+      // the stale record and give the account one fresh shot rather than
+      // re-tripping on the same old data.
+      await supabaseAdmin.from("platform_settings").delete().eq("key", haltKey);
+      return { allowed: true };
+    }
+
+    let streak = 0;
+    for (const t of (recentTrades || [])) {
+      if ((t.profit || 0) < 0) streak++;
+      else break;
+    }
+
+    if (streak >= maxLosses) {
+      const haltedNow = new Date().toISOString();
+      const cooldownUntil = new Date(now + cooldownHours * 60 * 60 * 1000).toISOString();
+      const newHalt = {
+        haltedAt: haltedNow,
+        cooldownUntil,
+        anchorCloseTime: recentTrades[0].close_time,
+        streak
+      };
+      await supabaseAdmin.from("platform_settings").upsert({
+        key: haltKey, value: JSON.stringify(newHalt), updated_at: haltedNow
+      }, { onConflict: "key" });
+      await log("warning", "riskEngine", `Account ${accountId}: ${streak} consecutive losses — paused ${cooldownHours}h`);
+      return { allowed: false, reason: `${streak} consecutive losses — account paused ${cooldownHours}h` };
+    }
+
+    if (halt) {
+      // Streak since the last halt broke (or never reached threshold) — clear it.
+      await supabaseAdmin.from("platform_settings").delete().eq("key", haltKey);
+    }
+    return { allowed: true };
+  } catch (e) {
+    await log("error", "riskEngine", `checkConsecutiveLossProtection error: ${e.message}`);
+    return { allowed: true }; // fail open, consistent with every other gate here
+  }
+}
+
 // ── Equity Curve Multiplier ───────────────────────────────────────────────────
 
 async function getEquityCurveMultiplier(accountId) {
@@ -797,6 +907,7 @@ module.exports = {
   checkCurrencyExposure,
   checkExtendedLossLimits,
   checkCircuitBreaker,
+  checkConsecutiveLossProtection,
   calculateTrailingStop,
   calculateBreakEven,
   calculatePartialCloseLevels,

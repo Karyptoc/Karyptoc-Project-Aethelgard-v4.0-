@@ -15,7 +15,7 @@ const signalEngine = require("../services/signalEngine");
 // correlated bet (GER40Cash + US30Cash, a pair CORRELATION_GROUPS already
 // names) that checkCorrelation was specifically built to catch. Now wired
 // into the same per-account gate sequence as checkCircuitBreaker, below.
-const { checkCircuitBreaker, calculatePositionSize, checkCorrelation, checkCurrencyExposure, getEquityCurveMultiplier } = require("../services/riskEngine");
+const { checkCircuitBreaker, calculatePositionSize, checkCorrelation, checkCurrencyExposure, getEquityCurveMultiplier, checkConsecutiveLossProtection } = require("../services/riskEngine");
 
 function verifyBridgeSecret(req, res, next) {
   const secret = req.headers["x-bridge-secret"];
@@ -318,6 +318,16 @@ router.get("/commands", async (req, res) => {
           const cbCheck = await checkCircuitBreaker(account.id, signal.symbol);
           if (!cbCheck.allowed) {
             await log("info", "bridge", `Circuit breaker / pair limit: ${cbCheck.reason}`);
+            continue;
+          }
+
+          // ── Account-level consecutive-loss protection (new — see riskEngine.js) ─
+          // Catches a losing streak spread across DIFFERENT pairs, which
+          // neither checkCircuitBreaker's per-pair halt nor its %-based
+          // daily/weekly/monthly limits see.
+          const streakCheck = await checkConsecutiveLossProtection(account.id);
+          if (!streakCheck.allowed) {
+            await log("info", "bridge", `Account ${account.id}: ${streakCheck.reason}`);
             continue;
           }
 
