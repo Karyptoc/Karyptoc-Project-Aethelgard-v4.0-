@@ -370,7 +370,7 @@ async function getRecentPerformance(symbol) {
 
 // ── SL/TP Calculation with Structural Anchor ──────────────────────────────────
 
-async function generateSignalFromOHLCV(symbol, ohlcvData) {
+async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
   try {
     const session = getSessionInfo();
     if (session.session === "WEEKEND" || session.session === "DEAD_ZONE") return null;
@@ -381,6 +381,23 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
 
     const pairCheck = await isPairEnabled(symbol);
     if (!pairCheck.allowed) { await log("info", "signalEngine", `${symbol}: ${pairCheck.reason}`); return null; }
+
+    // FIX (Oct 4 audit): checkDynamicSpread/recordSpread were imported here
+    // but never called anywhere — the bridge's /ohlcv push already carries
+    // a spread reading (req.body.spread) that was simply discarded. Now
+    // records it into the 24h rolling average and, when the current spread
+    // is abnormally wide relative to that average, widens the stop and
+    // scales the lot down later below (where sltp and position_size_modifier
+    // are built) rather than trading the structural SL/TP unchanged into a
+    // temporarily bad spread.
+    let spreadCheck = { allowed: true, multiplier: 1.0, slAdjustPips: 0 };
+    if (spread !== null && spread !== undefined && spread > 0) {
+      spreadCheck = checkDynamicSpread(symbol, spread);
+      if (!spreadCheck.allowed) {
+        await log("info", "signalEngine", `${symbol}: ${spreadCheck.reason}`);
+        return null;
+      }
+    }
 
     const dupMinutes = await getDuplicateWindow();
     const recent = await hasRecentSignal(symbol, dupMinutes);
@@ -439,11 +456,43 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
           if (tf === "M5")  m5Bars  = bars;
           if (tf === "D1")  d1Bars  = bars;
           if (tf === "W1")  w1Bars  = bars;
-          if (tf === "USDCHF") multiTFData[tf].bars = bars; // keep for DXY proxy
         }
       }
     }
     if (!Object.keys(multiTFData).length) return null;
+
+    // FIX (dead filter, confirmed in the Oct 4 audit): `ohlcvData` here is
+    // ALWAYS keyed by timeframe (H1/H4/M5/...) for the symbol being
+    // analyzed — it never contains a "USDCHF" key, because that's a symbol
+    // name, not a timeframe. `if (tf === "USDCHF")` above could therefore
+    // never be true, so getDXYConflict() always received an empty
+    // multiTFData["USDCHF"] and silently no-opped on every call, while the
+    // logs implied an active filter. USDCHF is itself one of this
+    // platform's actively-tracked pairs (see ohlcv_cache / ASSUMED_SPREAD_PIPS),
+    // so its bars are independently cached regardless of which symbol is
+    // currently being analyzed — fetch them directly as the DXY proxy
+    // whenever the current symbol is one the DXY check actually applies to.
+    if (symbol !== "USDCHF" && (DXY_INVERSE_PAIRS.includes(symbol) || DXY_DIRECT_PAIRS.includes(symbol))) {
+      try {
+        const { data: dxyRows } = await supabaseAdmin
+          .from("ohlcv_cache")
+          .select("open, high, low, close, time")
+          .eq("symbol", "USDCHF")
+          .eq("timeframe", "H4")
+          .order("time", { ascending: false })
+          .limit(60);
+        if (dxyRows && dxyRows.length >= 20) {
+          multiTFData["USDCHF"] = {
+            bars: dxyRows.reverse().map(b => ({
+              open: parseFloat(b.open), high: parseFloat(b.high),
+              low: parseFloat(b.low), close: parseFloat(b.close), time: b.time
+            }))
+          };
+        }
+      } catch (e) {
+        await log("warning", "signalEngine", `${symbol}: DXY proxy (USDCHF) fetch failed: ${e.message}`);
+      }
+    }
 
     // STAGE 2: h1Bars was already being extracted (line above) but never
     // reached getHTFBias - only used as a fallback if h4Bars was missing.
@@ -823,6 +872,19 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
       sltp.usedM5Entry = false;
     }
 
+    // Apply dynamic-spread widening computed above, if the current spread
+    // was abnormally wide relative to this symbol's 24h rolling average.
+    if (spreadCheck.widened) {
+      const pip = PIP_SIZES[symbol] || 0.0001;
+      const widenPrice = spreadCheck.slAdjustPips * pip;
+      sltp.stopLoss = parseFloat((analysis.direction === "BUY"
+        ? sltp.stopLoss - widenPrice
+        : sltp.stopLoss + widenPrice).toFixed(5));
+      sltp.slPips = parseFloat(((sltp.slPips || 0) + spreadCheck.slAdjustPips).toFixed(1));
+      await log("info", "signalEngine",
+        `${symbol}: Spread ${spreadCheck.spreadPips}p vs ${spreadCheck.avgSpread}p avg — widened SL by ${spreadCheck.slAdjustPips}p, lot x${spreadCheck.multiplier}`);
+    }
+
     // ── Pending Order Type Selection ─────────────────────────────────────────
     // Retest of FVG/OB → limit order (price must come to us).
     // Breakout/sweep momentum → market order.
@@ -899,7 +961,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData) {
         confluence_score: confluence.score,
         confluence_grade: confluence.grade,
         htf_bias: htfBias.bias,
-        position_size_modifier: analysis.position_size_modifier || 1.0,
+        position_size_modifier: (analysis.position_size_modifier || 1.0) * (spreadCheck.multiplier || 1.0),
         atr_ratio: atrRatio,
         sl_pips: sltp.slPips,
         rr_actual: sltp.rrActual,

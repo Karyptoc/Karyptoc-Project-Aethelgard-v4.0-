@@ -8,7 +8,14 @@ const express = require("express");
 const router = express.Router();
 const { supabaseAdmin, log } = require("../services/supabase");
 const signalEngine = require("../services/signalEngine");
-const { checkCircuitBreaker, calculatePositionSize } = require("../services/riskEngine");
+// FIX (Oct 4 audit): checkCorrelation and checkCurrencyExposure were fully
+// implemented in riskEngine.js, exported, and never imported or called
+// anywhere in the codebase — dead safeguards. 3 of the 5 losing trades
+// reviewed in the diagnostic report's Section 2 were a concentrated,
+// correlated bet (GER40Cash + US30Cash, a pair CORRELATION_GROUPS already
+// names) that checkCorrelation was specifically built to catch. Now wired
+// into the same per-account gate sequence as checkCircuitBreaker, below.
+const { checkCircuitBreaker, calculatePositionSize, checkCorrelation, checkCurrencyExposure, getEquityCurveMultiplier } = require("../services/riskEngine");
 
 function verifyBridgeSecret(req, res, next) {
   const secret = req.headers["x-bridge-secret"];
@@ -207,7 +214,11 @@ router.post("/ohlcv", async (req, res) => {
     }
 
     await log("info", "bridge", `OHLCV received: ${symbol} | spread: ${spread || "N/A"}pips`);
-    const signal = await signalEngine.generateSignalFromOHLCV(symbol, data);
+    // FIX (Oct 4 audit): spread was received here and logged, then
+    // discarded — generateSignalFromOHLCV never saw it, so the dynamic
+    // spread check it now performs (see signalEngine.js) needs it passed
+    // through explicitly.
+    const signal = await signalEngine.generateSignalFromOHLCV(symbol, data, spread);
     res.json({ ok: true, signal: signal ? signal.id : null });
   } catch (e) {
     await log("error", "bridge", `OHLCV signal error ${symbol}: ${e.message}`);
@@ -310,6 +321,22 @@ router.get("/commands", async (req, res) => {
             continue;
           }
 
+          // ── Correlation gate (newly wired — see import comment above) ─────────
+          const corrCheck = await checkCorrelation(signal.symbol, account.id);
+          if (!corrCheck.allowed) {
+            await log("info", "bridge", `${signal.symbol}: Correlation gate — ${corrCheck.reason}`);
+            continue;
+          }
+
+          // ── Currency net-exposure clamp (newly wired — see import comment above) ─
+          const exposureCheck = await checkCurrencyExposure(
+            signal.symbol, signal.direction, account.id, account.balance || 500
+          );
+          if (!exposureCheck.allowed) {
+            await log("info", "bridge", `${signal.symbol}: Currency exposure — ${exposureCheck.reason}`);
+            continue;
+          }
+
           // Check daily loss against platform setting
           const todayStart = new Date();
           todayStart.setHours(0, 0, 0, 0);
@@ -344,10 +371,19 @@ router.get("/commands", async (req, res) => {
           // A-grade and D-grade setups were sized identically in live trading.
           const signalGrade = signal.regime_detail?.confluence_grade || "B";
 
+          // FIX (Oct 4 audit): getEquityCurveMultiplier() was fully
+          // implemented and exported but never called anywhere — flagged
+          // as unverified in the diagnostic report's Section 8, confirmed
+          // dormant here. It scales risk down after a recent equity
+          // drawdown (and slightly up after a genuine winning run), which
+          // is exactly the account-level protection this gate sequence is
+          // otherwise missing between trades rather than within one.
+          const equityCurveMultiplier = await getEquityCurveMultiplier(account.id);
+
           // Use default_risk_percent from platform_settings
           const sizing = calculatePositionSize({
             balance: account.balance || 500,
-            riskPercent: settings.defaultRiskPercent * positionSizeModifier,
+            riskPercent: settings.defaultRiskPercent * positionSizeModifier * equityCurveMultiplier,
             stopLossPips: Math.max(stopPips, 5),
             symbol: signal.symbol,
             signalGrade
