@@ -15,6 +15,7 @@ const { supabaseAdmin, log } = require("../services/supabase");
 const { verifyToken } = require("../middleware/auth");
 const core = require("../services/signalCore");
 const riskEngine = require("../services/riskEngine");
+const perf = require("../services/performanceMetrics");
 
 // FIX: these were badly miscalibrated for GOLD/US30Cash/GER40Cash/BTCUSD -
 // confirmed by comparing against real spreads observed in live bridge logs
@@ -291,6 +292,18 @@ router.post("/walk-forward", verifyToken, async (req, res) => {
         profit_factor_mean: pfs.length ? round(mean(pfs)) : null,
         profit_factor_stddev: pfs.length > 1 ? round(stddev(pfs)) : null,
         win_rate_stddev: round(stddev(rows.map(r => r.win_rate)), 1),
+        // NEW (Roadmap Phase 2 item 7): mean of each window's own
+        // risk-adjusted metrics — deliberately NOT re-pooled from raw
+        // trades across window boundaries (that would need re-deriving
+        // R-multiples across windows with fresh per-window balances,
+        // which isn't meaningful since each window restarts at
+        // initial_balance). "Mean across windows" is a coarser but
+        // honest signal: is expectancy/Sharpe holding up window to
+        // window, not a single blended number.
+        expectancy_dollars_mean: round(mean(rows.map(r => r.expectancy_dollars).filter(x => x !== null && x !== undefined))),
+        expectancy_r_mean: round(mean(rows.map(r => r.expectancy_r).filter(x => x !== null && x !== undefined))),
+        sharpe_ratio_mean: round(mean(rows.map(r => r.sharpe_ratio).filter(x => x !== null && x !== undefined))),
+        sortino_ratio_mean: round(mean(rows.map(r => r.sortino_ratio).filter(x => x !== null && x !== undefined))),
       };
     }
 
@@ -752,6 +765,22 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
   const htfAligned = trades.filter(t => t.htf_full_alignment);
   const htfNotAligned = trades.filter(t => !t.htf_full_alignment);
 
+  // NEW (Oct 4 — Roadmap Phase 2 item 7): expectancy, R-multiple
+  // distribution, Sharpe, Sortino. pipSize is already known for this
+  // symbol/run; pipValuePerLot was already derived above for spread cost.
+  // balance_before is reconstructed from balance_after - pnl (not stored
+  // separately) purely to get a per-trade % return for Sharpe/Sortino.
+  const normalizedTrades = trades.map(t => perf.normalizeTradeForMetrics(
+    { pnl: t.pnl, entry_price: t.entry_price, stop_loss: t.stop_loss, lot_size: t.lot_size },
+    pipSize, pipValuePerLot
+  ));
+  const returns = trades.map(t => {
+    const balanceBefore = t.balance_after - t.pnl;
+    return balanceBefore > 0 ? t.pnl / balanceBefore : 0;
+  });
+  const times = trades.map(t => t.exit_time || t.entry_time);
+  const riskAdjusted = perf.buildRiskAdjustedSummary({ normalizedTrades, returns, times });
+
   return {
     summary: {
       total_trades: trades.length,
@@ -769,6 +798,19 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
       avg_loss: losers.length > 0 ? parseFloat((grossLoss / losers.length).toFixed(2)) : 0,
       best_trade: trades.length > 0 ? parseFloat(Math.max(...trades.map(t => t.pnl)).toFixed(2)) : 0,
       worst_trade: trades.length > 0 ? parseFloat(Math.min(...trades.map(t => t.pnl)).toFixed(2)) : 0,
+      // NEW (Roadmap Phase 2 item 7): risk-adjusted metrics the diagnostic
+      // report's Section 8 flagged as missing everywhere in this codebase —
+      // win_rate/profit_factor/max_drawdown alone can't distinguish a
+      // strategy with a real edge from one that just hasn't hit its tail
+      // risk yet. See performanceMetrics.js for methodology and the null-
+      // when-insufficient-data handling.
+      expectancy_dollars: riskAdjusted.expectancy_dollars,
+      expectancy_r: riskAdjusted.expectancy_r,
+      r_multiple: riskAdjusted.r_multiple,
+      sharpe_ratio: riskAdjusted.sharpe_ratio,
+      sortino_ratio: riskAdjusted.sortino_ratio,
+      annualization_trades_per_year: riskAdjusted.annualization_trades_per_year,
+      risk_adjusted_note: riskAdjusted.note,
       poiM15Count, poiTotalChecks, filterCounts, holdReasons, // DIAGNOSTIC (temporary)
       orderTypeCounts, limitFillCounts, // fill-price simulation results
       total_spread_cost: parseFloat(trades.reduce((s, t) => s + (t.spread_cost || 0), 0).toFixed(2)),

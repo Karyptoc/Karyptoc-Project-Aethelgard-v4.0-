@@ -5,6 +5,8 @@
 
 const Anthropic = require("@anthropic-ai/sdk");
 const { supabaseAdmin, log } = require("./supabase");
+const core = require("./signalCore");
+const perf = require("./performanceMetrics");
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -71,6 +73,23 @@ async function generateMonthlyReport(clientId, month, year) {
       if ((t.profit || 0) > 0) bySymbol[t.symbol].wins++;
     });
 
+    // NEW (Oct 4 — Roadmap Phase 2 item 7): expectancy/R-multiple/Sharpe/
+    // Sortino for the client-facing monthly report, same methodology as
+    // backtest.js and dashboard.js (see performanceMetrics.js). Uses this
+    // period's actual start balance for returns, which is a better basis
+    // than dashboard.js's "current balance" approximation since a monthly
+    // report has a well-defined period boundary.
+    const pipValuePerLotFor = (symbol) =>
+      ({ GOLD: 1, BTCUSD: 1, US30Cash: 1, GER40Cash: 1 }[symbol] || 10);
+    const normalizedTrades = closedTrades.map(t => perf.normalizeTradeForMetrics(
+      { profit: t.profit, open_price: t.open_price, stop_loss: t.stop_loss, volume: t.volume },
+      core.PIP_SIZES[t.symbol] || 0.0001,
+      pipValuePerLotFor(t.symbol)
+    ));
+    const returns = closedTrades.map(t => startBalance > 0 ? (t.profit || 0) / startBalance : 0);
+    const times = closedTrades.map(t => t.close_time || t.open_time);
+    const riskAdjusted = perf.buildRiskAdjustedSummary({ normalizedTrades, returns, times });
+
     const stats = {
       period: `${periodStart.toLocaleDateString("en-US", { month: "long", year: "numeric" })}`,
       total_trades: closedTrades.length,
@@ -81,6 +100,11 @@ async function generateMonthlyReport(clientId, month, year) {
       gross_profit: grossProfit.toFixed(2),
       gross_loss: grossLoss.toFixed(2),
       profit_factor: grossLoss > 0 ? (grossProfit / grossLoss).toFixed(2) : "∞",
+      expectancy_dollars: riskAdjusted.expectancy_dollars,
+      expectancy_r: riskAdjusted.expectancy_r,
+      r_multiple: riskAdjusted.r_multiple,
+      sharpe_ratio: riskAdjusted.sharpe_ratio,
+      sortino_ratio: riskAdjusted.sortino_ratio,
       start_balance: startBalance.toFixed(2),
       end_balance: endBalance.toFixed(2),
       balance_change: (endBalance - startBalance).toFixed(2),
@@ -220,6 +244,33 @@ function buildHTMLReport(stats, narrative, client) {
       <div class="stat-box">
         <div class="stat-label">Losers</div>
         <div class="stat-value red">${stats.losers}</div>
+      </div>
+    </div>
+
+    <!-- NEW (Oct 4 — Roadmap Phase 2 item 7): risk-adjusted metrics, not
+         just win rate/profit factor — a high win rate with a poor
+         expectancy or Sharpe is a different (and less trustworthy) result
+         than the same win rate with both strong, and this is the first
+         place in the codebase a client actually sees that distinction. -->
+    <div class="section-title">Risk-Adjusted Performance</div>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-label">Expectancy / Trade</div>
+        <div class="stat-value" style="color:${(stats.expectancy_dollars || 0) >= 0 ? "#00875a" : "#de350b"}">
+          ${stats.expectancy_dollars !== null ? `$${stats.expectancy_dollars}` : "—"}
+        </div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Expectancy (R)</div>
+        <div class="stat-value blue">${stats.expectancy_r !== null ? `${stats.expectancy_r}R` : "—"}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Sharpe Ratio</div>
+        <div class="stat-value blue">${stats.sharpe_ratio !== null ? stats.sharpe_ratio : "— (needs more trades)"}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Sortino Ratio</div>
+        <div class="stat-value blue">${stats.sortino_ratio !== null ? stats.sortino_ratio : "— (needs more trades)"}</div>
       </div>
     </div>
 

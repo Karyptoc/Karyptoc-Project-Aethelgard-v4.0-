@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { supabaseAdmin } = require("../services/supabase");
 const { verifyToken } = require("../middleware/auth");
+const core = require("../services/signalCore");
+const perf = require("../services/performanceMetrics");
 
 router.use(verifyToken);
 
@@ -105,6 +107,33 @@ router.get("/performance", async (req, res) => {
     const grossProfit = winners.reduce((s, t) => s + (t.profit || 0), 0);
     const grossLoss = Math.abs(losers.reduce((s, t) => s + (t.profit || 0), 0));
 
+    // NEW (Oct 4 — Roadmap Phase 2 item 7): same expectancy/R-multiple/
+    // Sharpe/Sortino metrics now in backtest.js, computed here for LIVE
+    // closed trades instead of a backtest replay. pipValuePerLot uses the
+    // same per-symbol convention as backtest.js's ASSUMED_SPREAD_PIPS
+    // table (index-style instruments priced in whole points, forex pairs
+    // priced per pip) so R-multiples mean the same thing in both places.
+    const pipValuePerLotFor = (symbol) =>
+      ({ GOLD: 1, BTCUSD: 1, US30Cash: 1, GER40Cash: 1 }[symbol] || 10);
+
+    const normalizedTrades = trades.map(t => perf.normalizeTradeForMetrics(
+      { profit: t.profit, open_price: t.open_price, stop_loss: t.stop_loss, volume: t.volume },
+      core.PIP_SIZES[t.symbol] || 0.0001,
+      pipValuePerLotFor(t.symbol)
+    ));
+    // balance isn't tracked per-trade for live trades (unlike the backtest
+    // replay, which recomputes it every step) - account balance at trade
+    // time isn't reconstructable from this table alone, so Sharpe/Sortino
+    // use profit as a fraction of the CURRENT total account balance as an
+    // approximation rather than the true balance-at-the-time. Flagged
+    // explicitly in the response rather than silently treated as exact.
+    const { data: accountsForBalance } = await supabaseAdmin
+      .from("mt5_accounts").select("balance").eq("is_active", true);
+    const approxBalance = (accountsForBalance || []).reduce((s, a) => s + (a.balance || 0), 0) || 1000;
+    const returns = trades.map(t => (t.profit || 0) / approxBalance);
+    const times = trades.map(t => t.close_time || t.open_time);
+    const riskAdjusted = perf.buildRiskAdjustedSummary({ normalizedTrades, returns, times });
+
     const stats = {
       total_trades: trades.length,
       win_rate: trades.length > 0 ? (winners.length / trades.length * 100).toFixed(1) : 0,
@@ -116,6 +145,14 @@ router.get("/performance", async (req, res) => {
       avg_loss: losers.length > 0 ? (grossLoss / losers.length).toFixed(2) : 0,
       best_trade: trades.reduce((max, t) => Math.max(max, t.profit || 0), 0).toFixed(2),
       worst_trade: trades.reduce((min, t) => Math.min(min, t.profit || 0), 0).toFixed(2),
+      expectancy_dollars: riskAdjusted.expectancy_dollars,
+      expectancy_r: riskAdjusted.expectancy_r,
+      r_multiple: riskAdjusted.r_multiple,
+      sharpe_ratio: riskAdjusted.sharpe_ratio,
+      sortino_ratio: riskAdjusted.sortino_ratio,
+      annualization_trades_per_year: riskAdjusted.annualization_trades_per_year,
+      risk_adjusted_note: riskAdjusted.note
+        || "Sharpe/Sortino use each trade's P&L against current total account balance (not the true balance at the time of that trade, which isn't stored) — a reasonable approximation for a roughly-stable account, less so after a large deposit/withdrawal or big equity swing.",
     };
 
     res.json({ trades, stats });
