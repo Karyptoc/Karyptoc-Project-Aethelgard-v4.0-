@@ -138,9 +138,6 @@ MIN_SL_DISTANCE = {
 # Track which bars already cached to avoid duplicates
 _cached_bars = set()
 
-# ── Fix 3: Copy trading client accounts cache ─────────────────────────────────
-_client_accounts_cache = []
-_client_accounts_last_fetch = 0
 
 def api_headers():
     return {"Content-Type": "application/json", "x-bridge-secret": BRIDGE_SECRET}
@@ -445,47 +442,78 @@ def validate_sl_distance(symbol, direction, price, sl, sym_info=None):
     return True, sl
 
 
-def fetch_client_accounts():
-    """Fix 3: Get active copy trading client accounts from backend."""
-    global _client_accounts_cache, _client_accounts_last_fetch
-    now = time.time()
-    if now - _client_accounts_last_fetch < 60:
-        return _client_accounts_cache
+# FIX (Oct 4 — bridge-execution-link audit, confirmed via direct code
+# trace, not a guess): this entire copy-trading dispatch used to fetch
+# client accounts straight from /api/copy-trading/bridge/accounts and
+# compute each client's lot size LOCALLY (balance_ratio * risk_ratio).
+# Two real, confirmed defects fell out of that:
+#
+#   1. /bridge/accounts has no risk gate at all — it returns every active,
+#      copy-enabled client unconditionally. The backend's per-client risk
+#      circuit breaker (checkClientRiskCircuitBreaker — daily loss %, max
+#      trades/day, consecutive-loss cooldown) only runs inside
+#      POST /bridge/lot-sizes, which this bridge never called. Every
+#      client was getting every copy trade regardless of their own risk
+#      state — exactly the gap that gate was built to close, silently
+#      bypassed from day one because the bridge used the wrong endpoint.
+#
+#   2. The old call site —
+#        execute_copy_trade(client, order, master_balance, None, result.order, signal_id)
+#      — passed master_balance into the master_price PARAMETER slot and
+#      None into the master_balance slot (execute_copy_trade's signature
+#      was (client, order, master_price, master_balance, master_ticket,
+#      signal_id) — a straight positional-argument mismatch). Since the
+#      lot-sizing code below only used `if master_balance and
+#      master_balance > 0`, it always saw None and silently fell back to
+#      a flat 0.01 lot for EVERY client, EVERY trade — the balance/
+#      risk_percent-proportional sizing promised by calculateClientLot()
+#      and the Clients UI's risk_percent field never actually applied
+#      here, for any client, ever.
+#
+# Both are fixed the same way: route through POST /bridge/lot-sizes,
+# which already runs the risk gate server-side AND returns each client's
+# correctly-scaled lot size via the backend's own calculateClientLot() —
+# one source of truth instead of parallel Python/JS sizing logic that can
+# (and did) drift out of sync.
+
+def fetch_client_lot_sizes(signal_id, master_lot, master_balance):
+    """Risk-gated, pre-sized copy-trade client list for this signal. Every
+    client in the returned list has ALREADY passed checkClientRiskCircuitBreaker
+    server-side — a client paused for daily loss, trade count, or a losing
+    streak simply isn't in the list, nothing further to check here."""
     try:
-        r = requests.get(
-            f"{BACKEND_URL}/api/copy-trading/bridge/accounts",
-            headers=api_headers(), timeout=10
+        r = requests.post(
+            f"{BACKEND_URL}/api/copy-trading/bridge/lot-sizes",
+            headers=api_headers(), timeout=15,
+            json={"signal_id": signal_id, "master_lot": master_lot, "master_balance": master_balance}
         )
         if r.status_code == 200:
-            _client_accounts_cache = r.json().get("accounts", [])
-            _client_accounts_last_fetch = now
-            log.info(f"Copy trading: {len(_client_accounts_cache)} client accounts loaded")
+            lot_sizes = r.json().get("lot_sizes", [])
+            log.info(f"Copy trading: {len(lot_sizes)} risk-cleared client account(s) for this signal")
+            return lot_sizes
+        log.warning(f"lot-sizes fetch failed: {r.status_code}")
     except Exception as e:
-        log.warning(f"Cannot fetch client accounts: {e}")
-    return _client_accounts_cache
+        log.warning(f"Cannot fetch client lot sizes: {e}")
+    return []
 
 
-def execute_copy_trade(client, order, master_price, master_balance, master_ticket, signal_id):
-    """Fix 3: Execute a scaled copy trade on a client MT5 account."""
+def execute_copy_trade(client_lot, order, master_ticket, signal_id):
+    """Executes a copy trade using the lot size the backend already
+    computed and risk-cleared via POST /bridge/lot-sizes (see
+    fetch_client_lot_sizes above). No balance/risk math happens here
+    anymore — client_lot["lot_size"] is exactly what calculateClientLot()
+    decided, for a client checkClientRiskCircuitBreaker already approved."""
+    client_name = client_lot.get("client_name", "?")
     try:
-        client_login = int(client["mt5_login"])
-        client_password = client["mt5_password"]
-        client_server = client["mt5_server"]
-        client_balance = float(client.get("balance") or 1000)
-        client_risk_pct = float(client.get("risk_percent") or 1.0)
-
-        # Scale lot size proportionally to client balance
-        master_lot = float(order["volume"])
-        if master_balance and master_balance > 0:
-            balance_ratio = client_balance / master_balance
-            risk_ratio = client_risk_pct / 1.0
-            client_lot = max(0.01, round(master_lot * balance_ratio * risk_ratio, 2))
-        else:
-            client_lot = 0.01
+        client_id = client_lot["client_id"]
+        client_login = int(client_lot["mt5_login"])
+        client_password = client_lot["mt5_password"]
+        client_server = client_lot["mt5_server"]
+        lot_size = float(client_lot["lot_size"])
 
         # Login to client account
         if not mt5.login(client_login, password=client_password, server=client_server):
-            log.warning(f"Copy trade: cannot login to client {client['name']} ({client_login})")
+            log.warning(f"Copy trade: cannot login to client {client_name} ({client_login})")
             return
 
         symbol = order["symbol"]
@@ -494,7 +522,7 @@ def execute_copy_trade(client, order, master_price, master_balance, master_ticke
 
         tick = mt5.symbol_info_tick(broker_symbol)
         if not tick:
-            log.warning(f"Copy trade: no tick for {symbol} on client {client['name']}")
+            log.warning(f"Copy trade: no tick for {symbol} on client {client_name}")
             return
 
         price = tick.ask if direction == "BUY" else tick.bid
@@ -507,41 +535,42 @@ def execute_copy_trade(client, order, master_price, master_balance, master_ticke
         sym_info = mt5.symbol_info(broker_symbol)
         sl_valid, sl = validate_sl_distance(symbol, direction, price, sl, sym_info)
         if sym_info:
-            client_lot = max(client_lot, sym_info.volume_min)
-            client_lot = round(round(client_lot / sym_info.volume_step) * sym_info.volume_step, 2)
+            lot_size = max(lot_size, sym_info.volume_min)
+            lot_size = round(round(lot_size / sym_info.volume_step) * sym_info.volume_step, 2)
 
         order_type = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
         req = {
             "action": mt5.TRADE_ACTION_DEAL, "symbol": broker_symbol,
-            "volume": client_lot, "type": order_type, "price": price,
+            "volume": lot_size, "type": order_type, "price": price,
             "sl": sl, "tp": tp, "deviation": 30, "magic": 20260102,
             "comment": "Aethelgard_Copy",
             "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC
         }
 
         result = mt5.order_send(req)
-        if result.retcode == mt5.TRADE_RETCODE_DONE:
-            log.info(f"Copy trade: {direction} {client_lot} {symbol} -> {client['name']} #{result.order}")
+        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            log.info(f"Copy trade: {direction} {lot_size} {symbol} -> {client_name} #{result.order}")
             # Report to backend
             try:
                 requests.post(f"{BACKEND_URL}/api/copy-trading/bridge/execute",
                     headers=api_headers(), timeout=5,
                     json={
-                        "client_id": client["id"],
+                        "client_id": client_id,
                         "master_signal_id": signal_id,
                         "master_ticket": master_ticket,
                         "client_ticket": result.order,
                         "symbol": symbol, "direction": direction,
-                        "lot_size": client_lot, "open_price": result.price,
+                        "lot_size": lot_size, "open_price": result.price,
                         "stop_loss": sl, "take_profit": tp,
                     })
             except Exception as e:
                 log.warning(f"Copy trade report failed: {e}")
         else:
-            log.warning(f"Copy trade failed for {client['name']}: {result.comment}")
+            comment = result.comment if result else mt5.last_error()
+            log.warning(f"Copy trade failed for {client_name}: {comment}")
 
     except Exception as e:
-        log.error(f"Copy trade error for {client.get('name','?')}: {e}")
+        log.error(f"Copy trade error for {client_name}: {e}")
     finally:
         # Re-login to master account after copy trade
         if MT5_LOGIN and MT5_PASSWORD:
@@ -786,15 +815,18 @@ def execute_trade(account_id, order):
 
     log.info(f"✅ Trade: {direction} {volume} {broker_symbol} @ {result.price} | #{result.order} | Spread:{spread}pips")
 
-    # ── Fix 3: Dispatch copy trades to all client accounts ────────────────────
+    # ── Fix 3 (rewritten Oct 4 — see the long comment above
+    # fetch_client_lot_sizes for the two bugs this replaces): dispatch
+    # copy trades through the backend's risk-gated /bridge/lot-sizes
+    # endpoint instead of fetching accounts directly and sizing locally.
     master_info = mt5.account_info()
     master_balance = master_info.balance if master_info else None
-    client_accounts = fetch_client_accounts()
-
-    if client_accounts:
-        log.info(f"Dispatching copy trades to {len(client_accounts)} client accounts...")
-        for client in client_accounts:
-            execute_copy_trade(client, order, master_balance, None, result.order, signal_id)
+    if master_balance:
+        lot_sizes = fetch_client_lot_sizes(signal_id, result.volume, master_balance)
+        for client_lot in lot_sizes:
+            execute_copy_trade(client_lot, order, result.order, signal_id)
+    else:
+        log.warning("Copy trading: could not read master account balance this cycle — skipping copy dispatch")
 
     return {"success": True, "ticket": result.order, "price": result.price, "volume": result.volume}
 
