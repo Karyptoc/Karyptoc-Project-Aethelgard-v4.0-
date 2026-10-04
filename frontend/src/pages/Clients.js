@@ -59,7 +59,14 @@ export default function Clients() {
       <div className="page-header">
         <div>
           <div className="page-title">Clients</div>
-          <div className="page-subtitle">SUBSCRIPTION MANAGEMENT · {clients.length} CLIENTS</div>
+          {/* NEW (Oct 4 — Roadmap Phase 3, "separate the two client UI
+              systems"): this page is about BILLING on accounts the engine
+              already trades (clients + invoices, Pesapal) — it is not the
+              copy-trading client system (that's under "Copy-Trading
+              Clients" in the sidebar, a fully separate set of MT5 accounts
+              and fees). Spelled out here since the two used to be easy to
+              conflate from the nav alone. */}
+          <div className="page-subtitle">SUBSCRIPTION BILLING FOR YOUR OWN MT5 ACCOUNTS · {clients.length} CLIENTS · not copy-trading clients</div>
         </div>
         <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ ADD CLIENT</button>
       </div>

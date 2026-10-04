@@ -109,8 +109,16 @@ export default function ClientManagement() {
     <>
       <div className="page-header">
         <div>
-          <div className="page-title">Client Management</div>
-          <div className="page-subtitle">COPY TRADING · PERFORMANCE FEES · PORTAL ACCESS</div>
+          <div className="page-title">Copy-Trading Clients</div>
+          {/* NEW (Oct 4 — Roadmap Phase 3, "separate the two client UI
+              systems"): clarified from "Client Management" — this is the
+              independent copy-trading engine (its own MT5 credentials per
+              client, automatic performance fees, client portal). It is
+              NOT the billing/subscription "Clients" page under the
+              Billing Clients section — that's a different table, a
+              different business model, and currently has no payment
+              integration wired to it (a separate, still-open item). */}
+          <div className="page-subtitle">COPY TRADING · PERFORMANCE FEES · PORTAL ACCESS · separate from Billing Clients</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-ghost btn-sm" onClick={load}>↻ Refresh</button>
