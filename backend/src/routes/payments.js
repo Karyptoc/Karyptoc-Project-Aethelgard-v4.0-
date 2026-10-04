@@ -10,14 +10,41 @@ const { supabaseAdmin, log } = require("../services/supabase");
 const pesapal = require("../services/pesapal");
 const { verifyToken } = require("../middleware/auth");
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Roadmap Phase 3, item 17: invoices now belong to either System A (clients/
+// mt5_accounts, client_id set) or System B (client_accounts copy-trading,
+// client_account_id set — see supabase_migration_client_account_invoices.sql).
+// Whichever webhook/poll path confirms a payment, this is the one place that
+// decrements the copy-trading client's pending_fee — never zeroed outright,
+// since pending_fee may have grown further between invoice creation and
+// payment confirmation; only the invoiced amount is cleared.
+async function onInvoicePaid(invoice) {
+  if (!invoice?.client_account_id) return; // System A invoice — nothing else to do
+  const { data: client } = await supabaseAdmin
+    .from("client_accounts")
+    .select("pending_fee, name")
+    .eq("id", invoice.client_account_id)
+    .single();
+  if (!client) return;
+
+  const newPending = Math.max(0, (client.pending_fee || 0) - (invoice.amount_due || 0));
+  await supabaseAdmin
+    .from("client_accounts")
+    .update({ pending_fee: newPending, updated_at: new Date().toISOString() })
+    .eq("id", invoice.client_account_id);
+
+  await log("info", "payments", `Copy-trading fee paid: $${invoice.amount_due?.toFixed(2)} from ${client.name} — pending_fee ${client.pending_fee?.toFixed(2)} -> ${newPending.toFixed(2)}`);
+}
+
 // ── Admin Routes (protected) ──────────────────────────────────────────────────
 
-// GET all invoices
+// GET all invoices (both System A "clients" and System B "client_accounts")
 router.get("/", verifyToken, async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
       .from("invoices")
-      .select("*, clients(full_name, email, phone)")
+      .select("*, clients(full_name, email, phone), client_accounts(name, email, phone)")
       .order("created_at", { ascending: false });
     if (error) throw error;
     res.json({ invoices: data });
@@ -133,7 +160,7 @@ router.post("/check/:invoiceId", verifyToken, async (req, res) => {
     const status = await pesapal.getTransactionStatus(invoice.pesapal_tracking_id);
 
     // Update invoice status if paid
-    if (status.payment_status_description === "Completed") {
+    if (status.payment_status_description === "Completed" && invoice.status !== "paid") {
       await supabaseAdmin
         .from("invoices")
         .update({
@@ -142,6 +169,7 @@ router.post("/check/:invoiceId", verifyToken, async (req, res) => {
           payment_method: status.payment_method || "mpesa"
         })
         .eq("id", req.params.invoiceId);
+      await onInvoicePaid(invoice);
     }
 
     res.json({ status, invoice });
@@ -174,14 +202,23 @@ router.get("/callback", async (req, res) => {
       const status = await pesapal.getTransactionStatus(OrderTrackingId);
 
       if (status.payment_status_description === "Completed") {
-        await supabaseAdmin
+        const { data: invoice } = await supabaseAdmin
           .from("invoices")
-          .update({
-            status: "paid",
-            paid_at: new Date().toISOString(),
-            pesapal_tracking_id: OrderTrackingId
-          })
-          .eq("id", invoice_id);
+          .select("*")
+          .eq("id", invoice_id)
+          .single();
+
+        if (invoice && invoice.status !== "paid") {
+          await supabaseAdmin
+            .from("invoices")
+            .update({
+              status: "paid",
+              paid_at: new Date().toISOString(),
+              pesapal_tracking_id: OrderTrackingId
+            })
+            .eq("id", invoice_id);
+          await onInvoicePaid(invoice);
+        }
 
         await log("info", "payments", `Payment confirmed: ${OrderTrackingId}`);
       }
@@ -203,10 +240,19 @@ router.get("/ipn", async (req, res) => {
     if (orderTrackingId) {
       const status = await pesapal.getTransactionStatus(orderTrackingId);
       if (status.payment_status_description === "Completed") {
-        await supabaseAdmin
+        const { data: invoice } = await supabaseAdmin
           .from("invoices")
-          .update({ status: "paid", paid_at: new Date().toISOString() })
-          .eq("pesapal_tracking_id", orderTrackingId);
+          .select("*")
+          .eq("pesapal_tracking_id", orderTrackingId)
+          .single();
+
+        if (invoice && invoice.status !== "paid") {
+          await supabaseAdmin
+            .from("invoices")
+            .update({ status: "paid", paid_at: new Date().toISOString() })
+            .eq("pesapal_tracking_id", orderTrackingId);
+          await onInvoicePaid(invoice);
+        }
         await log("info", "payments", `IPN: payment confirmed ${orderTrackingId}`);
       }
     }

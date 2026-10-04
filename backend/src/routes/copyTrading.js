@@ -14,6 +14,7 @@ const { supabaseAdmin, log } = require("../services/supabase");
 const { verifyToken } = require("../middleware/auth");
 const { encryptSecret, decryptSecret } = require("../services/crypto");
 const { checkClientRiskCircuitBreaker } = require("../services/clientRiskEngine");
+const pesapal = require("../services/pesapal");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -243,6 +244,11 @@ router.get("/overview", verifyToken, async (req, res) => {
 });
 
 // POST /api/copy-trading/fees/collect — mark fees as collected
+// MANUAL / OFFLINE RECONCILIATION ONLY (cash, bank transfer, already paid some
+// other way). Zeroes pending_fee immediately with no payment verification —
+// kept as an admin override. For an actual Pesapal-collected payment, use
+// POST /fees/invoice/:clientId below instead, which only clears pending_fee
+// once Pesapal confirms the transaction (see onInvoicePaid in payments.js).
 router.post("/fees/collect/:clientId", verifyToken, async (req, res) => {
   try {
     const { clientId } = req.params;
@@ -254,8 +260,90 @@ router.post("/fees/collect/:clientId", verifyToken, async (req, res) => {
       .update({ pending_fee: 0, updated_at: new Date().toISOString() })
       .eq("id", clientId);
 
-    await log("info", "copyTrading", `Fee collected: $${client?.pending_fee?.toFixed(2)} from ${client?.name}`);
+    await log("info", "copyTrading", `Fee collected (manual): $${client?.pending_fee?.toFixed(2)} from ${client?.name}`);
     res.json({ ok: true, collected: client?.pending_fee });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/copy-trading/fees/invoice/:clientId — admin triggers a real
+// Pesapal payment request for a copy-trading client's pending_fee.
+// Roadmap Phase 3, item 17. Mirrors payments.js's POST /create (System A)
+// but targets client_accounts instead of clients, writing an invoices row
+// with client_account_id set (client_id left null — see
+// supabase_migration_client_account_invoices.sql). pending_fee is NOT
+// touched here — it's only decremented once Pesapal confirms payment,
+// via onInvoicePaid() in payments.js (callback/IPN/check all reuse it).
+router.post("/fees/invoice/:clientId", verifyToken, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { data: client, error: clientError } = await supabaseAdmin
+      .from("client_accounts")
+      .select("id, name, email, phone, pending_fee, currency")
+      .eq("id", clientId)
+      .single();
+    if (clientError || !client) return res.status(404).json({ error: "Client not found" });
+
+    const amountDue = parseFloat((client.pending_fee || 0).toFixed(2));
+    if (!amountDue || amountDue <= 0) {
+      return res.status(400).json({ error: "No pending fee to invoice" });
+    }
+
+    const invoiceNumber = `AE-CT-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+    const { data: invoice, error } = await supabaseAdmin
+      .from("invoices")
+      .insert({
+        invoice_number: invoiceNumber,
+        client_account_id: client.id,
+        amount_due: amountDue,
+        currency: client.currency || "USD",
+        status: "pending",
+        notes: "Copy-trading performance fee"
+      })
+      .select()
+      .single();
+    if (error) throw error;
+
+    const order = await pesapal.submitOrder({
+      invoiceId: invoice.id,
+      amount: amountDue,
+      currency: client.currency || "USD",
+      description: `Aethelgard Copy-Trading Performance Fee — ${client.name}`,
+      clientName: client.name,
+      clientEmail: client.email,
+      clientPhone: client.phone
+    });
+
+    await supabaseAdmin
+      .from("invoices")
+      .update({
+        pesapal_tracking_id: order.order_tracking_id,
+        payment_url: order.redirect_url
+      })
+      .eq("id", invoice.id);
+
+    await log("info", "copyTrading", `Fee invoice created: ${invoiceNumber} | $${amountDue} for ${client.name}`);
+
+    res.json({
+      invoice: { ...invoice, pesapal_tracking_id: order.order_tracking_id },
+      payment_url: order.redirect_url
+    });
+  } catch (e) {
+    await log("error", "copyTrading", `Fee invoice failed: ${e.message}`);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/copy-trading/portal/fee-invoices — client sees their own fee
+// invoices + payment links (portal token, no admin auth).
+router.get("/portal/fee-invoices", verifyPortalToken, async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("invoices")
+      .select("*")
+      .eq("client_account_id", req.client.id)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    res.json({ invoices: data || [] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
