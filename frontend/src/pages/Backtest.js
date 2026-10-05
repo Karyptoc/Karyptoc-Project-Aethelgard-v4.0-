@@ -252,7 +252,7 @@ export default function Backtest() {
 
             {/* Tabs */}
             <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-              {["summary","trades","sessions","grades","fills"].map(tab => (
+              {["summary","trades","sessions","grades","regimes","risk","fills"].map(tab => (
                 <button key={tab} className={`btn btn-sm ${activeTab === tab ? "btn-primary" : "btn-ghost"}`}
                   onClick={() => setActiveTab(tab)}>
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -319,6 +319,106 @@ export default function Backtest() {
                 </table>
               </div>
             )}
+
+            {/* By Regime / Volatility */}
+            {activeTab === "regimes" && (
+              <>
+                {[["Performance by Market Regime", result.by_regime], ["Performance by Volatility", result.by_volatility]].map(([title, group]) => (
+                  <div className="card" key={title} style={{ marginBottom: 12 }}>
+                    <div className="card-header"><span className="card-title">{title}</span></div>
+                    {!group || Object.keys(group).length === 0 ? (
+                      <div style={{ padding: 16, color: "var(--text-muted)", fontSize: 12 }}>No trades to break down.</div>
+                    ) : (
+                      <table>
+                        <thead>
+                          <tr><th>Bucket</th><th>Trades</th><th>Win Rate</th><th>Profit Factor</th><th>Expectancy</th><th>P&L</th></tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(group).sort(([, a], [, b]) => b.trades - a.trades).map(([name, d]) => (
+                            <tr key={name} style={d.low_sample ? { opacity: 0.55 } : undefined}>
+                              <td style={{ fontWeight: 600 }}>
+                                {name}
+                                {d.low_sample && <span className="badge muted" style={{ marginLeft: 6, fontSize: 9 }} title="Under 10 trades — anecdote, not evidence">LOW SAMPLE</span>}
+                              </td>
+                              <td className="mono">{d.trades}</td>
+                              <td className="mono"><span style={{ color: d.win_rate >= 50 ? "var(--bull)" : "var(--bear)", fontWeight: 700 }}>{d.win_rate}%</span></td>
+                              <td className="mono">{d.profit_factor ?? "∞"}</td>
+                              <td className="mono"><span className={d.expectancy >= 0 ? "pnl-pos" : "pnl-neg"}>{pnlSign(d.expectancy)}${d.expectancy}</span></td>
+                              <td className="mono"><span className={d.pnl >= 0 ? "pnl-pos" : "pnl-neg"}>{pnlSign(d.pnl)}${d.pnl.toFixed(2)}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                ))}
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  Faded rows have fewer than 10 trades. Treat them as anecdotes until more history accumulates.
+                </div>
+              </>
+            )}
+
+            {/* Risk: expectancy, Monte Carlo, decision states */}
+            {activeTab === "risk" && (() => {
+              const s = result.summary, mc = result.monte_carlo, ds = s.decision_states || {};
+              const dsTotal = Object.values(ds).reduce((a, b) => a + b, 0);
+              return (
+                <>
+                  <div className="card" style={{ marginBottom: 12 }}>
+                    <div className="card-header"><span className="card-title">Risk-Adjusted Metrics</span></div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
+                      <StatCard label="Expectancy / trade" value={s.expectancy_dollars != null ? `${pnlSign(s.expectancy_dollars)}$${s.expectancy_dollars}` : "—"}
+                        color={s.expectancy_dollars >= 0 ? "var(--bull)" : "var(--bear)"} />
+                      <StatCard label="Expectancy (R)" value={s.expectancy_r != null ? `${s.expectancy_r}R` : "—"}
+                        color={s.expectancy_r >= 0 ? "var(--bull)" : "var(--bear)"} />
+                      <StatCard label="Sharpe" value={s.sharpe_ratio ?? "—"} />
+                      <StatCard label="Sortino" value={s.sortino_ratio ?? "—"} />
+                    </div>
+                    {s.risk_adjusted_note && <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>{s.risk_adjusted_note}</div>}
+                  </div>
+
+                  <div className="card" style={{ marginBottom: 12 }}>
+                    <div className="card-header"><span className="card-title">Monte Carlo ({mc?.simulations ?? 1000} resamples)</span></div>
+                    {!mc || !mc.available ? (
+                      <div style={{ padding: 16, color: "var(--text-muted)", fontSize: 12 }}>{mc?.note || "Not available for this run."}</div>
+                    ) : (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
+                          <StatCard label="Median final" value={`$${mc.final_balance.median}`} sub={`5th–95th: $${mc.final_balance.p5} – $${mc.final_balance.p95}`} />
+                          <StatCard label="Typical max DD" value={`${mc.max_drawdown_pct.median}%`} sub={`1 in 20 worse than ${mc.max_drawdown_pct.p95}%`}
+                            color={mc.max_drawdown_pct.p95 < 20 ? "var(--bull)" : "var(--bear)"} />
+                          <StatCard label="Chance of a loss" value={`${mc.probability_of_loss_pct}%`}
+                            color={mc.probability_of_loss_pct < 20 ? "var(--bull)" : "var(--bear)"} />
+                          <StatCard label={`Chance of -${mc.ruin_threshold_pct}%`} value={`${mc.probability_of_ruin_pct}%`}
+                            color={mc.probability_of_ruin_pct < 1 ? "var(--bull)" : "var(--bear)"} />
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>{mc.note}</div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="card">
+                    <div className="card-header"><span className="card-title">What the engine decided on every bar</span></div>
+                    {dsTotal === 0 ? (
+                      <div style={{ padding: 16, color: "var(--text-muted)", fontSize: 12 }}>No decision-state data in this run.</div>
+                    ) : (
+                      <table>
+                        <thead><tr><th>Decision state</th><th>Count</th><th>Share</th></tr></thead>
+                        <tbody>
+                          {Object.entries(ds).sort(([, a], [, b]) => b - a).map(([k, n]) => (
+                            <tr key={k}>
+                              <td style={{ fontWeight: 600 }}>{k}</td>
+                              <td className="mono">{n}</td>
+                              <td className="mono">{(n / dsTotal * 100).toFixed(1)}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Order Type / Fill Simulation */}
             {activeTab === "fills" && (

@@ -12,6 +12,22 @@ function StatCard({ label, value, sub, color = "accent", icon }) {
   );
 }
 
+// How a trade ended, from MT5's own deal history (bridge.py close_reason).
+// "unknown" = closed by a fallback path where the real reason wasn't available
+// (also every trade closed before this was tracked) — shown as a dash, not guessed.
+const CLOSE_REASON = {
+  tp:        { label: "TP",       cls: "bull" },
+  sl:        { label: "SL",       cls: "bear" },
+  stop_out:  { label: "STOP-OUT", cls: "bear" },
+  manual:    { label: "MANUAL",   cls: "accent" },
+};
+function CloseReasonBadge({ trade }) {
+  if (trade.status === "open") return <span style={{ color: "var(--text-muted)" }}>—</span>;
+  const r = CLOSE_REASON[trade.close_reason];
+  if (!r) return <span style={{ color: "var(--text-muted)" }}>—</span>;
+  return <span className={`badge ${r.cls}`}>{r.label}</span>;
+}
+
 export default function Trades() {
   const [trades, setTrades] = useState([]);
   const [stats, setStats] = useState(null);
@@ -203,7 +219,7 @@ export default function Trades() {
                   <tr>
                     <th>Ticket</th><th>Symbol</th><th>Dir</th><th>Vol</th>
                     <th>Open</th><th>Close</th><th>SL</th><th>TP</th>
-                    <th>P&L</th><th>Status</th><th>Opened</th>
+                    <th>P&L</th><th>Status</th><th>Closed by</th><th>Opened</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -227,6 +243,7 @@ export default function Trades() {
                           {t.status?.toUpperCase()}
                         </span>
                       </td>
+                      <td><CloseReasonBadge trade={t} /></td>
                       <td style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>
                         {t.open_time ? new Date(t.open_time).toLocaleString() : "—"}
                       </td>
