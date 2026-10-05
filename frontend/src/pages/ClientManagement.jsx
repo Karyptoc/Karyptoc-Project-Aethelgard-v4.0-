@@ -93,11 +93,27 @@ export default function ClientManagement() {
     } catch {}
   };
 
-  const collectFee = async (clientId, name, amount) => {
-    if (!window.confirm(`Collect $${amount.toFixed(2)} performance fee from ${name}?`)) return;
+  // Real Pesapal invoice: pending_fee is only cleared once Pesapal confirms
+  // payment (backend onInvoicePaid), so a failed/abandoned payment never
+  // wipes the fee owed.
+  const sendFeeInvoice = async (clientId, name, amount) => {
+    if (!window.confirm(`Create a payment link for $${amount.toFixed(2)} performance fee from ${name}?`)) return;
+    try {
+      const r = await api.post(`/api/copy-trading/fees/invoice/${clientId}`);
+      const url = r.data.payment_url;
+      try { await navigator.clipboard.writeText(url); showToast(`✅ Payment link copied — send it to ${name}`); }
+      catch { window.prompt("Payment link (copy and send to client):", url); }
+      await load();
+    } catch (e) { showToast("❌ " + (e.response?.data?.error || e.message)); }
+  };
+
+  // Offline settlement only (cash/bank transfer outside Pesapal): clears
+  // pending_fee immediately with no payment check.
+  const markFeePaidOffline = async (clientId, name, amount) => {
+    if (!window.confirm(`Mark $${amount.toFixed(2)} from ${name} as paid OFFLINE? This clears the fee without any payment check.`)) return;
     try {
       await api.post(`/api/copy-trading/fees/collect/${clientId}`);
-      showToast(`✅ $${amount.toFixed(2)} fee collected from ${name}`);
+      showToast(`✅ $${amount.toFixed(2)} marked paid for ${name}`);
       await load();
     } catch (e) { showToast("❌ " + e.message); }
   };
@@ -287,9 +303,14 @@ export default function ClientManagement() {
                     <td><span className={`badge ${c.status === "active" ? "bull" : "bear"}`}>{c.status}</span></td>
                     <td className="mono">
                       {parseFloat(c.pending_fee||0) > 0 ? (
-                        <button className="btn btn-warning btn-xs" onClick={() => collectFee(c.id, c.name, c.pending_fee)}>
-                          Collect ${parseFloat(c.pending_fee).toFixed(2)}
-                        </button>
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          <button className="btn btn-warning btn-xs" onClick={() => sendFeeInvoice(c.id, c.name, parseFloat(c.pending_fee))}
+                            title="Create a Pesapal payment link">
+                            Invoice ${parseFloat(c.pending_fee).toFixed(2)}
+                          </button>
+                          <button className="btn btn-ghost btn-xs" onClick={() => markFeePaidOffline(c.id, c.name, parseFloat(c.pending_fee))}
+                            title="Paid outside Pesapal">Paid offline</button>
+                        </div>
                       ) : <span style={{ color: "var(--text-muted)" }}>$0.00</span>}
                     </td>
                     <td>

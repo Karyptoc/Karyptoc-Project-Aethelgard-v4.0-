@@ -147,16 +147,19 @@ export default function Billing() {
                     <tr key={inv.id}>
                       <td className="mono" style={{ fontSize: 11 }}>{inv.invoice_number}</td>
                       <td style={{ fontWeight: 600, color: "var(--text-primary)" }}>
-                        {inv.clients?.full_name || "—"}
+                        {inv.clients?.full_name || inv.client_accounts?.name || "—"}
+                        {inv.client_account_id && (
+                          <span className="badge blue" style={{ marginLeft: 6, fontSize: 9 }}>COPY-TRADING</span>
+                        )}
                         <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>
-                          {inv.clients?.email}
+                          {inv.clients?.email || inv.client_accounts?.email}
                         </div>
                       </td>
                       <td className="mono" style={{ fontSize: 11 }}>
-                        {inv.period_start} → {inv.period_end}
+                        {inv.period_start ? `${inv.period_start} → ${inv.period_end}` : "—"}
                       </td>
-                      <td className="mono">{inv.gross_profit?.toFixed(2)}</td>
-                      <td className="mono">{inv.split_percent}%</td>
+                      <td className="mono">{inv.gross_profit != null ? inv.gross_profit.toFixed(2) : "—"}</td>
+                      <td className="mono">{inv.split_percent != null ? `${inv.split_percent}%` : "—"}</td>
                       <td style={{ fontWeight: 700, color: "var(--text-primary)" }}>
                         {inv.amount_due?.toFixed(2)}
                       </td>
