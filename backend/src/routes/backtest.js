@@ -16,6 +16,7 @@ const { verifyToken } = require("../middleware/auth");
 const core = require("../services/signalCore");
 const riskEngine = require("../services/riskEngine");
 const perf = require("../services/performanceMetrics");
+const { runMonteCarlo } = require("../services/monteCarlo");
 
 // FIX: these were badly miscalibrated for GOLD/US30Cash/GER40Cash/BTCUSD -
 // confirmed by comparing against real spreads observed in live bridge logs
@@ -351,6 +352,41 @@ router.post("/walk-forward", verifyToken, async (req, res) => {
 // loop itself still runs on H4 exactly as before. Intentionally split into
 // its own stage so this data-availability change can be verified
 // independently before the higher-risk logic rewrite happens on top of it.
+// NEW (Roadmap Phase 5, regime segmentation): classifies volatility at
+// trade entry by comparing the current 14-bar ATR to the ATR of the window
+// just before it. >1.3x = expanding (HIGH_VOL), <0.7x = contracting
+// (LOW_VOL). Returns "UNKNOWN" (never a guessed NORMAL) if there isn't
+// enough history to form the baseline.
+function classifyVolatility(bars, currentATR) {
+  if (!bars || bars.length < 50 || !currentATR) return "UNKNOWN";
+  const baseline = core.atrCalc(bars.slice(0, -14), 14);
+  if (!baseline) return "UNKNOWN";
+  const ratio = currentATR / baseline;
+  return ratio > 1.3 ? "HIGH_VOL" : ratio < 0.7 ? "LOW_VOL" : "NORMAL_VOL";
+}
+
+function summarizeBy(trades, keyFn) {
+  const out = {};
+  trades.forEach(t => {
+    const k = keyFn(t);
+    if (!out[k]) out[k] = { trades: 0, wins: 0, pnl: 0, gross_profit: 0, gross_loss: 0 };
+    out[k].trades++;
+    if (t.outcome === "WIN") out[k].wins++;
+    out[k].pnl += t.pnl;
+    if (t.pnl > 0) out[k].gross_profit += t.pnl; else out[k].gross_loss += Math.abs(t.pnl);
+  });
+  Object.values(out).forEach(b => {
+    b.win_rate = b.trades ? parseFloat((b.wins / b.trades * 100).toFixed(1)) : 0;
+    b.profit_factor = b.gross_loss > 0 ? parseFloat((b.gross_profit / b.gross_loss).toFixed(2)) : null;
+    b.expectancy = b.trades ? parseFloat((b.pnl / b.trades).toFixed(2)) : 0;
+    b.pnl = parseFloat(b.pnl.toFixed(2));
+    b.gross_profit = parseFloat(b.gross_profit.toFixed(2));
+    b.gross_loss = parseFloat(b.gross_loss.toFixed(2));
+    b.low_sample = b.trades < 10; // a regime with <10 trades is anecdote, not evidence
+  });
+  return out;
+}
+
 function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, params) {
   // NEW (walk-forward support, Oct 4): windowEnd is optional and only
   // gates new ENTRIES (barTime > windowEnd is skipped, same as
@@ -730,6 +766,8 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
       kill_zone: session.killZone,
       htf_bias: htfBias.bias,
       htf_full_alignment: htfBias.fullAlignment,
+      regime: ind.trendState || "RANGING",
+      volatility: classifyVolatility(primaryBars, currentATR),
       ict_full_sequence: ictSequence.hasFullSequence,
       spread_cost: parseFloat(spreadCost.toFixed(2)),
       balance_after: parseFloat(balance.toFixed(2))
@@ -762,6 +800,9 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     byGrade[t.grade].pnl += t.pnl;
   });
 
+  const byRegime = summarizeBy(trades, t => t.regime || "UNKNOWN");
+  const byVolatility = summarizeBy(trades, t => t.volatility || "UNKNOWN");
+
   const htfAligned = trades.filter(t => t.htf_full_alignment);
   const htfNotAligned = trades.filter(t => !t.htf_full_alignment);
 
@@ -780,6 +821,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
   });
   const times = trades.map(t => t.exit_time || t.entry_time);
   const riskAdjusted = perf.buildRiskAdjustedSummary({ normalizedTrades, returns, times });
+  const monteCarlo = runMonteCarlo(returns, { initialBalance });
 
   return {
     summary: {
@@ -822,6 +864,9 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     },
     by_session: bySession,
     by_grade: byGrade,
+    by_regime: byRegime,
+    by_volatility: byVolatility,
+    monte_carlo: monteCarlo,
     trades: trades.slice(-100),
     equity_curve: equityCurve
   };
