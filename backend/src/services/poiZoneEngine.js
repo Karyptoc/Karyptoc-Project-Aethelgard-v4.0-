@@ -88,21 +88,47 @@ function barsToCheck(bars, lastSeen) {
   return slice.slice(-MAX_BARS_PER_CHECK);
 }
 
-async function notifyZoneTouched(zone) {
+/**
+ * Only zones that are still genuinely WAITING for a retest are worth
+ * watching. The first live version inserted every zone detected inside the
+ * 40-bar lookback, including ones price had already traded through and ones
+ * sitting right under the current price. On the next push the current bar
+ * was inside a whole stack of them, so a single push produced a burst of
+ * "touched" alerts, bullish and bearish on the same pair at once.
+ *
+ * A zone is watchable when:
+ *  - it is UNMITIGATED: no bar since it formed has penetrated it; and
+ *  - price is on its far side: a bullish zone needs price ABOVE it (a pullback
+ *    down into support is the retest), a bearish zone needs price BELOW it.
+ *    A zone with price already inside it, or on the wrong side, has either
+ *    been used up or is not a retest candidate.
+ */
+function isWatchable(d, bars, lastClose) {
+  const bullish = d.zone_type.endsWith("BULL");
+  if (bullish ? !(lastClose > d.high) : !(lastClose < d.low)) return false;
+  for (let i = Math.max(d.after, 0); i < bars.length; i++) {
+    if (barPenetratesZone(bars[i], { zone_high: d.high, zone_low: d.low })) return false;
+  }
+  return true;
+}
+
+async function notifyZonesTouched(symbol, timeframe, zones) {
+  // One message per symbol per push, not one per zone.
   try {
+    if (!zones.length) return;
     if (!(await isTelegramConfigured())) return;
-    const dir = zone.zone_type.startsWith("OB") ? "Order Block" : "Fair Value Gap";
-    const side = zone.zone_type.endsWith("BULL") ? "🟢 BULLISH" : "🔴 BEARISH";
-    const msg =
-      `📍 POI TOUCHED\n` +
-      `${side} ${dir} — ${zone.symbol} (${zone.timeframe})\n` +
-      `Zone: ${zone.zone_low} – ${zone.zone_high}`;
+    const lines = zones.map(z => {
+      const kind = z.zone_type.startsWith("OB") ? "Order Block" : "Fair Value Gap";
+      const side = z.zone_type.endsWith("BULL") ? "🟢 Bullish" : "🔴 Bearish";
+      return `${side} ${kind}: ${z.zone_low} – ${z.zone_high}`;
+    });
+    const msg = `📍 POI TOUCHED — ${symbol} (${timeframe})\n` + lines.join("\n");
     const tgResult = await sendTelegramMessage(msg);
     if (!tgResult.ok) {
-      await log("warning", "poiZoneEngine", `${zone.symbol}: touch alert not sent — ${tgResult.error}`);
+      await log("warning", "poiZoneEngine", `${symbol}: touch alert not sent — ${tgResult.error}`);
     }
   } catch (tgErr) {
-    await log("warning", "poiZoneEngine", `${zone.symbol}: touch alert threw unexpectedly — ${tgErr.message}`);
+    await log("warning", "poiZoneEngine", `${symbol}: touch alert threw unexpectedly — ${tgErr.message}`);
   }
 }
 
@@ -125,10 +151,14 @@ async function updatePOIZones(symbol, ohlcvData) {
     const obs = detectOBs(bars, OB_LOOKBACK);
     const fvgs = atrVal ? detectFVGs(bars, atrVal, FVG_LOOKBACK) : [];
 
-    const detected = [
-      ...obs.map(o => ({ zone_type: o.type === "BULLISH_OB" ? "OB_BULL" : "OB_BEAR", high: o.high, low: o.low })),
-      ...fvgs.map(f => ({ zone_type: f.type === "BULLISH_FVG" ? "FVG_BULL" : "FVG_BEAR", high: f.high, low: f.low })),
+    // `after` = index of the first bar that comes AFTER the zone fully formed
+    // (OB: the impulse candle is idx+1; FVG: the third candle is idx+2).
+    const detectedRaw = [
+      ...obs.map(o => ({ zone_type: o.type === "BULLISH_OB" ? "OB_BULL" : "OB_BEAR", high: o.high, low: o.low, after: o.idx + 2 })),
+      ...fvgs.map(f => ({ zone_type: f.type === "BULLISH_FVG" ? "FVG_BULL" : "FVG_BEAR", high: f.high, low: f.low, after: f.idx + 3 })),
     ];
+    const lastClose = bars[bars.length - 1].close;
+    const detected = detectedRaw.filter(d => isWatchable(d, bars, lastClose));
     // NOTE: deliberately NO early return when nothing new is detected — the
     // touch check and expiry sweep below must still run for zones already
     // being watched (an earlier version returned here and skipped both).
@@ -167,14 +197,16 @@ async function updatePOIZones(symbol, ohlcvData) {
     // bar), uses strict penetration, and skips zones inserted just now.
     const lastSeen = lastSeenBarTime.get(symbol);
     const checkBars = barsToCheck(bars, lastSeen);
+    const touchedNow = [];
     for (const zone of active) {
       if (checkBars.some(b => barPenetratesZone(b, zone))) {
         await supabaseAdmin.from("poi_zones")
           .update({ status: "touched", touched_at: new Date().toISOString() })
           .eq("id", zone.id);
-        await notifyZoneTouched(zone);
+        touchedNow.push(zone);
       }
     }
+    await notifyZonesTouched(symbol, timeframe, touchedNow);
     lastSeenBarTime.set(symbol, bars[bars.length - 1].time);
 
     // Housekeeping: expire stale untouched zones so the active set doesn't
