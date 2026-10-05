@@ -74,16 +74,16 @@ function DirectionBadge({ direction }) {
 
 function Empty({ title, children }) {
   return (
-    <div style={{ padding: "28px 20px", textAlign: "center" }}>
+    <div style={{ padding: "34px 24px", textAlign: "center" }}>
       <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>{title}</div>
       {children && <div style={{ fontSize: 13, color: "var(--text-muted)", maxWidth: 420, margin: "0 auto", lineHeight: 1.5 }}>{children}</div>}
     </div>
   );
 }
 
-function Section({ title, aside, children, flush }) {
+function Section({ title, aside, children, flush, className = "" }) {
   return (
-    <section className="cp-section">
+    <section className={`cp-section ${className}`.trim()}>
       <div className="cp-section-head">
         <h2>{title}</h2>
         {aside && <div className="cp-aside">{aside}</div>}
@@ -93,36 +93,105 @@ function Section({ title, aside, children, flush }) {
   );
 }
 
-// Cumulative net P&L over the history window, drawn as one quiet line.
-function PnlLine({ history, color }) {
-  if (!history || history.length < 2) return null;
-  let run = 0;
-  const pts = history.map(d => (run += num(d.net_pnl)));
-  const min = Math.min(0, ...pts), max = Math.max(0, ...pts);
-  const range = max - min || 1;
-  const W = 400, H = 70, pad = 4;
-  const x = i => (i / (pts.length - 1)) * W;
-  const y = v => pad + (1 - (v - min) / range) * (H - pad * 2);
-  const line = pts.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-  const zeroY = y(0);
+// Equity over the history window, rebuilt by walking back from today's equity
+// through each day's net result. The curve is the portal's centrepiece, so it
+// is large and can be inspected: hover (or touch) to read any day.
+function EquityCurve({ history, equityNow, money }) {
+  const [hover, setHover] = useState(null);
+  const series = useMemo(() => {
+    if (!history || history.length < 2) return [];
+    const total = history.reduce((s, d) => s + num(d.net_pnl), 0);
+    let run = num(equityNow) - total;
+    return history.map(d => { run += num(d.net_pnl); return { date: d.date, v: run }; });
+  }, [history, equityNow]);
+
+  if (series.length < 2) {
+    return (
+      <div className="cp-curve cp-curve-empty">
+        <svg viewBox="0 0 800 160" preserveAspectRatio="none" aria-hidden="true">
+          <line x1="0" x2="800" y1="100" y2="100" stroke="rgba(255,255,255,.22)" strokeDasharray="4 6" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <p>Your equity curve appears here after your first full trading day.</p>
+      </div>
+    );
+  }
+
+  const W = 800, H = 160, top = 28, bottom = 10;
+  const vals = series.map(p => p.v);
+  let min = Math.min(...vals), max = Math.max(...vals);
+  if (max - min < 1e-9) { min -= 1; max += 1; }
+  const padv = (max - min) * 0.12; min -= padv; max += padv;
+  const n = series.length;
+  const x = i => (i / (n - 1)) * W;
+  const y = v => top + (1 - (v - min) / (max - min)) * (H - top - bottom);
+  const line = series.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+  const up = series[n - 1].v >= series[0].v;
+  const color = up ? "var(--cp-gain)" : "var(--cp-loss)";
+
+  const pick = clientX => {
+    const r = document.getElementById("cp-curve-box")?.getBoundingClientRect();
+    if (!r || r.width === 0) return;
+    const ratio = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    setHover(Math.round(ratio * (n - 1)));
+  };
+  const h = hover === null ? null : series[hover];
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img"
-      aria-label="Cumulative profit and loss, last 30 days" style={{ width: "100%", height: 70, display: "block" }}>
-      <line x1="0" x2={W} y1={zeroY} y2={zeroY} stroke="var(--border-bright)" strokeDasharray="3 4" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      <path d={`${line} L${W},${zeroY} L0,${zeroY} Z`} fill={color} opacity="0.10" />
-      <path d={line} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-    </svg>
+    <div className="cp-curve" id="cp-curve-box"
+      onMouseMove={e => pick(e.clientX)} onMouseLeave={() => setHover(null)}
+      onTouchStart={e => pick(e.touches[0].clientX)} onTouchMove={e => pick(e.touches[0].clientX)} onTouchEnd={() => setHover(null)}
+      role="img" aria-label={`Account equity over the last ${n} days, from ${money.plain(series[0].v)} to ${money.plain(series[n - 1].v)}`}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="cp-area" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor={up ? "#5BD6A6" : "#FF8F85"} stopOpacity="0.28" />
+            <stop offset="1" stopColor={up ? "#5BD6A6" : "#FF8F85"} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={`${line} L${W},${H} L0,${H} Z`} fill="url(#cp-area)" />
+        <path d={line} fill="none" stroke={color} strokeWidth="2.25" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      </svg>
+      {h && (
+        <>
+          <div className="cp-curve-rule" style={{ left: `${(hover / (n - 1)) * 100}%` }} />
+          <div className="cp-curve-dot" style={{ left: `${(hover / (n - 1)) * 100}%`, top: `${(y(h.v) / H) * 100}%`, background: color }} />
+          <div className="cp-curve-tip" style={{ left: `${(hover / (n - 1)) * 100}%`, transform: `translateX(${hover > n * 0.7 ? "-105%" : "8px"})` }}>
+            <strong>{money.plain(h.v)}</strong>
+            <span>{new Date(h.date).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}</span>
+          </div>
+        </>
+      )}
+      <div className="cp-curve-axis">
+        <span>{new Date(series[0].date).toLocaleDateString([], { day: "numeric", month: "short" })}</span>
+        <span>Today</span>
+      </div>
+    </div>
   );
 }
 
+function Icon({ name }) {
+  const common = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
+  if (name === "lock") return <svg {...common}><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>;
+  if (name === "check") return <svg {...common}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
+  if (name === "monitor") return <svg {...common}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>;
+  if (name === "cloud") return <svg {...common}><path d="M7 18a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 17 8.5a4.5 4.5 0 0 1 .5 9H7z" /></svg>;
+  return null;
+}
+
+// Browsers aggressively autofill a text + password pair with the user's saved
+// sign-in, which here is the admin's own email and password. The two hidden
+// decoy fields absorb that autofill, the real password field is marked
+// "new-password", and no <form> element is used so the browser never offers to
+// save these as a login.
 function MT5ConnectForm({ token, onConnected }) {
+  const [method, setMethod] = useState("login");
   const [form, setForm] = useState({ mt5_login: "", mt5_password: "", mt5_server: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async () => {
     if (!form.mt5_login || !form.mt5_password || !form.mt5_server) {
-      return setError("Enter your MT5 login, password and server.");
+      return setError("Enter your MT5 login number, password and server.");
     }
     setLoading(true);
     setError("");
@@ -130,62 +199,241 @@ function MT5ConnectForm({ token, onConnected }) {
       await api(token).post("/api/copy-trading/portal/connect-mt5", form);
       onConnected();
     } catch (e) {
-      setError(e.response?.data?.error || "Couldn't connect. Check the details and try again.");
+      setError(e.response?.data?.error || "We couldn't connect. Check the login number, password and server, then try again.");
     } finally {
       setLoading(false);
     }
   };
+  const submitOnEnter = e => { if (e.key === "Enter") handleSubmit(); };
 
   const downloadBridge = () => {
     window.open(`${API_BASE}/api/copy-trading/portal/bridge-script?token=${token}`, "_blank");
   };
 
+  const Method = ({ id, icon, title, text }) => (
+    <button type="button" role="radio" aria-checked={method === id} className="cp-method" onClick={() => setMethod(id)}>
+      <span className="cp-method-icon"><Icon name={icon} /></span>
+      <span>
+        <strong>{title}</strong>
+        <small>{text}</small>
+      </span>
+      <span className="cp-method-tick"><Icon name="check" /></span>
+    </button>
+  );
+
   return (
-    <div style={{ maxWidth: 520 }}>
-      <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: "0 0 14px", lineHeight: 1.5 }}>
-        Choose how to connect your MetaTrader 5 account so trades can be copied to it.
-      </p>
-      <div className="cp-two">
-        <div style={{ border: "2px solid var(--accent)", borderRadius: "var(--radius)", padding: 14 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Enter your login details</div>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.45 }}>Your broker account is connected from our server. Fill in the form below.</div>
-        </div>
-        <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 14 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Run a script on your PC</div>
-          <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.45 }}>MT5 stays on your computer.</div>
-          <button className="btn btn-ghost btn-xs" style={{ marginTop: 8 }} onClick={downloadBridge}>Download script</button>
-        </div>
+    <div style={{ maxWidth: 560 }}>
+      <div className="cp-methods" role="radiogroup" aria-label="How to connect">
+        <Method id="login" icon="cloud" title="Enter your login details" text="We connect to your broker account from our server." />
+        <Method id="script" icon="monitor" title="Run a script on your PC" text="MT5 stays on your own computer." />
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
-        <div>
-          <label className="form-label" htmlFor="mt5l">MT5 login number</label>
-          <input id="mt5l" className="form-input" placeholder="e.g. 334414473" inputMode="numeric"
-            value={form.mt5_login} onChange={e => setForm({ ...form, mt5_login: e.target.value })} />
-        </div>
-        <div>
-          <label className="form-label" htmlFor="mt5p">MT5 password</label>
-          <input id="mt5p" className="form-input" type="password" autoComplete="off"
-            value={form.mt5_password} onChange={e => setForm({ ...form, mt5_password: e.target.value })} />
-        </div>
-        <div>
-          <label className="form-label" htmlFor="mt5s">MT5 server</label>
-          <input id="mt5s" className="form-input" placeholder="e.g. XMGlobal-MT5 9"
-            value={form.mt5_server} onChange={e => setForm({ ...form, mt5_server: e.target.value })} />
-        </div>
-      </div>
+      {method === "login" ? (
+        <div className="cp-fields">
+          {/* Decoys that soak up browser autofill — never submitted or shown. */}
+          <input type="text" name="username" autoComplete="username" tabIndex={-1} aria-hidden="true" className="cp-decoy" />
+          <input type="password" name="password" autoComplete="current-password" tabIndex={-1} aria-hidden="true" className="cp-decoy" />
 
-      {error && <div className="alert alert-error" style={{ marginTop: 12 }}>{error}</div>}
+          <div>
+            <label className="cp-label" htmlFor="cp-mt5-login">MT5 login number</label>
+            <input id="cp-mt5-login" name="mt5-account-number" className="form-input" placeholder="For example 334414473"
+              inputMode="numeric" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+              data-lpignore="true" data-1p-ignore="true" data-form-type="other"
+              value={form.mt5_login} onKeyDown={submitOnEnter}
+              onChange={e => setForm({ ...form, mt5_login: e.target.value.replace(/\D/g, "") })} />
+            <div className="cp-help">The number of your trading account, shown at the top of MetaTrader 5. It is not an email address.</div>
+          </div>
+          <div>
+            <label className="cp-label" htmlFor="cp-mt5-pass">MT5 trading password</label>
+            <input id="cp-mt5-pass" name="mt5-trading-secret" className="form-input" type="password"
+              autoComplete="new-password" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+              data-lpignore="true" data-1p-ignore="true" data-form-type="other"
+              value={form.mt5_password} onKeyDown={submitOnEnter}
+              onChange={e => setForm({ ...form, mt5_password: e.target.value })} />
+            <div className="cp-help">Use your trading password. The read-only investor password can't place trades.</div>
+          </div>
+          <div>
+            <label className="cp-label" htmlFor="cp-mt5-server">MT5 server</label>
+            <input id="cp-mt5-server" name="mt5-server-name" className="form-input" placeholder="For example XMGlobal-MT5 9"
+              autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+              data-lpignore="true" data-1p-ignore="true" data-form-type="other"
+              value={form.mt5_server} onKeyDown={submitOnEnter}
+              onChange={e => setForm({ ...form, mt5_server: e.target.value })} />
+            <div className="cp-help">Shown on your broker's login screen, next to your account number.</div>
+          </div>
 
-      <button className="btn btn-primary" style={{ width: "100%", marginTop: 14 }} onClick={handleSubmit} disabled={loading}>
-        {loading ? "Connecting…" : "Connect MT5 account"}
-      </button>
-      <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 8 }}>
-        Your login details are encrypted and used only to place and monitor trades on your account.
-      </p>
+          {error && <div className="alert alert-error">{error}</div>}
+
+          <button type="button" className="btn btn-primary cp-cta" onClick={handleSubmit} disabled={loading}>
+            {loading ? "Connecting" : "Connect MT5 account"}
+          </button>
+          <div className="cp-trust"><Icon name="lock" /><span>Your login details are encrypted and used only to place and monitor trades on your account.</span></div>
+        </div>
+      ) : (
+        <div className="cp-fields">
+          <p className="cp-help" style={{ margin: 0, fontSize: 13 }}>
+            The script runs on the computer where MetaTrader 5 is installed and sends your account updates to us. Your login stays on your computer.
+          </p>
+          <button type="button" className="btn btn-primary cp-cta" onClick={downloadBridge}>Download the script</button>
+          <div className="cp-trust"><Icon name="monitor" /><span>MetaTrader 5 and the script must stay running for trades to be copied.</span></div>
+        </div>
+      )}
     </div>
   );
 }
+
+// Portal styling. Page chrome (surfaces, borders, text) follows the app theme so
+// dark mode works; the hero panel is a fixed deep navy in both themes.
+const PORTAL_CSS = `
+  .cp-root { --cp-vault: #0E1C30; --cp-vault-line: rgba(255,255,255,.10); --cp-gold: #C8A24A; --cp-gain: #5BD6A6; --cp-loss: #FF8F85;
+    min-height: 100vh; background: var(--bg-base); color: var(--text-primary); font-family: var(--font-main); -webkit-font-smoothing: antialiased; }
+  .cp-root * { box-sizing: border-box; }
+  .cp-center { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; background: var(--bg-base); color: var(--text-muted); font-size: 13px; font-family: var(--font-main); }
+  .cp-center h1 { margin: 0; font-size: 18px; font-weight: 700; color: var(--text-primary); }
+  .cp-center p { margin: 0; max-width: 380px; line-height: 1.55; }
+  .cp-mark { width: 36px; height: 36px; border-radius: 10px; background: #0E1C30; color: #C8A24A; display: grid; place-items: center; font-weight: 700; font-size: 19px; letter-spacing: -.02em; flex: none; box-shadow: inset 0 0 0 1px rgba(200,162,74,.4); }
+  .cp-pulse { animation: cp-pulse 1.4s ease-in-out infinite; }
+  @keyframes cp-pulse { 50% { opacity: .45; } }
+
+  .cp-top { background: var(--bg-surface); border-bottom: 1px solid var(--border); }
+  .cp-top-in { max-width: 1040px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .cp-brand { display: flex; align-items: center; gap: 11px; }
+  .cp-brand b { display: block; font-size: 15px; font-weight: 700; letter-spacing: -.01em; line-height: 1.15; }
+  .cp-brand small { display: block; font-size: 12px; color: var(--text-muted); }
+  .cp-who { display: flex; align-items: center; gap: 12px; }
+  .cp-who-name { font-size: 14px; font-weight: 600; text-align: right; }
+  .cp-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+  .cp-pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .cp-pill.ok { color: var(--bull); background: var(--bull-dim); }
+  .cp-pill.warn { color: var(--warn); background: var(--warn-dim); }
+
+  .cp-wrap { max-width: 1040px; margin: 0 auto; padding: 20px 20px 44px; }
+
+  .cp-hero { background: var(--cp-vault); color: #fff; border-radius: 20px; overflow: hidden; margin-bottom: 18px; box-shadow: 0 14px 34px -20px rgba(14,28,48,.6); }
+  .cp-hero-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 26px 28px 0; }
+  .cp-hero-label { font-size: 13px; color: rgba(255,255,255,.62); margin-bottom: 4px; }
+  .cp-big { font-size: 54px; font-weight: 500; letter-spacing: -.035em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  .cp-chg { margin-top: 12px; font-size: 13px; color: rgba(255,255,255,.66); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .cp-delta { font-weight: 600; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .cp-delta.up { background: rgba(91,214,166,.14); color: var(--cp-gain); }
+  .cp-delta.down { background: rgba(255,143,133,.14); color: var(--cp-loss); }
+  .cp-delta.flat { background: rgba(255,255,255,.10); color: rgba(255,255,255,.82); }
+  .cp-updated { font-size: 12px; color: rgba(255,255,255,.5); white-space: nowrap; padding-top: 4px; }
+
+  .cp-curve { position: relative; height: 176px; margin-top: 4px; cursor: crosshair; touch-action: pan-y; }
+  .cp-curve svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .cp-curve-axis { position: absolute; left: 28px; right: 28px; bottom: 8px; display: flex; justify-content: space-between; font-size: 12px; color: rgba(255,255,255,.45); pointer-events: none; }
+  .cp-curve-empty { cursor: default; }
+  .cp-curve-empty p { position: absolute; left: 28px; right: 28px; bottom: 16px; margin: 0; font-size: 13px; color: rgba(255,255,255,.62); }
+  .cp-curve-rule { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.28); pointer-events: none; }
+  .cp-curve-dot { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid var(--cp-vault); pointer-events: none; }
+  .cp-curve-tip { position: absolute; top: 8px; background: #fff; color: #0E1C30; border-radius: 10px; padding: 7px 11px; font-size: 12px; display: flex; flex-direction: column; gap: 1px; box-shadow: 0 8px 20px -8px rgba(0,0,0,.5); pointer-events: none; white-space: nowrap; }
+  .cp-curve-tip strong { font-size: 14px; font-variant-numeric: tabular-nums; }
+  .cp-curve-tip span { color: #5B6779; }
+
+  .cp-hero-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--cp-vault-line); }
+  .cp-hero-stats > div { padding: 16px 28px; border-left: 1px solid var(--cp-vault-line); min-width: 0; }
+  .cp-hero-stats > div:first-child { border-left: 0; }
+  .cp-hero-stats dt { font-size: 12px; color: rgba(255,255,255,.58); margin: 0 0 4px; }
+  .cp-hero-stats dd { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .cp-hero-stats .up { color: var(--cp-gain); }
+  .cp-hero-stats .down { color: var(--cp-loss); }
+
+  .cp-setup { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px 22px; margin-bottom: 18px; }
+  .cp-setup h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+  .cp-setup > p { margin: 0 0 16px; font-size: 13px; color: var(--text-secondary); max-width: 62ch; line-height: 1.5; }
+  .cp-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .cp-step { border: 1px solid var(--border); border-radius: 12px; padding: 14px; display: flex; gap: 12px; align-items: flex-start; background: var(--bg-base); }
+  .cp-step-n { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 600; border: 1.5px solid var(--border-bright); color: var(--text-muted); }
+  .cp-step-n svg { width: 14px; height: 14px; }
+  .cp-step[data-state="done"] .cp-step-n { background: var(--bull); border-color: var(--bull); color: #fff; }
+  .cp-step[data-state="current"] { border-color: var(--accent); background: var(--bg-surface); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .cp-step[data-state="current"] .cp-step-n { border-color: var(--accent); color: var(--accent); }
+  .cp-step strong { display: block; font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .cp-step small { display: block; font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+  .cp-step .btn { margin-top: 10px; }
+
+  .cp-attn { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-radius: 12px; background: var(--warn-dim); border-left: 3px solid var(--warn); margin-bottom: 12px; font-size: 13px; }
+
+  .cp-tabs-wrap { position: sticky; top: 0; z-index: 20; background: var(--bg-base); margin: 0 -20px 18px; padding: 0 20px; border-bottom: 1px solid var(--border); }
+  .cp-tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  .cp-tabs::-webkit-scrollbar { display: none; }
+  .cp-tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 12px 14px; font: inherit; font-size: 14px; font-weight: 500; color: var(--text-secondary); cursor: pointer; white-space: nowrap; transition: color .15s, border-color .15s; }
+  .cp-tab:hover { color: var(--text-primary); }
+  .cp-tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+  .cp-tab:focus-visible, .cp-chip:focus-visible, .cp-method:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+  .cp-section { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 16px; overflow: hidden; }
+  .cp-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .cp-section-head h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.005em; }
+  .cp-aside { font-size: 12.5px; color: var(--text-muted); }
+  .cp-section-body { padding: 18px 20px; }
+  .cp-plan { box-shadow: inset 0 3px 0 var(--cp-gold); }
+  .cp-kv { margin: 0; display: grid; grid-template-columns: 1fr auto; column-gap: 0; }
+  .cp-kv dt, .cp-kv dd { margin: 0; padding: 11px 0; border-top: 1px solid var(--border); font-size: 13px; }
+  .cp-kv dt:first-of-type, .cp-kv dt:first-of-type + dd { border-top: 0; padding-top: 0; }
+  .cp-kv dt { color: var(--text-muted); }
+  .cp-kv dd { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; padding-left: 16px; }
+  .cp-note { margin: 14px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--text-secondary); }
+
+  .cp-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .cp-chip { appearance: none; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-secondary); border-radius: 999px; padding: 5px 13px; font: inherit; font-size: 12.5px; cursor: pointer; transition: background .15s, border-color .15s; }
+  .cp-chip:hover { border-color: var(--border-bright); }
+  .cp-chip[aria-pressed="true"] { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+  .cp-section .table-wrap { overflow-x: auto; }
+  .cp-table th { background: var(--bg-elevated); font-family: var(--font-main); font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-muted); text-align: left; white-space: nowrap; padding: 10px 14px; }
+  .cp-table td { padding: 12px 14px; font-size: 13px; }
+  .cp-table tbody tr:hover { background: var(--bg-hover); }
+  .cp-table .r { text-align: right; }
+  .cp-table .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  .cp-cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .cp-side { position: sticky; top: 64px; }
+  .cp-feed { list-style: none; margin: 0; padding: 0; }
+  .cp-feed li { display: flex; gap: 10px; justify-content: space-between; align-items: center; padding: 12px 20px; border-top: 1px solid var(--border); font-size: 13px; }
+  .cp-feed li:first-child { border-top: 0; }
+  .cp-feed small { display: block; color: var(--text-muted); font-size: 12.5px; margin-top: 2px; }
+
+  .cp-methods { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .cp-method { position: relative; display: flex; gap: 12px; align-items: flex-start; text-align: left; font: inherit; color: inherit; background: var(--bg-surface); border: 1.5px solid var(--border); border-radius: 12px; padding: 14px 40px 14px 14px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+  .cp-method:hover { border-color: var(--border-bright); }
+  .cp-method[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .cp-method strong { display: block; font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .cp-method small { display: block; font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+  .cp-method-icon { flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--bg-elevated); display: grid; place-items: center; color: var(--text-secondary); }
+  .cp-method[aria-checked="true"] .cp-method-icon { background: var(--accent-dim); color: var(--accent); }
+  .cp-method-tick { position: absolute; top: 12px; right: 12px; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; display: none; place-items: center; }
+  .cp-method-tick svg { width: 12px; height: 12px; }
+  .cp-method[aria-checked="true"] .cp-method-tick { display: grid; }
+  .cp-fields { display: flex; flex-direction: column; gap: 18px; }
+  .cp-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary); }
+  .cp-help { font-size: 12.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
+  .cp-decoy { position: absolute !important; opacity: 0; height: 0; width: 0; padding: 0; border: 0; pointer-events: none; }
+  .cp-cta { width: 100%; padding: 12px 16px; font-size: 14px; }
+  .cp-trust { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+  .cp-trust svg { flex: none; margin-top: 2px; }
+  .cp-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .cp-tile { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; font-size: 13px; line-height: 1.55; color: var(--text-secondary); }
+  .cp-tile strong { display: block; color: var(--text-primary); font-size: 14px; margin-bottom: 2px; }
+  .cp-foot { margin: 28px 0 0; font-size: 12.5px; color: var(--text-muted); text-align: center; line-height: 1.6; }
+
+  @media (max-width: 860px) {
+    .cp-hero-top { padding: 22px 20px 0; flex-direction: column; gap: 10px; }
+    .cp-updated { padding-top: 0; order: -1; }
+    .cp-big { font-size: 42px; }
+    .cp-curve { height: 150px; }
+    .cp-curve-axis, .cp-curve-empty p { left: 20px; right: 20px; }
+    .cp-hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cp-hero-stats > div { padding: 14px 20px; }
+    .cp-hero-stats > div:nth-child(odd) { border-left: 0; }
+    .cp-hero-stats > div:nth-child(n+3) { border-top: 1px solid var(--cp-vault-line); }
+    .cp-cols, .cp-methods, .cp-steps, .cp-tiles { grid-template-columns: 1fr; }
+    .cp-side { position: static; }
+    .cp-who-name { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .cp-root *, .cp-pulse { transition: none !important; animation: none !important; } }
+`;
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
@@ -268,18 +516,20 @@ export default function ClientPortalPublic() {
   }, [trades]);
 
   if (loading) return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-      background: "var(--bg-base)", flexDirection: "column", gap: 10 }}>
-      <div style={{ fontSize: 22, fontWeight: 700, color: "var(--accent)" }}>Æ</div>
-      <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Loading your account…</div>
+    <div className="cp-root">
+      <style>{PORTAL_CSS}</style>
+      <div className="cp-center"><div className="cp-mark cp-pulse">Æ</div><div>Loading your account</div></div>
     </div>
   );
 
   if (error || !data) return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-      background: "var(--bg-base)", flexDirection: "column", gap: 10, padding: 24, textAlign: "center" }}>
-      <div style={{ fontSize: 18, fontWeight: 700 }}>We can't open this page</div>
-      <div style={{ fontSize: 13, color: "var(--text-muted)", maxWidth: 380, lineHeight: 1.5 }}>{error}</div>
+    <div className="cp-root">
+      <style>{PORTAL_CSS}</style>
+      <div className="cp-center">
+        <div className="cp-mark">Æ</div>
+        <h1>We can't open this page</h1>
+        <p>{error}</p>
+      </div>
     </div>
   );
 
@@ -291,8 +541,8 @@ export default function ClientPortalPublic() {
   const fixedFee = account.fee_model === "fixed_fee";
   const feeName = fixedFee ? "monthly fee" : "performance fee";
   const feeSummaryText = fixedFee
-    ? `${M.plain(account.fixed_fee_amount)} per month, charged whether or not trades win`
-    : `${account.performance_fee_pct}% of the profit on each winning trade (you keep ${(100 - num(account.performance_fee_pct)).toFixed(0)}%)`;
+    ? `${M.plain(account.fixed_fee_amount)} per month`
+    : `${num(account.performance_fee_pct)}% of profit, you keep ${(100 - num(account.performance_fee_pct)).toFixed(0)}%`;
   const pendingInvoices = invoices.filter(i => i.status === "pending");
   const paidInvoices = invoices.filter(i => i.status === "paid");
 
@@ -302,8 +552,19 @@ export default function ClientPortalPublic() {
   const monthPnl = history.reduce((s, d) => s + num(d.net_pnl), 0);
   const totalReturn = num(account.total_return_pct);
 
+  // New-client setup guide: shown until the first trade has been copied.
+  const stepDone = [!!account.is_connected, !!account.is_connected && !!account.copy_enabled, trades.length > 0];
+  const currentStep = stepDone.findIndex(d => !d);
+  const showSetup = trades.length === 0 && currentStep !== -1;
+  const stepInfo = [
+    { title: "Connect your MT5 account", text: stepDone[0] ? "Your account is connected." : "Add your login so trades can be copied to it." },
+    { title: "Trade copying switched on", text: stepDone[1] ? "Copying is on." : account.is_connected ? "Copying is paused. Ask your account manager to turn it on." : "Turns on once your account is connected." },
+    { title: "Your first trade", text: stepDone[2] ? "Your first trade has been copied." : "It appears here when the engine next places a trade." },
+  ];
+  const deltaClass = num(account.total_pnl) > 0 ? "up" : num(account.total_pnl) < 0 ? "down" : "flat";
+
   const attention = [];
-  if (!account.is_connected) attention.push({ key: "conn", text: "Your MT5 account isn't connected, so trades can't be copied.", action: "Connect now", tab: "account" });
+  if (!account.is_connected && trades.length > 0) attention.push({ key: "conn", text: "Your MT5 account isn't connected, so new trades can't be copied.", action: "Reconnect", tab: "account" });
   if (pendingInvoices.length > 0) attention.push({
     key: "inv",
     text: `You have ${pendingInvoices.length} unpaid fee invoice${pendingInvoices.length > 1 ? "s" : ""} (${pendingInvoices.map(i => `${i.currency || ""} ${num(i.amount_due).toFixed(2)}`.trim()).join(" + ")}).`,
@@ -373,102 +634,70 @@ export default function ClientPortalPublic() {
 
   return (
     <div className="cp-root">
-      <style>{`
-        .cp-root { min-height: 100vh; background: var(--bg-base); color: var(--text-primary); font-family: var(--font-main); }
-        .cp-root * { box-sizing: border-box; }
-        .cp-top { background: var(--bg-surface); border-bottom: 1px solid var(--border); }
-        .cp-top-in { max-width: 1040px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-        .cp-wrap { max-width: 1040px; margin: 0 auto; padding: 20px 20px 40px; }
-        .cp-hero { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 28px; align-items: end; padding: 8px 0 20px; }
-        .cp-hero h1 { margin: 0; font-size: 13px; font-weight: 500; color: var(--text-secondary); }
-        .cp-big { font-family: var(--font-mono); font-size: 40px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; margin: 4px 0 6px; font-variant-numeric: tabular-nums; }
-        .cp-sub { font-size: 13px; color: var(--text-secondary); }
-        .cp-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 18px; }
-        .cp-strip > div { padding: 12px 16px; border-left: 1px solid var(--border); min-width: 0; }
-        .cp-strip > div:first-child { border-left: 0; }
-        .cp-strip dt { font-size: 12px; color: var(--text-muted); margin: 0 0 3px; }
-        .cp-strip dd { margin: 0; font-family: var(--font-mono); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
-        .cp-attn { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 11px 14px; border-radius: var(--radius); background: var(--warn-dim); border-left: 3px solid var(--warn); margin-bottom: 10px; font-size: 13px; }
-        .cp-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 18px; overflow-x: auto; }
-        .cp-tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 10px 14px; font: inherit; font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer; white-space: nowrap; }
-        .cp-tab:hover { color: var(--text-primary); }
-        .cp-tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-        .cp-tab:focus-visible, .cp-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-        .cp-section { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 16px; overflow: hidden; }
-        .cp-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-        .cp-section-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
-        .cp-aside { font-size: 12px; color: var(--text-muted); }
-        .cp-section-body { padding: 16px 18px; }
-        .cp-chips { display: flex; gap: 6px; flex-wrap: wrap; }
-        .cp-chip { appearance: none; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-secondary); border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 12px; cursor: pointer; }
-        .cp-chip[aria-pressed="true"] { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); font-weight: 600; }
-        .cp-table th { font-family: var(--font-main); font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-muted); text-align: left; white-space: nowrap; }
-        .cp-table .r { text-align: right; }
-        .cp-table .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-        .cp-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .cp-cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: start; }
-        .cp-feed { list-style: none; margin: 0; padding: 0; }
-        .cp-feed li { display: flex; gap: 10px; justify-content: space-between; align-items: center; padding: 11px 18px; border-top: 1px solid var(--border); font-size: 13px; }
-        .cp-feed li:first-child { border-top: 0; }
-        .cp-feed small { display: block; color: var(--text-muted); font-size: 12px; margin-top: 1px; }
-        @media (max-width: 860px) {
-          .cp-hero { grid-template-columns: 1fr; gap: 14px; }
-          .cp-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .cp-strip > div:nth-child(odd) { border-left: 0; }
-          .cp-strip > div:nth-child(n+3) { border-top: 1px solid var(--border); }
-          .cp-cols, .cp-two { grid-template-columns: 1fr; }
-          .cp-big { font-size: 32px; }
-        }
-        @media (prefers-reduced-motion: reduce) { .cp-root * { transition: none !important; } }
-      `}</style>
+      <style>{PORTAL_CSS}</style>
 
-      {/* Header */}
       <header className="cp-top">
         <div className="cp-top-in">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: 20, fontWeight: 700, color: "var(--accent)" }}>Æ</div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.2 }}>Aethelgard</div>
-              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Client portal</div>
-            </div>
+          <div className="cp-brand">
+            <div className="cp-mark">Æ</div>
+            <div><b>Aethelgard</b><small>Client portal</small></div>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 14, fontWeight: 600 }}>{account.name}</div>
-            <div style={{ fontSize: 12, color: account.is_connected ? "var(--bull)" : "var(--warn)" }}>
-              {account.is_connected ? "Account connected" : "Account not connected"}
-              {updatedAt && <span style={{ color: "var(--text-muted)" }}> · updated {updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
-            </div>
+          <div className="cp-who">
+            <div className="cp-who-name">{account.name}</div>
+            <span className={`cp-pill ${account.is_connected ? "ok" : "warn"}`}><i />{account.is_connected ? "Connected" : "Not connected"}</span>
           </div>
         </div>
       </header>
 
       <main className="cp-wrap">
-        {/* Account value */}
-        <div className="cp-hero">
-          <div>
-            <h1>Account equity</h1>
-            <div className="cp-big">{M.plain(account.equity)}</div>
-            <div className="cp-sub">
-              <span style={{ color: pnlColor(totalReturn), fontWeight: 600 }}>{M.signed(account.total_pnl)} ({sign(totalReturn)}{Math.abs(totalReturn)}%)</span>
-              {" "}since you started with {M.plain(account.starting_balance)}
+        <section className="cp-hero" aria-label="Account summary">
+          <div className="cp-hero-top">
+            <div>
+              <div className="cp-hero-label">Account equity</div>
+              <div className="cp-big">{M.plain(account.equity)}</div>
+              <div className="cp-chg">
+                <span className={`cp-delta ${deltaClass}`}>{M.signed(account.total_pnl)} ({sign(totalReturn)}{Math.abs(totalReturn)}%)</span>
+                <span>since you started with {M.plain(account.starting_balance)}</span>
+              </div>
             </div>
+            {updatedAt && <div className="cp-updated">Updated {updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>}
           </div>
-          <div>
-            <PnlLine history={history} color={monthPnl >= 0 ? "var(--bull)" : "var(--bear)"} />
-            <div className="cp-sub" style={{ marginTop: 4, fontSize: 12, color: "var(--text-muted)" }}>
-              Profit and loss after fees, last 30 days: <strong style={{ color: pnlColor(monthPnl) }}>{M.signed(monthPnl)}</strong>
-            </div>
-          </div>
-        </div>
 
-        <dl className="cp-strip" style={{ margin: "0 0 18px" }}>
-          <div><dt>Balance</dt><dd>{M.plain(account.balance)}</dd></div>
-          <div><dt>Today</dt><dd style={{ color: pnlColor(today.net_pnl) }}>{M.signed(today.net_pnl)}</dd></div>
-          <div><dt>Last 7 days</dt><dd style={{ color: pnlColor(weekPnl) }}>{M.signed(weekPnl)}</dd></div>
-          <div><dt>Win rate</dt><dd>{derived.winRate === null ? "—" : `${derived.winRate}%`}</dd></div>
-          <div><dt>Open trades</dt><dd>{derived.open.length}</dd></div>
-          <div><dt>Fees owed</dt><dd style={{ color: num(account.pending_fee) > 0 ? "var(--warn)" : undefined }}>{M.plain(account.pending_fee)}</dd></div>
-        </dl>
+          <EquityCurve history={history} equityNow={account.equity} money={M} />
+
+          <dl className="cp-hero-stats">
+            <div><dt>Today</dt><dd className={num(today.net_pnl) > 0 ? "up" : num(today.net_pnl) < 0 ? "down" : ""}>{M.signed(today.net_pnl)}</dd></div>
+            <div><dt>Last 7 days</dt><dd className={weekPnl > 0 ? "up" : weekPnl < 0 ? "down" : ""}>{M.signed(weekPnl)}</dd></div>
+            <div><dt>Win rate</dt><dd>{derived.winRate === null ? "No trades yet" : `${derived.winRate}%`}</dd></div>
+            <div><dt>Open trades</dt><dd>{derived.open.length}</dd></div>
+          </dl>
+        </section>
+
+        {showSetup && (
+          <section className="cp-setup" aria-label="Account setup">
+            <h2>{currentStep === 0 ? "Set up your account" : "You're nearly there"}</h2>
+            <p>
+              {currentStep === 0
+                ? "Connect your MetaTrader 5 account and the engine's trades will be copied to it automatically. Setup takes about a minute."
+                : "Your account is ready. The next trade the engine places will be copied and appear here."}
+            </p>
+            <ol className="cp-steps">
+              {stepInfo.map((s, i) => {
+                const state = stepDone[i] ? "done" : i === currentStep ? "current" : "todo";
+                return (
+                  <li key={s.title} className="cp-step" data-state={state}>
+                    <span className="cp-step-n">{stepDone[i] ? <Icon name="check" /> : i + 1}</span>
+                    <div>
+                      <strong>{s.title}</strong>
+                      <small>{s.text}</small>
+                      {i === 0 && state === "current" && <button className="btn btn-primary btn-sm" onClick={() => setActiveTab("account")}>Connect now</button>}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        )}
 
         {attention.map(a => (
           <div className="cp-attn" key={a.key}>
@@ -477,15 +706,16 @@ export default function ClientPortalPublic() {
           </div>
         ))}
 
-        {/* Tabs */}
-        <div className="cp-tabs" role="tablist" aria-label="Portal sections" style={{ marginTop: attention.length ? 8 : 0 }}>
-          {TABS.map(([id, label]) => (
-            <button key={id} role="tab" aria-selected={activeTab === id} className="cp-tab" onClick={() => setActiveTab(id)}>
-              {label}
-              {id === "billing" && pendingInvoices.length > 0 && <span className="badge warn" style={{ marginLeft: 6 }}>{pendingInvoices.length}</span>}
-              {id === "trades" && derived.open.length > 0 && <span className="badge accent" style={{ marginLeft: 6 }}>{derived.open.length}</span>}
-            </button>
-          ))}
+        <div className="cp-tabs-wrap">
+          <div className="cp-tabs" role="tablist" aria-label="Portal sections">
+            {TABS.map(([id, label]) => (
+              <button key={id} role="tab" aria-selected={activeTab === id} className="cp-tab" onClick={() => setActiveTab(id)}>
+                {label}
+                {id === "billing" && pendingInvoices.length > 0 && <span className="badge warn" style={{ marginLeft: 6 }}>{pendingInvoices.length}</span>}
+                {id === "trades" && derived.open.length > 0 && <span className="badge accent" style={{ marginLeft: 6 }}>{derived.open.length}</span>}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Overview */}
@@ -493,53 +723,86 @@ export default function ClientPortalPublic() {
           <>
             <Section title="Open trades" aside={`${derived.open.length} running`} flush>
               {derived.open.length === 0
-                ? <Empty title="No trades open right now">New trades from the engine appear here as soon as they are placed on your account.</Empty>
+                ? <Empty title="No trades open right now">
+                    {account.is_connected
+                      ? "New trades from the engine appear here as soon as they are placed on your account."
+                      : "Connect your MT5 account and trades appear here the moment the engine places them."}
+                  </Empty>
                 : <TradeTable rows={derived.open} compact />}
             </Section>
 
             <div className="cp-cols">
-              <Section title="Recent results" aside="Latest closed trades" flush>
-                {derived.recentCloses.length === 0
-                  ? <Empty title="No closed trades yet">When a trade reaches its take profit or stop loss, it is listed here.</Empty>
-                  : (
-                    <ul className="cp-feed">
-                      {derived.recentCloses.map(t => {
-                        const o = outcomeOf(t);
-                        return (
-                          <li key={t.id}>
-                            <div>
-                              <span className={`badge ${o.cls}`}>{o.short}</span>{" "}
-                              <strong>{t.symbol}</strong> <span style={{ color: "var(--text-muted)" }}>{t.direction === "BUY" ? "buy" : "sell"}</span>
-                              <small>{o.label} · {ago(t.close_time)}</small>
-                            </div>
-                            <div className="num" style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: pnlColor(t.profit) }}>{M.signed(t.profit)}</div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-              </Section>
+              <div>
+                <Section title="Recent results" aside="Latest closed trades" flush>
+                  {derived.recentCloses.length === 0
+                    ? <Empty title="No closed trades yet">When a trade reaches its take profit or stop loss, it is listed here with the result.</Empty>
+                    : (
+                      <ul className="cp-feed">
+                        {derived.recentCloses.map(t => {
+                          const o = outcomeOf(t);
+                          return (
+                            <li key={t.id}>
+                              <div>
+                                <span className={`badge ${o.cls}`}>{o.short}</span>{" "}
+                                <strong>{t.symbol}</strong> <span style={{ color: "var(--text-muted)" }}>{t.direction === "BUY" ? "buy" : "sell"}</span>
+                                <small>{o.label}, {ago(t.close_time)}</small>
+                              </div>
+                              <div className="num" style={{ fontFamily: "var(--font-mono)", fontWeight: 600, color: pnlColor(t.profit) }}>{M.signed(t.profit)}</div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                </Section>
 
-              <Section title="Latest signals" aside="From the engine" flush>
-                {signals.length === 0
-                  ? <Empty title="No recent signals">Signals from the last 14 days appear here.</Empty>
-                  : (
-                    <ul className="cp-feed">
-                      {signals.slice(0, 6).map(s => {
-                        const st = signalStatus(s);
-                        return (
-                          <li key={s.id}>
-                            <div>
-                              <strong>{s.symbol}</strong> <DirectionBadge direction={s.direction} />
-                              <small>{ago(s.created_at)}{s.grade ? ` · grade ${s.grade}` : ""}</small>
-                            </div>
-                            <span className={`badge ${st.cls}`} title={st.label}>{st.short}</span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-              </Section>
+                <Section title="Latest signals" aside="From the engine" flush>
+                  {signals.length === 0
+                    ? <Empty title="No recent signals">Signals from the last 14 days appear here.</Empty>
+                    : (
+                      <ul className="cp-feed">
+                        {signals.slice(0, 6).map(s => {
+                          const st = signalStatus(s);
+                          return (
+                            <li key={s.id}>
+                              <div>
+                                <strong>{s.symbol}</strong> <DirectionBadge direction={s.direction} />
+                                <small>{ago(s.created_at)}{s.grade ? `, grade ${s.grade}` : ""}</small>
+                              </div>
+                              <span className={`badge ${st.cls}`} title={st.label}>{st.short}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                </Section>
+              </div>
+
+              <div className="cp-side">
+                <Section title="Your plan" className="cp-plan">
+                  <dl className="cp-kv">
+                    <dt>Fee type</dt><dd>{fixedFee ? "Fixed monthly fee" : "Profit split"}</dd>
+                    {fixedFee ? (
+                      <>
+                        <dt>Monthly fee</dt><dd>{M.plain(account.fixed_fee_amount)}</dd>
+                        {account.fixed_fee_next_due && <><dt>Next fee due</dt><dd>{new Date(account.fixed_fee_next_due).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })}</dd></>}
+                      </>
+                    ) : (
+                      <>
+                        <dt>You keep</dt><dd>{(100 - num(account.performance_fee_pct)).toFixed(0)}% of profit</dd>
+                        <dt>Our share</dt><dd>{num(account.performance_fee_pct)}% of profit</dd>
+                      </>
+                    )}
+                    <dt>Fees owed</dt><dd style={{ color: num(account.pending_fee) > 0 ? "var(--warn)" : undefined }}>{M.plain(account.pending_fee)}</dd>
+                    <dt>Balance</dt><dd>{M.plain(account.balance)}</dd>
+                  </dl>
+                  <p className="cp-note">
+                    {fixedFee
+                      ? "The monthly fee is charged whether or not trades win. Nothing is taken from individual trades."
+                      : "Our share is taken from each winning trade as it closes. Losing trades carry no fee."}
+                  </p>
+                  <button className="btn btn-ghost btn-sm" style={{ marginTop: 12 }} onClick={() => setActiveTab("billing")}>View billing</button>
+                </Section>
+              </div>
             </div>
           </>
         )}
@@ -757,15 +1020,15 @@ export default function ClientPortalPublic() {
         {activeTab === "account" && (
           <>
             <Section title="Your account">
-              <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "minmax(120px, 200px) 1fr", gap: "10px 16px", fontSize: 13 }}>
-                <dt style={{ color: "var(--text-muted)" }}>Name</dt><dd style={{ margin: 0 }}>{account.name}</dd>
-                <dt style={{ color: "var(--text-muted)" }}>MT5 connection</dt>
-                <dd style={{ margin: 0, color: account.is_connected ? "var(--bull)" : "var(--warn)" }}>{account.is_connected ? "Connected" : "Not connected"}</dd>
-                <dt style={{ color: "var(--text-muted)" }}>Trade copying</dt>
-                <dd style={{ margin: 0 }}>{account.copy_enabled ? "On" : "Paused"}</dd>
-                <dt style={{ color: "var(--text-muted)" }}>Last update from your account</dt>
-                <dd style={{ margin: 0 }}>{account.last_sync ? `${ago(account.last_sync)} (${when(account.last_sync)})` : "No update received yet"}</dd>
-                <dt style={{ color: "var(--text-muted)" }}>{fixedFee ? "Fixed fee" : "Profit split"}</dt><dd style={{ margin: 0 }}>{feeSummaryText}</dd>
+              <dl className="cp-kv">
+                <dt>Name</dt><dd>{account.name}</dd>
+                <dt>MT5 connection</dt>
+                <dd style={{ color: account.is_connected ? "var(--bull)" : "var(--warn)" }}>{account.is_connected ? "Connected" : "Not connected"}</dd>
+                <dt>Trade copying</dt><dd>{account.copy_enabled ? "On" : "Paused"}</dd>
+                <dt>Last update from your account</dt>
+                <dd>{account.last_sync ? `${ago(account.last_sync)}` : "No update yet"}</dd>
+                <dt>{fixedFee ? "Fixed fee" : "Profit split"}</dt>
+                <dd>{feeSummaryText}</dd>
               </dl>
             </Section>
 
@@ -774,17 +1037,17 @@ export default function ClientPortalPublic() {
             </Section>
 
             <Section title="How copy trading works">
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 13, lineHeight: 1.55, color: "var(--text-secondary)" }}>
-                <div><strong style={{ color: "var(--text-primary)" }}>Automatic.</strong> When the engine places a trade, your account opens the same trade. You don't need to do anything.</div>
-                <div><strong style={{ color: "var(--text-primary)" }}>Sized to your account.</strong> Lot sizes follow your balance, so a smaller account trades smaller lots than a larger one.</div>
-                <div><strong style={{ color: "var(--text-primary)" }}>Protected.</strong> Your account has its own daily loss and trade-count limits. A trade can be skipped when a limit has been reached.</div>
-                <div><strong style={{ color: "var(--text-primary)" }}>Transparent.</strong> Every trade, with its entry, stop loss, take profit and result, is listed under Trades.</div>
+              <div className="cp-tiles">
+                <div className="cp-tile"><strong>Automatic</strong>When the engine places a trade, your account opens the same trade. You don't need to do anything.</div>
+                <div className="cp-tile"><strong>Sized to your account</strong>Lot sizes follow your balance, so a smaller account trades smaller lots than a larger one.</div>
+                <div className="cp-tile"><strong>Protected</strong>Your account has its own daily loss and trade-count limits. A trade can be skipped when a limit has been reached.</div>
+                <div className="cp-tile"><strong>Transparent</strong>Every trade, with its entry, stop loss, take profit and result, is listed under Trades.</div>
               </div>
             </Section>
           </>
         )}
 
-        <p style={{ marginTop: 24, fontSize: 12, color: "var(--text-muted)", textAlign: "center", lineHeight: 1.6 }}>
+        <p className="cp-foot">
           Trading involves risk, and you can lose money. Past performance does not guarantee future results.
         </p>
       </main>

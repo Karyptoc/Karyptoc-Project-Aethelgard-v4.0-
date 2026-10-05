@@ -298,6 +298,9 @@ export default function ClientManagement() {
         {showAdd && (
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-header"><span className="card-title">Add new client</span></div>
+            {/* Decoys that soak up browser autofill of the admin's own saved login. */}
+            <input type="text" name="username" autoComplete="username" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", opacity: 0, height: 0, width: 0, padding: 0, border: 0, pointerEvents: "none" }} />
+            <input type="password" name="password" autoComplete="current-password" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", opacity: 0, height: 0, width: 0, padding: 0, border: 0, pointerEvents: "none" }} />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
               <div>
                 <label className="form-label">Full name *</label>
@@ -305,7 +308,7 @@ export default function ClientManagement() {
               </div>
               <div>
                 <label className="form-label">Email *</label>
-                <input className="form-input" type="email" value={newClient.email} onChange={e => setNewClient({...newClient, email: e.target.value})} />
+                <input className="form-input" type="email" name="client-email" autoComplete="off" value={newClient.email} onChange={e => setNewClient({...newClient, email: e.target.value})} />
               </div>
               <div>
                 <label className="form-label">Phone</label>
@@ -317,15 +320,15 @@ export default function ClientManagement() {
               </div>
               <div>
                 <label className="form-label">MT5 Login</label>
-                <input className="form-input" value={newClient.mt5_login} onChange={e => setNewClient({...newClient, mt5_login: e.target.value})} />
+                <input className="form-input" name="client-mt5-account-number" inputMode="numeric" autoComplete="off" data-lpignore="true" data-1p-ignore="true" value={newClient.mt5_login} onChange={e => setNewClient({...newClient, mt5_login: e.target.value.replace(/\D/g, "")})} />
               </div>
               <div>
                 <label className="form-label">MT5 Password</label>
-                <input className="form-input" type="password" value={newClient.mt5_password} onChange={e => setNewClient({...newClient, mt5_password: e.target.value})} />
+                <input className="form-input" name="client-mt5-secret" type="password" autoComplete="new-password" data-lpignore="true" data-1p-ignore="true" value={newClient.mt5_password} onChange={e => setNewClient({...newClient, mt5_password: e.target.value})} />
               </div>
               <div>
                 <label className="form-label">MT5 Server</label>
-                <input className="form-input" value={newClient.mt5_server} onChange={e => setNewClient({...newClient, mt5_server: e.target.value})} />
+                <input className="form-input" name="client-mt5-server" autoComplete="off" data-lpignore="true" data-1p-ignore="true" value={newClient.mt5_server} onChange={e => setNewClient({...newClient, mt5_server: e.target.value})} />
               </div>
               <div>
                 <label className="form-label">Risk per trade (%)</label>
