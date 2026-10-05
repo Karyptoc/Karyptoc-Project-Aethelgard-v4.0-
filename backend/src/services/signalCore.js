@@ -70,6 +70,18 @@ const DXY_DIRECT_PAIRS  = ["USDCAD", "USDCHF", "USDJPY"];
  * - Sweep adds conviction (but not required)
  * - RSI must not be extreme against direction
  */
+// NEW (Roadmap Phase 5, decision states): every result now carries an
+// explicit decision_state instead of leaving callers to infer WHY a HOLD
+// happened by string-matching the human-readable reason:
+//   TRADE            - a signal fired
+//   NO_SETUP         - nothing directional at all (no sweep/BOS/CHoCH/RSI extreme)
+//   BLOCKED_CONTEXT  - a setup exists but HTF bias or trend state vetoes it
+//   BLOCKED_MOMENTUM - a setup exists but RSI/EMA conflict with it
+//   LOW_CONVICTION   - a setup exists and passes context, but score/confidence
+//                      is below the bar
+// The split matters operationally: NO_SETUP is the market doing nothing,
+// BLOCKED_* are filters doing their job (worth auditing if they dominate),
+// LOW_CONVICTION is the nearest-miss pile (where threshold tuning lives).
 function makePureMathDecision(confluence, htfBias, ictSequence, ind, session, options = {}) {
   const score = confluence.score;
   const htf = htfBias.bias;
@@ -119,7 +131,7 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session, op
   }
 
   if (direction === "HOLD") {
-    return { direction: "HOLD", confidence: 0, reason: "No directional signal — no sweep/BOS/CHoCH/RSI extreme" };
+    return { direction: "HOLD", confidence: 0, decision_state: "NO_SETUP", reason: "No directional signal — no sweep/BOS/CHoCH/RSI extreme" };
   }
 
   // HTF PERMISSION CHECK: applied AFTER direction comes from real
@@ -127,7 +139,7 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session, op
   // only ever block or confirm - never originate.
   const expectedHTF = direction === "BUY" ? "bullish" : "bearish";
   if (htf !== "neutral" && htf !== expectedHTF) {
-    return { direction: "HOLD", confidence: 0, reason: `HTF ${htf} conflicts with structural ${direction} (source: ${directionSource})` };
+    return { direction: "HOLD", confidence: 0, decision_state: "BLOCKED_CONTEXT", reason: `HTF ${htf} conflicts with structural ${direction} (source: ${directionSource})` };
   }
   const htfAligned = htf === expectedHTF;
 
@@ -146,13 +158,13 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session, op
   const isReversalEvidence = directionSource === "ICT_SWEEP" || directionSource === "CHOCH";
   if (!isReversalEvidence && !options.disableTrendGate) {
     if (trendState === "RANGING") {
-      return { direction: "HOLD", confidence: 0, reason: `Ranging market (${ind.trendReason || "no clear structure"}) — ${directionSource} continuation entry blocked` };
+      return { direction: "HOLD", confidence: 0, decision_state: "BLOCKED_CONTEXT", reason: `Ranging market (${ind.trendReason || "no clear structure"}) — ${directionSource} continuation entry blocked` };
     }
     if (trendState === "TRENDING_UP" && direction === "SELL") {
-      return { direction: "HOLD", confidence: 0, reason: `Uptrend — counter-trend SELL via ${directionSource} blocked (no reversal evidence)` };
+      return { direction: "HOLD", confidence: 0, decision_state: "BLOCKED_CONTEXT", reason: `Uptrend — counter-trend SELL via ${directionSource} blocked (no reversal evidence)` };
     }
     if (trendState === "TRENDING_DOWN" && direction === "BUY") {
-      return { direction: "HOLD", confidence: 0, reason: `Downtrend — counter-trend BUY via ${directionSource} blocked (no reversal evidence)` };
+      return { direction: "HOLD", confidence: 0, decision_state: "BLOCKED_CONTEXT", reason: `Downtrend — counter-trend BUY via ${directionSource} blocked (no reversal evidence)` };
     }
   }
 
@@ -180,19 +192,19 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session, op
   // RSI conflict check
   const r = ind.rsi14;
   if (direction === "BUY" && r > 78) {
-    return { direction: "HOLD", confidence: 0, reason: `RSI overbought: ${r}` };
+    return { direction: "HOLD", confidence: 0, decision_state: "BLOCKED_MOMENTUM", reason: `RSI overbought: ${r}` };
   }
   if (direction === "SELL" && r < 22) {
-    return { direction: "HOLD", confidence: 0, reason: `RSI oversold: ${r}` };
+    return { direction: "HOLD", confidence: 0, decision_state: "BLOCKED_MOMENTUM", reason: `RSI oversold: ${r}` };
   }
 
   // EMA conflict check - applies to all sources now, since none of them
   // are HTF-derived anymore (that special case no longer exists)
   if (direction === "BUY" && !ind.bullish && score < 55) {
-    return { direction: "HOLD", confidence: 0, reason: "EMA bearish + low score" };
+    return { direction: "HOLD", confidence: 0, decision_state: "BLOCKED_MOMENTUM", reason: "EMA bearish + low score" };
   }
   if (direction === "SELL" && ind.bullish && score < 55) {
-    return { direction: "HOLD", confidence: 0, reason: "EMA bullish + low score" };
+    return { direction: "HOLD", confidence: 0, decision_state: "BLOCKED_MOMENTUM", reason: "EMA bullish + low score" };
   }
 
   // Score → confidence mapping. Real structural sources (sweep/BOS/CHoCH)
@@ -205,7 +217,7 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session, op
   else if (baseScore >= 55) confidence = 0.63;
   else if (baseScore >= 45) confidence = 0.55;
   else if (baseScore >= 35) confidence = 0.50;
-  else return { direction: "HOLD", confidence: 0, reason: `Score too low: ${score} (source: ${directionSource})` };
+  else return { direction: "HOLD", confidence: 0, decision_state: "LOW_CONVICTION", reason: `Score too low: ${score} (source: ${directionSource})` };
 
   // Boosts
   if (ictSequence.hasFullSequence) confidence = Math.min(confidence + 0.08, 0.88);
@@ -223,7 +235,7 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session, op
   // Minimum confidence gate — low bar to match backtest behavior
   const minConf = ind.atr_ratio >= 2.5 ? 0.60 : session.killZone ? 0.45 : 0.48;
   if (confidence < minConf) {
-    return { direction: "HOLD", confidence, reason: `Confidence ${confidence.toFixed(2)} < ${minConf} (${directionSource})` };
+    return { direction: "HOLD", confidence, decision_state: "LOW_CONVICTION", reason: `Confidence ${confidence.toFixed(2)} < ${minConf} (${directionSource})` };
   }
 
   // FIX: previously fell back to a crude htf==='neutral' check to decide
@@ -237,6 +249,7 @@ function makePureMathDecision(confluence, htfBias, ictSequence, ind, session, op
 
   return {
     direction,
+    decision_state: "TRADE",
     confidence: parseFloat(confidence.toFixed(2)),
     regime,
     regime_detail: {

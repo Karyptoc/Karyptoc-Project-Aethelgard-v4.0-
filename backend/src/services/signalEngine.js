@@ -795,7 +795,7 @@ async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
       // single time. Now surfaces it directly, with the old field kept as
       // a fallback for the AI/Hybrid path which may return a differently-
       // shaped object without a .reason field.
-      await log("info", "signalEngine", `${symbol}: HOLD — ${analysis?.reason || analysis?.smc_context?.entry_model_quality || "no setup"}`);
+      await log("info", "signalEngine", `${symbol}: HOLD${analysis?.decision_state ? " [" + analysis.decision_state + "]" : ""} — ${analysis?.reason || analysis?.smc_context?.entry_model_quality || "no setup"}`);
       return null;
     }
 

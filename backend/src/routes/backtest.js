@@ -431,6 +431,10 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
   // DIAGNOSTIC (temporary, round 4) - why makePureMathDecision returns HOLD
   // for bars that reached POI detection - to understand GOLD's drop to
   // zero trades after the HTF-permission fix.
+  // NEW (Roadmap Phase 5): count of bars that reached the decision step,
+  // by explicit decision_state (see signalCore.js) - replaces inferring the
+  // same thing from reason text. TRADE is counted when a signal is taken.
+  const decisionStates = {};
   const holdReasons = {
     noStructure: 0, htfConflict: 0, rsiConflict: 0, emaConflict: 0,
     scoreTooLow: 0, confidenceTooLow: 0, other: 0,
@@ -569,6 +573,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
     const pureMathInd = poiStructure ? { ...ind, bos: poiStructure.bos, choch: poiStructure.choch } : ind;
     const analysis = core.makePureMathDecision(confluence, htfBias, ictSequence, pureMathInd, session, { disableTrendGate });
     if (analysis.direction === "HOLD") {
+      decisionStates[analysis.decision_state || "UNKNOWN"] = (decisionStates[analysis.decision_state || "UNKNOWN"] || 0) + 1;
       // DIAGNOSTIC (temporary, round 5) - categorize why, including precise
       // breakdown of which mandatory-sequence element(s) are missing, since
       // GOLD dropped from 8 trades to 0 over the full 90-day window after
@@ -590,6 +595,8 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
       else holdReasons.other++;
       continue;
     }
+
+    decisionStates.TRADE = (decisionStates.TRADE || 0) + 1;
 
     const sltp = core.calculateStructuralSLTP(
       analysis.direction, bar.close, ind, currentATR, symbol, ictSequence, analysis.reward_risk_ratio, poiATR
@@ -854,6 +861,7 @@ function runBacktest(symbol, h4Bars, d1Bars, w1Bars, h1Bars, m15Bars, m5Bars, pa
       annualization_trades_per_year: riskAdjusted.annualization_trades_per_year,
       risk_adjusted_note: riskAdjusted.note,
       poiM15Count, poiTotalChecks, filterCounts, holdReasons, // DIAGNOSTIC (temporary)
+      decision_states: decisionStates,
       orderTypeCounts, limitFillCounts, // fill-price simulation results
       total_spread_cost: parseFloat(trades.reduce((s, t) => s + (t.spread_cost || 0), 0).toFixed(2)),
       htf_aligned_trades: htfAligned.length,
