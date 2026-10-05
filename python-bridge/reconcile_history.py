@@ -123,6 +123,7 @@ def build_positions(deals, server_offset_hours):
             "close_reason": DEAL_REASON_LABELS.get(_g(last_out, "reason", -1), "manual") if closed else None,
             "status": "closed" if closed else "open",
             "comment": _g(ins[0], "comment", ""),
+            "bot": bot_of(_g(ins[0], "comment", "")),
         })
     positions.sort(key=lambda p: p["open_time"])
     return positions, other_ops
@@ -130,6 +131,20 @@ def build_positions(deals, server_offset_hours):
 
 def net(p):
     return p["profit"] + p["swap"] + p["commission"]
+
+
+def bot_of(comment):
+    """Which robot opened a position, from the order comment. The same MT5
+    account has been used by several robots, so results must be split."""
+    c = (comment or "").strip()
+    if c.startswith("AE_") or c.startswith("Aethelgard"):
+        return "Aethelgard"
+    if not c:
+        return "manual/no comment"
+    for prefix in ("SMC_Bot", "LightFX", "APEX", "V8", "UPB", "InstBot", "UltimateProf", "CRT"):
+        if c.startswith(prefix):
+            return prefix
+    return c.split("_")[0].split(" ")[0][:14]
 
 
 def max_drawdown(values, start=0.0):
@@ -214,6 +229,17 @@ def summarize(positions, other_ops, account_balance=None):
             rs[p["close_reason"]].append(net(p))
         for r, v in sorted(rs.items(), key=lambda kv: sum(kv[1])):
             add(f"  {r:<22}{len(v):>7}{sum(v):>11,.2f}")
+
+        add("")
+        add("BY ROBOT (order comment)  trades     net      win%   profit factor")
+        bots = defaultdict(list)
+        for p in closed:
+            bots[p["bot"]].append(net(p))
+        for b, v in sorted(bots.items(), key=lambda kv: sum(kv[1])):
+            w = sum(x for x in v if x > 0)
+            l = -sum(x for x in v if x < 0)
+            add(f"  {b:<22}{len(v):>7}{sum(v):>11,.2f}{100 * sum(1 for x in v if x > 0) / len(v):>8.0f}"
+                f"{(w / l) if l else float('inf'):>10.2f}")
     add("=" * 64)
     return "\n".join(lines)
 
@@ -221,7 +247,7 @@ def summarize(positions, other_ops, account_balance=None):
 def write_csvs(positions, other_ops, outdir):
     p1 = os.path.join(outdir, "mt5_true_trades.csv")
     cols = ["ticket", "symbol", "direction", "volume", "open_price", "close_price", "open_time",
-            "close_time", "profit", "swap", "commission", "close_reason", "status", "comment"]
+            "close_time", "profit", "swap", "commission", "close_reason", "status", "bot", "comment"]
     with open(p1, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
@@ -234,7 +260,7 @@ def write_csvs(positions, other_ops, outdir):
     return p1, p2
 
 
-def apply_to_backend(positions, login, backend_url, secret, requests_mod, chunk=100):
+def apply_to_backend(positions, login, backend_url, secret, requests_mod, chunk=100, all_bots=False):
     headers = {"Content-Type": "application/json", "x-bridge-secret": secret}
     r = requests_mod.get(f"{backend_url}/api/bridge/accounts", headers=headers, timeout=30)
     r.raise_for_status()
@@ -245,6 +271,11 @@ def apply_to_backend(positions, login, backend_url, secret, requests_mod, chunk=
         raise SystemExit(f"No account with login {login} in the database (found: {known}). Nothing was changed.")
     account_id = match[0]["id"]
     closed = [p for p in positions if p["status"] == "closed"]
+    if not all_bots:
+        # The account also hosted other robots (InstBot, UPB, SMC_Bot, ...).
+        # Their trades are not Aethelgard's and must not pollute its records.
+        closed = [p for p in closed if p["bot"] == "Aethelgard"]
+    print(f"  Sending {len(closed)} {'trades (all robots)' if all_bots else 'Aethelgard trades only'}")
     totals = {"updated": 0, "inserted": 0, "duplicates_removed": 0, "errors": 0}
     for i in range(0, len(closed), chunk):
         batch = closed[i:i + chunk]
@@ -262,6 +293,8 @@ def apply_to_backend(positions, login, backend_url, secret, requests_mod, chunk=
 def main():
     ap = argparse.ArgumentParser(description="Reconcile the database with real MT5 history")
     ap.add_argument("--apply", action="store_true", help="write corrections to the database (default: report only)")
+    ap.add_argument("--all-bots", action="store_true",
+                    help="with --apply: also write trades opened by OTHER robots (default: Aethelgard's only)")
     ap.add_argument("--server-offset-hours", type=float, default=3.0,
                     help="broker server time minus UTC, in hours (default 3 = summer EET; use 2 in winter)")
     ap.add_argument("--outdir", default=".", help="where to write the CSV files")
@@ -305,7 +338,7 @@ def main():
     if not backend or not secret:
         raise SystemExit("BACKEND_URL and BRIDGE_SECRET must be set in .env to use --apply")
     print("\nApplying to database...")
-    totals = apply_to_backend(positions, info.login, backend.rstrip("/"), secret, requests)
+    totals = apply_to_backend(positions, info.login, backend.rstrip("/"), secret, requests, all_bots=args.all_bots)
     print(f"Done: {totals}")
     mt5.shutdown()
 
