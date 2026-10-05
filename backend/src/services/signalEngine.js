@@ -77,6 +77,7 @@ const {
 } = require("./signalCore");
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const { shouldSkipAi, recordAiResult } = require("./aiHoldMemo");
 
 const PAIRS = [
   "GOLD", "EURUSD", "GBPUSD", "USDJPY",
@@ -778,9 +779,15 @@ async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
       // Use Claude only for high-confidence setups (score >= 65)
       // Everything else decided by pure math
       if (confluence.score >= 65 || ictSequence.hasFullSequence) {
+        const skipAi = shouldSkipAi(symbol, confluence.score, ictSequence.hasFullSequence);
+        if (skipAi.skip) {
+          await log("info", "signalEngine", `${symbol}: HYBRID — Claude said HOLD ${skipAi.ageMin}min ago (score ${skipAi.prevScore}, now ${confluence.score}); not re-asking yet`);
+          return null;
+        }
         await log("info", "signalEngine", `${symbol}: HYBRID mode — score ${confluence.score} qualifies for AI analysis`);
         decisionEngine = "HYBRID_AI";
         analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, primaryInd?.trendState, fundamentalBias);
+        recordAiResult(symbol, confluence.score, ictSequence.hasFullSequence, !analysis || analysis.direction === "HOLD");
       } else {
         decisionEngine = "HYBRID_MATH";
         const pureMathInd = poiStructure ? { ...primaryInd, bos: poiStructure.bos, choch: poiStructure.choch } : primaryInd;
@@ -790,7 +797,13 @@ async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
 
     } else {
       // AI mode — full Claude analysis (original behavior)
+      const skipAi = shouldSkipAi(symbol, confluence.score, ictSequence.hasFullSequence);
+      if (skipAi.skip) {
+        await log("info", "signalEngine", `${symbol}: AI — Claude said HOLD ${skipAi.ageMin}min ago (score ${skipAi.prevScore}, now ${confluence.score}); not re-asking yet`);
+        return null;
+      }
       analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, primaryInd?.trendState, fundamentalBias);
+      recordAiResult(symbol, confluence.score, ictSequence.hasFullSequence, !analysis || analysis.direction === "HOLD");
     }
 
     if (!analysis || analysis.direction === "HOLD") {
