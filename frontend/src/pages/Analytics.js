@@ -10,6 +10,120 @@ const COLORS = {
   warn: "#ff8b00", gold: "#b8860b", blue: "#0052cc"
 };
 
+// Decision-engine comparison (Roadmap Phase 5). Loads on its own so a failure
+// here can never blank the rest of the Analytics page.
+const VERDICT_STYLE = {
+  A_BETTER:            { cls: "bull",  label: "CLEAR WINNER" },
+  B_BETTER:            { cls: "bull",  label: "CLEAR WINNER" },
+  NO_CLEAR_DIFFERENCE: { cls: "warn",  label: "NO CLEAR DIFFERENCE" },
+  INSUFFICIENT_DATA:   { cls: "muted", label: "NOT ENOUGH DATA" },
+};
+
+function EngineComparison() {
+  const [days, setDays] = useState(90);
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    let live = true;
+    setBusy(true); setErr("");
+    api.get(`/api/dashboard/model-eval?days=${days}`)
+      .then(r => { if (live) setData(r.data); })
+      .catch(e => { if (live) setErr(e.response?.data?.error || e.message); })
+      .finally(() => { if (live) setBusy(false); });
+    return () => { live = false; };
+  }, [days]);
+
+  const engines = data ? Object.entries(data.engines || {}) : [];
+  const money = v => v === null || v === undefined ? "—" : `${v >= 0 ? "+" : "-"}$${Math.abs(v).toFixed(2)}`;
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="card-header">
+        <span className="card-title">Decision Engine Comparison</span>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[30, 90, 180].map(d => (
+            <button key={d} className={`btn btn-sm ${days === d ? "btn-primary" : "btn-ghost"}`} onClick={() => setDays(d)}>{d}D</button>
+          ))}
+        </div>
+      </div>
+
+      {busy && <div style={{ padding: 16, color: "var(--text-muted)", fontSize: 12 }}>Loading...</div>}
+      {err && <div className="alert alert-warn" style={{ margin: 12, fontSize: 12 }}>Couldn't load the comparison: {err}</div>}
+
+      {!busy && !err && data && (
+        <>
+          <div style={{ padding: "0 4px 10px", fontSize: 12, color: "var(--text-muted)" }}>
+            {data.closed_trades_in_window} closed trades in the last {data.days} days · {data.attributable_to_a_signal} can be tied to a
+            signal and engine · {data.unattributable} can't. A verdict needs at least {data.min_trades_per_engine} trades per engine.
+          </div>
+
+          {engines.length === 0 ? (
+            <div className="empty-state" style={{ padding: 24 }}>
+              <div className="empty-icon">⚖️</div>
+              <div className="empty-text">No engine-tagged trades yet. They appear as new signals (which now record their engine) turn into closed trades.</div>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Engine</th><th>Trades</th><th>Win Rate</th><th>Profit Factor</th><th>Avg / trade</th><th>Avg (R)</th><th>Total P&L</th></tr>
+                </thead>
+                <tbody>
+                  {engines.map(([name, e]) => (
+                    <tr key={name} style={e.sufficient_sample ? undefined : { opacity: 0.6 }}>
+                      <td style={{ fontWeight: 700 }}>
+                        {name}
+                        {!e.sufficient_sample && <span className="badge muted" style={{ marginLeft: 6, fontSize: 9 }}>LOW SAMPLE</span>}
+                      </td>
+                      <td className="mono">{e.trades}</td>
+                      <td className="mono">{e.win_rate === null ? "—" : `${e.win_rate}%`}</td>
+                      <td className="mono">{e.profit_factor ?? "—"}</td>
+                      <td className="mono"><span className={(e.expectancy_dollars || 0) >= 0 ? "pnl-pos" : "pnl-neg"}>{money(e.expectancy_dollars)}</span></td>
+                      <td className="mono">{e.expectancy_r === null || e.expectancy_r === undefined ? "—" : `${e.expectancy_r}R`}</td>
+                      <td className="mono"><span className={(e.total_pnl || 0) >= 0 ? "pnl-pos" : "pnl-neg"}>{money(e.total_pnl)}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {(data.comparisons || []).length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: 2, color: "var(--text-muted)", marginBottom: 8 }}>HEAD TO HEAD</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {data.comparisons.map(c => {
+                  const v = VERDICT_STYLE[c.verdict] || VERDICT_STYLE.INSUFFICIENT_DATA;
+                  return (
+                    <div key={`${c.a}-${c.b}`} style={{ padding: "10px 14px", background: "var(--bg-elevated)", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <strong>{c.a} vs {c.b}</strong>
+                        <span className={`badge ${v.cls}`}>{v.label}{c.winner ? ` — ${c.winner}` : ""}</span>
+                        {c.ci95 && (
+                          <span className="mono" style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                            difference {c.mean_diff_a_minus_b} {c.unit}/trade (95% range {c.ci95[0]} to {c.ci95[1]})
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>{c.note}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginTop: 12, fontSize: 11, color: "var(--text-muted)", lineHeight: 1.6 }}>
+            {(data.notes || []).map((n, i) => <div key={i}>• {n}</div>)}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function Analytics() {
   const [perf, setPerf] = useState(null);
   const [snapshots, setSnapshots] = useState([]);
@@ -336,6 +450,8 @@ export default function Analytics() {
             )}
           </>
         )}
+
+        <EngineComparison />
       </div>
     </>
   );
