@@ -122,7 +122,14 @@ router.post("/sync", async (req, res) => {
       leverage: account_info.leverage, is_connected: true, last_sync: timestamp
     }).eq("id", account_id);
 
-    if (positions?.length > 0) {
+    // FIX: this used to be `positions?.length > 0`, with an else branch that
+    // marked EVERY open trade closed with no real profit data. Two problems:
+    // (a) when the LAST open position closed, positions was empty, so the
+    // real closing result bridge.py had just fetched (closed_positions) was
+    // thrown away and the trade kept a stale floating P&L; (b) a malformed
+    // request with no positions field would have closed everything. An
+    // empty array now goes through the same real-data close path below.
+    if (Array.isArray(positions)) {
       for (const pos of positions) {
         // FIX: this used to filter by .eq("status", "open") too, meaning
         // if a row ever got marked "closed" by a transient sync glitch
@@ -136,11 +143,22 @@ router.post("/sync", async (req, res) => {
         // account regardless of current status, same principle as the
         // ack-handler fix - the row's existence is checked independent
         // of a status field that can be wrong transiently.
-        const { data: existing } = await supabaseAdmin.from("trades").select("id, status")
-          .eq("account_id", account_id).eq("ticket", pos.ticket).single();
+        //
+        // FIX (root cause of the duplicate trade rows - confirmed in a
+        // 1,274-row export: 234 phantom copies, one ticket stored 68
+        // times): this used .single(), which returns an ERROR (and no
+        // data) as soon as MORE than one row matches. So after a ticket
+        // was inserted twice, every later sync saw "no existing row" and
+        // inserted ANOTHER copy, forever. Now reads an array and takes the
+        // first match, so a duplicate can never beget more duplicates.
+        // (The unique index in supabase_cleanup_duplicate_trades.sql makes
+        // the database itself refuse them as a second line of defence.)
+        const { data: existingRows } = await supabaseAdmin.from("trades").select("id, status")
+          .eq("account_id", account_id).eq("ticket", pos.ticket).limit(1);
+        const existing = existingRows?.[0];
 
         if (!existing) {
-          await supabaseAdmin.from("trades").insert({
+          const { error: insErr } = await supabaseAdmin.from("trades").insert({
             account_id, ticket: pos.ticket, symbol: pos.symbol,
             direction: pos.direction, volume: pos.volume,
             open_price: pos.open_price, stop_loss: pos.stop_loss,
@@ -148,6 +166,11 @@ router.post("/sync", async (req, res) => {
             swap: pos.swap, commission: pos.commission,
             status: "open", open_time: pos.open_time
           });
+          // 23505 = unique violation: another request inserted this ticket
+          // a moment ago. Harmless - the next sync updates that row.
+          if (insErr && insErr.code !== "23505") {
+            await log("error", "bridge", `Trade insert failed for #${pos.ticket}: ${insErr.message}`);
+          }
         } else {
           // MT5 reports this ticket as an active position right now, so
           // it must be "open" regardless of what a prior sync cycle set
@@ -223,10 +246,6 @@ router.post("/sync", async (req, res) => {
           }
         }
       }
-    } else {
-      await supabaseAdmin.from("trades").update({
-        status: "closed", close_time: new Date().toISOString(), close_reason: "unknown"
-      }).eq("account_id", account_id).eq("status", "open");
     }
 
     res.json({ ok: true });
@@ -511,8 +530,11 @@ router.post("/commands/:id/ack", async (req, res) => {
       // leaving an orphaned garbage row (open_price=0, profit=null) behind
       // every time. Now checks for an existing row by ticket+account first,
       // matching the same safe pattern already used in the sync path.
-      const { data: existingTrade } = await supabaseAdmin.from("trades")
-        .select("id, open_price").eq("account_id", accountId).eq("ticket", result.ticket).single();
+      // (Same .single() duplicate trap as the sync path - see the note
+      // there. Array + first match instead.)
+      const { data: existingTradeRows } = await supabaseAdmin.from("trades")
+        .select("id, open_price").eq("account_id", accountId).eq("ticket", result.ticket).limit(1);
+      const existingTrade = existingTradeRows?.[0];
 
       if (existingTrade) {
         // FIX (real data gap confirmed - several live trades showed
@@ -593,6 +615,52 @@ router.post("/commands/:id/ack", async (req, res) => {
   }
 
   res.json({ ok: true });
+});
+
+// POST /api/bridge/reconcile — used by python-bridge/reconcile_history.py.
+// Receives trades rebuilt from MT5's own deal history and makes the database
+// match: updates the existing row (keeping its signal link and SL/TP), inserts
+// trades the database never recorded, and removes extra rows for a ticket.
+router.post("/reconcile", async (req, res) => {
+  const { account_id, trades } = req.body || {};
+  if (!account_id || typeof account_id !== "string" || !Array.isArray(trades) || trades.length === 0 || trades.length > 500) {
+    return res.status(400).json({ error: "account_id and 1-500 trades required" });
+  }
+  const out = { updated: 0, inserted: 0, duplicates_removed: 0, errors: 0 };
+  const num = v => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v))) ? null : Number(v);
+  try {
+    for (const t of trades) {
+      const ticket = num(t.ticket);
+      if (ticket === null || t.status !== "closed" || !t.close_time) { out.errors++; continue; }
+      const fields = {
+        symbol: t.symbol, direction: t.direction, volume: num(t.volume),
+        open_price: num(t.open_price), close_price: num(t.close_price),
+        profit: num(t.profit), swap: num(t.swap), commission: num(t.commission),
+        open_time: t.open_time, close_time: t.close_time,
+        close_reason: t.close_reason || "unknown", status: "closed",
+      };
+      const { data: rows, error: selErr } = await supabaseAdmin.from("trades").select("id")
+        .eq("account_id", account_id).eq("ticket", ticket);
+      if (selErr) { out.errors++; continue; }
+      if (rows && rows.length > 0) {
+        const { error: upErr } = await supabaseAdmin.from("trades").update(fields).eq("id", rows[0].id);
+        if (upErr) { out.errors++; continue; }
+        out.updated++;
+        for (const extra of rows.slice(1)) {
+          const { error: delErr } = await supabaseAdmin.from("trades").delete().eq("id", extra.id);
+          if (delErr) out.errors++; else out.duplicates_removed++;
+        }
+      } else {
+        const { error: insErr } = await supabaseAdmin.from("trades").insert({ account_id, ticket, ...fields });
+        if (insErr) { out.errors++; } else { out.inserted++; }
+      }
+    }
+    await log("info", "bridge", `Reconcile ${account_id}: ${JSON.stringify(out)}`);
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    await log("error", "bridge", `Reconcile error: ${e.message}`);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // POST /api/bridge/slippage — slippage analytics logger
