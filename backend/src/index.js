@@ -114,6 +114,16 @@ cron.schedule("0 * * * *", async () => {
   }
 });
 
+// Copy-trading fixed monthly fees: hourly check for clients whose billing date
+// has arrived (idempotent — see accrueFixedFees).
+cron.schedule("10 * * * *", async () => {
+  try {
+    await copyTradingRoutes.accrueFixedFees();
+  } catch (e) {
+    await log("error", "cron", `Fixed fee accrual failed: ${e.message}`);
+  }
+});
+
 // Bridge health check every 5 minutes
 cron.schedule("*/5 * * * *", async () => {
   await checkBridgeHealth();

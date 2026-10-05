@@ -285,6 +285,14 @@ export default function ClientPortalPublic() {
 
   const { account, today, history } = data;
   const M = makeMoney(account.currency);
+  // Fee arrangement: a share of each winning trade ("profit_split") or a fixed
+  // monthly amount ("fixed_fee"). Accounts created before the option existed
+  // have no fee_model and are profit-split.
+  const fixedFee = account.fee_model === "fixed_fee";
+  const feeName = fixedFee ? "monthly fee" : "performance fee";
+  const feeSummaryText = fixedFee
+    ? `${M.plain(account.fixed_fee_amount)} per month, charged whether or not trades win`
+    : `${account.performance_fee_pct}% of the profit on each winning trade (you keep ${(100 - num(account.performance_fee_pct)).toFixed(0)}%)`;
   const pendingInvoices = invoices.filter(i => i.status === "pending");
   const paidInvoices = invoices.filter(i => i.status === "paid");
 
@@ -659,7 +667,7 @@ export default function ClientPortalPublic() {
                     <thead>
                       <tr>
                         <th>Date</th><th className="r">Trades</th><th>Wins / losses</th>
-                        <th className="r">Profit before fee</th><th className="r">Fee ({account.performance_fee_pct}%)</th><th className="r">Profit after fee</th>
+                        <th className="r">{fixedFee ? "Profit" : "Profit before fee"}</th><th className="r">{fixedFee ? "Fee" : `Fee (${account.performance_fee_pct}%)`}</th><th className="r">{fixedFee ? "Profit (no per-trade fee)" : "Profit after fee"}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -669,7 +677,7 @@ export default function ClientPortalPublic() {
                           <td className="r num">{d.trades_count}</td>
                           <td style={{ fontSize: 12 }}>{d.winning_trades} won · {d.losing_trades} lost</td>
                           <td className="r num" style={{ color: pnlColor(d.gross_pnl) }}>{d.gross_pnl !== undefined ? M.signed(d.gross_pnl) : "—"}</td>
-                          <td className="r num" style={{ color: "var(--text-muted)" }}>{d.performance_fee !== undefined ? `-${M.plain(d.performance_fee)}` : "—"}</td>
+                          <td className="r num" style={{ color: "var(--text-muted)" }}>{fixedFee || d.performance_fee === undefined ? "—" : `-${M.plain(d.performance_fee)}`}</td>
                           <td className="r num" style={{ color: pnlColor(d.net_pnl), fontWeight: 600 }}>{M.signed(d.net_pnl)}</td>
                         </tr>
                       ))}
@@ -687,7 +695,7 @@ export default function ClientPortalPublic() {
               {pendingInvoices.length === 0 ? (
                 <Empty title="You have no unpaid invoices">
                   {num(account.pending_fee) > 0
-                    ? `Your accrued performance fee is ${M.plain(account.pending_fee)}. An invoice with a payment link appears here when it's issued.`
+                    ? `Your accrued ${feeName} is ${M.plain(account.pending_fee)}. An invoice with a payment link appears here when it's issued.`
                     : "Nothing is due right now."}
                 </Empty>
               ) : pendingInvoices.map(inv => (
@@ -695,7 +703,7 @@ export default function ClientPortalPublic() {
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 16 }}>{inv.currency || "USD"} {num(inv.amount_due).toFixed(2)}</div>
                     <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-                      {inv.notes || "Performance fee"} · issued {inv.created_at ? new Date(inv.created_at).toLocaleDateString() : "—"} · {inv.invoice_number}
+                      {inv.notes || "Fee"} · issued {inv.created_at ? new Date(inv.created_at).toLocaleDateString() : "—"} · {inv.invoice_number}
                     </div>
                   </div>
                   {inv.payment_url
@@ -728,8 +736,18 @@ export default function ClientPortalPublic() {
 
             <Section title="How fees work">
               <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                The performance fee is {account.performance_fee_pct}% of the profit on each winning trade. Losing trades carry no fee.
-                Fees build up as trades close and are invoiced for payment; your daily results show the fee taken from each day's profit.
+                {fixedFee ? (
+                  <>
+                    Your fee is a fixed {M.plain(account.fixed_fee_amount)} per month, whether or not trades win. Nothing is taken from
+                    individual trades, so your daily results show your full profit and loss.
+                    {account.fixed_fee_next_due ? ` Your next monthly fee is due ${new Date(account.fixed_fee_next_due).toLocaleDateString()}.` : ""} Each fee is invoiced for payment.
+                  </>
+                ) : (
+                  <>
+                    You keep {(100 - num(account.performance_fee_pct)).toFixed(0)}% of your profits and the fee is {account.performance_fee_pct}% of the profit on each winning trade.
+                    Losing trades carry no fee. Fees build up as trades close and are invoiced for payment; your daily results show the fee taken from each day's profit.
+                  </>
+                )}
               </p>
             </Section>
           </>
@@ -747,7 +765,7 @@ export default function ClientPortalPublic() {
                 <dd style={{ margin: 0 }}>{account.copy_enabled ? "On" : "Paused"}</dd>
                 <dt style={{ color: "var(--text-muted)" }}>Last update from your account</dt>
                 <dd style={{ margin: 0 }}>{account.last_sync ? `${ago(account.last_sync)} (${when(account.last_sync)})` : "No update received yet"}</dd>
-                <dt style={{ color: "var(--text-muted)" }}>Performance fee</dt><dd style={{ margin: 0 }}>{account.performance_fee_pct}% of profit on winning trades</dd>
+                <dt style={{ color: "var(--text-muted)" }}>{fixedFee ? "Fixed fee" : "Profit split"}</dt><dd style={{ margin: 0 }}>{feeSummaryText}</dd>
               </dl>
             </Section>
 

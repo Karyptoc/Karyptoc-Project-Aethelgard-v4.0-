@@ -1,6 +1,56 @@
 import React, { useState, useEffect, useCallback } from "react";
 import api from "../lib/api";
 
+// The portal link is built from the address this admin app is running on, so
+// it always points at the real frontend (the backend's FRONTEND_URL setting can
+// be wrong or stale).
+const portalUrlFor = (token) => `${window.location.origin}/client-portal?token=${token}`;
+
+const feeSummary = (c) => c.fee_model === "fixed_fee"
+  ? `$${parseFloat(c.fixed_fee_amount || 0).toFixed(2)}/month fixed`
+  : `${c.performance_fee_pct ?? 20}% profit split`;
+
+// Shared by "Add client" and "Edit fee terms".
+function FeeTermsFields({ value, onChange }) {
+  const model = value.fee_model || "profit_split";
+  const pct = parseFloat(value.performance_fee_pct);
+  const set = (patch) => onChange({ ...value, ...patch });
+  return (
+    <div style={{ gridColumn: "1/-1", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: 12 }}>
+      <label className="form-label">How do you charge this client?</label>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        {[["profit_split", "Profit split"], ["fixed_fee", "Fixed monthly fee"]].map(([k, label]) => (
+          <button type="button" key={k} className={`btn btn-sm ${model === k ? "btn-primary" : "btn-ghost"}`}
+            onClick={() => set({ fee_model: k })}>{label}</button>
+        ))}
+      </div>
+      {model === "profit_split" ? (
+        <div style={{ maxWidth: 320 }}>
+          <label className="form-label">Your share of the profit (%)</label>
+          <input className="form-input" type="number" min="0" max="100" step="1"
+            value={value.performance_fee_pct} onChange={e => set({ performance_fee_pct: e.target.value })} />
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.5 }}>
+            {Number.isFinite(pct) && pct >= 0 && pct <= 100
+              ? `You take ${pct}% and the client keeps ${(100 - pct).toFixed(0)}% of each winning trade. `
+              : ""}
+            It builds up as trades close. Losing trades carry no fee.
+          </div>
+        </div>
+      ) : (
+        <div style={{ maxWidth: 320 }}>
+          <label className="form-label">Fee per month ($)</label>
+          <input className="form-input" type="number" min="0" step="1"
+            value={value.fixed_fee_amount} onChange={e => set({ fixed_fee_amount: e.target.value })} />
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.5 }}>
+            Charged once a month, whether or not trades win, and nothing is taken from individual trades.
+            The first charge is one month after the client is added.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ClientManagement() {
   const [clients, setClients] = useState([]);
   const [overview, setOverview] = useState(null);
@@ -15,11 +65,18 @@ export default function ClientManagement() {
     name: "", email: "", phone: "",
     mt5_login: "", mt5_password: "", mt5_server: "",
     starting_balance: "", risk_percent: "1.0",
-    performance_fee_pct: "20", currency: "USD",
+    fee_model: "profit_split", performance_fee_pct: "20", fixed_fee_amount: "",
+    currency: "USD",
     connection_type: "credentials", notes: ""
   });
+  const [newLink, setNewLink] = useState(null);   // { name, url } shown until dismissed
+  const [feeEdit, setFeeEdit] = useState(null);   // { id, name, fee_model, performance_fee_pct, fixed_fee_amount }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3500); };
+
+  const copyText = async (text) => {
+    try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -43,11 +100,16 @@ export default function ClientManagement() {
         ...newClient,
         starting_balance: parseFloat(newClient.starting_balance) || 0,
         risk_percent: parseFloat(newClient.risk_percent),
+        fee_model: newClient.fee_model,
         performance_fee_pct: parseFloat(newClient.performance_fee_pct),
+        fixed_fee_amount: parseFloat(newClient.fixed_fee_amount) || 0,
       });
-      showToast(`✅ Client added! Portal: ${r.data.portal_url}`);
+      const url = portalUrlFor(r.data.client.portal_token);
+      const copied = await copyText(url);
+      setNewLink({ name: newClient.name, url });
+      showToast(copied ? "✅ Client added. Portal link copied" : "✅ Client added");
       setShowAdd(false);
-      setNewClient({ name:"",email:"",phone:"",mt5_login:"",mt5_password:"",mt5_server:"",starting_balance:"",risk_percent:"1.0",performance_fee_pct:"20",currency:"USD",connection_type:"credentials",notes:"" });
+      setNewClient({ name:"",email:"",phone:"",mt5_login:"",mt5_password:"",mt5_server:"",starting_balance:"",risk_percent:"1.0",fee_model:"profit_split",performance_fee_pct:"20",fixed_fee_amount:"",currency:"USD",connection_type:"credentials",notes:"" });
       await load();
     } catch (e) { showToast("❌ " + (e.response?.data?.error || e.message)); }
   };
@@ -71,18 +133,37 @@ export default function ClientManagement() {
 
   const regenerateLink = async (id, name) => {
     try {
+      if (!window.confirm(`Create a new link for ${name}? Their current link will stop working.`)) return;
       const r = await api.post(`/api/copy-trading/clients/${id}/regenerate-token`);
-      await navigator.clipboard.writeText(r.data.portal_url);
-      showToast(`✅ New link for ${name} copied to clipboard`);
-    } catch (e) { showToast("❌ " + e.message); }
+      const url = portalUrlFor(r.data.portal_token);
+      const copied = await copyText(url);
+      setNewLink({ name, url });
+      showToast(copied ? `✅ New link for ${name} copied` : `✅ New link for ${name} created`);
+      await load();
+    } catch (e) { showToast("❌ " + (e.response?.data?.error || e.message)); }
   };
 
-  const copyPortalLink = (client) => {
+  const copyPortalLink = async (client) => {
     const token = client.portal_token;
-    if (!token) return showToast("❌ No portal token");
-    const url = `${window.location.origin}/client-portal?token=${token}`;
-    navigator.clipboard.writeText(url);
-    showToast("✅ Portal link copied");
+    if (!token) return showToast("❌ No portal token. Refresh the page and try again");
+    const url = portalUrlFor(token);
+    const copied = await copyText(url);
+    setNewLink({ name: client.name, url });
+    showToast(copied ? "✅ Portal link copied" : "Portal link shown below. Copy it from there");
+  };
+
+  const saveFeeTerms = async () => {
+    const f = feeEdit;
+    try {
+      await api.put(`/api/copy-trading/clients/${f.id}`, {
+        fee_model: f.fee_model,
+        performance_fee_pct: parseFloat(f.performance_fee_pct),
+        fixed_fee_amount: parseFloat(f.fixed_fee_amount) || 0,
+      });
+      showToast(`✅ Fee terms updated for ${f.name}`);
+      setFeeEdit(null);
+      await load();
+    } catch (e) { showToast("❌ " + (e.response?.data?.error || e.message)); }
   };
 
   const viewClientTrades = async (client) => {
@@ -179,6 +260,40 @@ export default function ClientManagement() {
           ))}
         </div>
 
+        {/* Portal link — stays on screen until dismissed (toasts vanish too fast to copy from) */}
+        {newLink && (
+          <div className="alert alert-info" style={{ marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Portal link for {newLink.name}</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <input className="form-input mono" readOnly value={newLink.url} style={{ flex: "1 1 360px", fontSize: 12 }}
+                onFocus={e => e.target.select()} />
+              <button className="btn btn-primary btn-sm" onClick={async () => showToast((await copyText(newLink.url)) ? "✅ Copied" : "Select the link and copy it")}>Copy</button>
+              <a className="btn btn-ghost btn-sm" href={newLink.url} target="_blank" rel="noopener noreferrer">Open</a>
+              <button className="btn btn-ghost btn-sm" onClick={() => setNewLink(null)}>Dismiss</button>
+            </div>
+            <div style={{ fontSize: 11, marginTop: 6, opacity: 0.8 }}>
+              Anyone with this link can see this client's account, so send it only to them. "New link" replaces it if it leaks.
+            </div>
+          </div>
+        )}
+
+        {/* Edit fee terms */}
+        {feeEdit && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="card-header"><span className="card-title">Fee terms — {feeEdit.name}</span></div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12, marginBottom: 14 }}>
+              <FeeTermsFields value={feeEdit} onChange={setFeeEdit} />
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 12 }}>
+              Changes apply from now on. Fees already owed are not recalculated.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-primary" onClick={saveFeeTerms}>Save fee terms</button>
+              <button className="btn btn-ghost" onClick={() => setFeeEdit(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+
         {/* Add client form */}
         {showAdd && (
           <div className="card" style={{ marginBottom: 16 }}>
@@ -217,16 +332,13 @@ export default function ClientManagement() {
                 <input className="form-input" type="number" step="0.1" value={newClient.risk_percent} onChange={e => setNewClient({...newClient, risk_percent: e.target.value})} />
               </div>
               <div>
-                <label className="form-label">Performance fee (%)</label>
-                <input className="form-input" type="number" value={newClient.performance_fee_pct} onChange={e => setNewClient({...newClient, performance_fee_pct: e.target.value})} />
-              </div>
-              <div>
                 <label className="form-label">Connection method</label>
                 <select className="form-select" value={newClient.connection_type} onChange={e => setNewClient({...newClient, connection_type: e.target.value})}>
                   <option value="credentials">Credentials (hosted)</option>
                   <option value="bridge_script">Local bridge script</option>
                 </select>
               </div>
+              <FeeTermsFields value={newClient} onChange={setNewClient} />
               <div style={{ gridColumn: "1/-1" }}>
                 <label className="form-label">Notes</label>
                 <input className="form-input" value={newClient.notes} onChange={e => setNewClient({...newClient, notes: e.target.value})} />
@@ -296,6 +408,7 @@ export default function ClientManagement() {
                           {c.copy_enabled ? "COPY ON" : "COPY OFF"}
                         </span>
                       </div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 3 }}>{feeSummary(c)}</div>
                     </td>
                     <td className="mono">${parseFloat(c.equity||0).toFixed(2)}</td>
                     <td className="mono"><span className={c.today_pnl >= 0 ? "pnl-pos" : "pnl-neg"}>{pnlSign(c.today_pnl)}${parseFloat(c.today_pnl||0).toFixed(2)}</span></td>
@@ -318,6 +431,8 @@ export default function ClientManagement() {
                         <button className="btn btn-ghost btn-xs" onClick={() => viewClientTrades(c)}>Trades</button>
                         <button className="btn btn-ghost btn-xs" onClick={() => copyPortalLink(c)} title="Copy portal link">Link</button>
                         <button className="btn btn-ghost btn-xs" onClick={() => regenerateLink(c.id, c.name)}>New link</button>
+                        <button className="btn btn-ghost btn-xs" title="Change how this client is charged"
+                          onClick={() => setFeeEdit({ id: c.id, name: c.name, fee_model: c.fee_model || "profit_split", performance_fee_pct: String(c.performance_fee_pct ?? 20), fixed_fee_amount: c.fixed_fee_amount ? String(c.fixed_fee_amount) : "" })}>Fees</button>
                         {c.status === "active"
                           ? <button className="btn btn-danger btn-xs" onClick={() => suspendClient(c.id, c.name)}>Suspend</button>
                           : <button className="btn btn-success btn-xs" onClick={() => reactivateClient(c.id)}>Reactivate</button>

@@ -22,6 +22,84 @@ function generatePortalToken() {
   return crypto.randomBytes(32).toString("hex");
 }
 
+// ── Fee terms ─────────────────────────────────────────────────────────────────
+// Two ways to charge a copy-trading client:
+//   profit_split  performance_fee_pct % of each winning trade's profit is
+//                 accrued into pending_fee when the trade closes.
+//   fixed_fee     fixed_fee_amount is accrued into pending_fee once a month
+//                 (billed in arrears: the first charge is one month after
+//                 the client starts), regardless of trading results.
+const FEE_MODELS = ["profit_split", "fixed_fee"];
+
+function addMonths(isoDate, n) {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, lastDay));
+  return d.toISOString().slice(0, 10);
+}
+
+// Validates whichever fee fields are present. Returns { terms } or { error }.
+function parseFeeTerms(body) {
+  const terms = {};
+  if (body.fee_model !== undefined && body.fee_model !== null) {
+    if (!FEE_MODELS.includes(body.fee_model)) return { error: "fee_model must be profit_split or fixed_fee" };
+    terms.fee_model = body.fee_model;
+  }
+  if (body.performance_fee_pct !== undefined && body.performance_fee_pct !== null && body.performance_fee_pct !== "") {
+    const n = Number(body.performance_fee_pct);
+    if (!Number.isFinite(n) || n < 0 || n > 100) return { error: "Profit share must be between 0 and 100" };
+    terms.performance_fee_pct = n;
+  }
+  if (body.fixed_fee_amount !== undefined && body.fixed_fee_amount !== null && body.fixed_fee_amount !== "") {
+    const n = Number(body.fixed_fee_amount);
+    if (!Number.isFinite(n) || n < 0) return { error: "Fixed fee must be zero or more" };
+    terms.fixed_fee_amount = parseFloat(n.toFixed(2));
+  }
+  return { terms };
+}
+
+// Accrue the monthly fixed fee for every active fixed_fee client whose
+// billing date has arrived. Safe to run as often as you like: each client's
+// row is advanced with a compare-and-set on fixed_fee_next_due, so two runs
+// (or two server instances) can never charge the same month twice.
+async function accrueFixedFees(now = new Date()) {
+  const today = now.toISOString().slice(0, 10);
+  const { data: due, error } = await supabaseAdmin
+    .from("client_accounts")
+    .select("id, name, pending_fee, fixed_fee_amount, fixed_fee_next_due")
+    .eq("fee_model", "fixed_fee")
+    .eq("status", "active")
+    .lte("fixed_fee_next_due", today);
+  if (error) throw error;
+
+  let charged = 0;
+  for (const c of due || []) {
+    let next = c.fixed_fee_next_due;
+    let months = 0;
+    while (next <= today && months < 12) { next = addMonths(next, 1); months++; }
+    const add = parseFloat(((c.fixed_fee_amount || 0) * months).toFixed(2));
+    const { data: updated, error: upErr } = await supabaseAdmin
+      .from("client_accounts")
+      .update({
+        pending_fee: parseFloat(((c.pending_fee || 0) + add).toFixed(2)),
+        fixed_fee_next_due: next,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", c.id)
+      .eq("fixed_fee_next_due", c.fixed_fee_next_due)
+      .select("id");
+    if (upErr) { await log("error", "copyTrading", `Fixed fee accrual failed for ${c.name}: ${upErr.message}`); continue; }
+    if (updated && updated.length) {
+      charged++;
+      await log("info", "copyTrading", `Fixed fee accrued: $${add.toFixed(2)} (${months} month${months > 1 ? "s" : ""}) for ${c.name}; next due ${next}`);
+    }
+  }
+  return { checked: (due || []).length, charged };
+}
+
 // Calculate lot size for client based on their balance vs master balance
 function calculateClientLot(masterLot, clientBalance, masterBalance, clientRiskPct = 1.0, masterRiskPct = 1.0) {
   if (!clientBalance || !masterBalance || masterBalance <= 0) return 0.01;
@@ -66,7 +144,7 @@ router.get("/clients", verifyToken, async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
       .from("client_accounts")
-      .select("id, name, email, phone, balance, equity, starting_balance, currency, copy_enabled, is_connected, last_sync, performance_fee_pct, pending_fee, high_water_mark, status, connection_type, lot_multiplier, risk_percent, created_at")
+      .select("id, name, email, phone, balance, equity, starting_balance, currency, copy_enabled, is_connected, last_sync, performance_fee_pct, fee_model, fixed_fee_amount, fixed_fee_next_due, pending_fee, high_water_mark, status, connection_type, lot_multiplier, risk_percent, portal_token, created_at")
       .order("created_at", { ascending: false });
     if (error) throw error;
 
@@ -97,11 +175,24 @@ router.post("/clients", verifyToken, async (req, res) => {
     const {
       name, email, phone, mt5_login, mt5_password, mt5_server,
       starting_balance, currency = "USD", leverage = 100,
-      risk_percent = 1.0, performance_fee_pct = 20.0,
+      risk_percent = 1.0,
       connection_type = "credentials", notes
     } = req.body;
 
     if (!name || !email) return res.status(400).json({ error: "name and email required" });
+
+    const { terms, error: feeError } = parseFeeTerms({
+      fee_model: req.body.fee_model || "profit_split",
+      performance_fee_pct: req.body.performance_fee_pct ?? 20,
+      fixed_fee_amount: req.body.fixed_fee_amount ?? 0,
+    });
+    if (feeError) return res.status(400).json({ error: feeError });
+    if (terms.fee_model === "fixed_fee" && !(terms.fixed_fee_amount > 0)) {
+      return res.status(400).json({ error: "Enter the fixed monthly fee amount" });
+    }
+    const feeNextDue = terms.fee_model === "fixed_fee"
+      ? addMonths(new Date().toISOString().slice(0, 10), 1)
+      : null;
 
     const portalToken = generatePortalToken();
     const portalUrl = `${process.env.FRONTEND_URL}/client-portal?token=${portalToken}`;
@@ -118,7 +209,11 @@ router.post("/clients", verifyToken, async (req, res) => {
         balance: starting_balance || 0,
         equity: starting_balance || 0,
         high_water_mark: starting_balance || 0,
-        currency, leverage, risk_percent, performance_fee_pct,
+        currency, leverage, risk_percent,
+        performance_fee_pct: terms.performance_fee_pct,
+        fee_model: terms.fee_model,
+        fixed_fee_amount: terms.fixed_fee_amount,
+        fixed_fee_next_due: feeNextDue,
         connection_type, notes,
         portal_token: portalToken,
         status: "active"
@@ -141,6 +236,32 @@ router.put("/clients/:id", verifyToken, async (req, res) => {
     const updates = { ...req.body, updated_at: new Date().toISOString() };
     // Don't allow updating portal_token via this endpoint
     delete updates.portal_token;
+
+    // Fee terms: validate, and keep the fixed-fee billing date sensible.
+    const feeFieldsSent = ["fee_model", "performance_fee_pct", "fixed_fee_amount"].some(k => req.body[k] !== undefined);
+    const reactivating = updates.status === "active";
+    if (feeFieldsSent || reactivating) {
+      const { terms, error: feeError } = parseFeeTerms(req.body);
+      if (feeError) return res.status(400).json({ error: feeError });
+      Object.assign(updates, terms);
+      const { data: cur } = await supabaseAdmin
+        .from("client_accounts")
+        .select("fee_model, fixed_fee_amount, fixed_fee_next_due")
+        .eq("id", id).single();
+      const model = terms.fee_model || cur?.fee_model || "profit_split";
+      const amount = terms.fixed_fee_amount ?? cur?.fixed_fee_amount ?? 0;
+      if (model === "fixed_fee") {
+        if (!(amount > 0)) return res.status(400).json({ error: "Enter the fixed monthly fee amount" });
+        const today = new Date().toISOString().slice(0, 10);
+        // Newly switched to fixed fee, or coming back from suspension with a
+        // stale date: start a fresh month so nobody is billed for time off.
+        if (!cur?.fixed_fee_next_due || (reactivating && cur.fixed_fee_next_due <= today)) {
+          updates.fixed_fee_next_due = addMonths(today, 1);
+        }
+      } else if (terms.fee_model === "profit_split") {
+        updates.fixed_fee_next_due = null;
+      }
+    }
     // FIX: encrypt mt5_password if this update is changing it
     if (updates.mt5_password) {
       updates.mt5_password = encryptSecret(updates.mt5_password);
@@ -184,7 +305,9 @@ router.post("/clients/:id/regenerate-token", verifyToken, async (req, res) => {
       .eq("id", id);
     if (error) throw error;
     const portalUrl = `${process.env.FRONTEND_URL}/client-portal?token=${newToken}`;
-    res.json({ ok: true, portal_url: portalUrl });
+    // portal_token is returned so the admin UI can build the link from the
+    // origin it is actually running on (portal_url depends on FRONTEND_URL).
+    res.json({ ok: true, portal_url: portalUrl, portal_token: newToken });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -278,7 +401,7 @@ router.post("/fees/invoice/:clientId", verifyToken, async (req, res) => {
     const { clientId } = req.params;
     const { data: client, error: clientError } = await supabaseAdmin
       .from("client_accounts")
-      .select("id, name, email, phone, pending_fee, currency")
+      .select("id, name, email, phone, pending_fee, currency, fee_model")
       .eq("id", clientId)
       .single();
     if (clientError || !client) return res.status(404).json({ error: "Client not found" });
@@ -297,7 +420,7 @@ router.post("/fees/invoice/:clientId", verifyToken, async (req, res) => {
         amount_due: amountDue,
         currency: client.currency || "USD",
         status: "pending",
-        notes: "Copy-trading performance fee"
+        notes: client.fee_model === "fixed_fee" ? "Copy-trading monthly fee" : "Copy-trading performance fee"
       })
       .select()
       .single();
@@ -307,7 +430,7 @@ router.post("/fees/invoice/:clientId", verifyToken, async (req, res) => {
       invoiceId: invoice.id,
       amount: amountDue,
       currency: client.currency || "USD",
-      description: `Aethelgard Copy-Trading Performance Fee — ${client.name}`,
+      description: `Aethelgard Copy-Trading ${client.fee_model === "fixed_fee" ? "Monthly Fee" : "Performance Fee"} — ${client.name}`,
       clientName: client.name,
       clientEmail: client.email,
       clientPhone: client.phone
@@ -507,12 +630,18 @@ router.post("/bridge/close", verifyBridgeSecret, async (req, res) => {
     const today = new Date().toISOString().slice(0, 10);
     const { data: client } = await supabaseAdmin
       .from("client_accounts")
-      .select("performance_fee_pct, high_water_mark, equity")
+      .select("performance_fee_pct, fee_model, pending_fee, high_water_mark, equity")
       .eq("id", trade.client_id)
       .single();
 
     const grossPnl = profit;
-    const fee = profit > 0 ? profit * ((client?.performance_fee_pct || 20) / 100) : 0;
+    // Profit split: a share of each winning trade. Fixed fee: nothing is taken
+    // per trade (the monthly fee is accrued by accrueFixedFees instead).
+    // Note: ?? not || — a 0% split is a valid arrangement, not "unset".
+    const splitPct = client?.performance_fee_pct ?? 20;
+    const fee = (client?.fee_model !== "fixed_fee" && profit > 0)
+      ? parseFloat((profit * (splitPct / 100)).toFixed(2))
+      : 0;
     const netPnl = grossPnl - fee;
 
     const { data: dayRecord } = await supabaseAdmin
@@ -543,10 +672,13 @@ router.post("/bridge/close", verifyBridgeSecret, async (req, res) => {
       losing_trades: (dayRecord?.losing_trades || 0) + (profit < 0 ? 1 : 0),
     }).eq("client_id", trade.client_id).eq("date", today);
 
-    // Update pending fee and high water mark
+    // Update pending fee and high water mark.
+    // BUG WAS: pending_fee wasn't in the select above, so (client.pending_fee || 0)
+    // was always 0 and every winning trade OVERWROTE the balance owed with just
+    // that one trade's fee instead of adding to it.
     if (profit > 0) {
       await supabaseAdmin.from("client_accounts").update({
-        pending_fee: (client?.pending_fee || 0) + fee,
+        pending_fee: parseFloat(((client?.pending_fee || 0) + fee).toFixed(2)),
         high_water_mark: Math.max(client?.high_water_mark || 0, client?.equity || 0),
         updated_at: new Date().toISOString()
       }).eq("id", trade.client_id);
@@ -639,6 +771,9 @@ router.get("/portal/me", verifyPortalToken, async (req, res) => {
         is_connected: client.is_connected,
         copy_enabled: client.copy_enabled,
         performance_fee_pct: client.performance_fee_pct,
+        fee_model: client.fee_model || "profit_split",
+        fixed_fee_amount: client.fixed_fee_amount || 0,
+        fixed_fee_next_due: client.fee_model === "fixed_fee" ? client.fixed_fee_next_due : null,
         pending_fee: client.pending_fee,
         last_sync: client.last_sync,
       },
@@ -827,3 +962,4 @@ while True:
 
 module.exports = router;
 module.exports.calculateClientLot = calculateClientLot;
+module.exports.accrueFixedFees = accrueFixedFees;
