@@ -15,6 +15,9 @@ export default function PairControls() {
   const [haltReasons, setHaltReasons] = useState({});
   const [editing, setEditing] = useState(null);
   const [toast, setToast] = useState("");
+  const [filter, setFilter] = useState("all"); // all | active | halted
+  const [asOf, setAsOf] = useState(null);
+  const [statsError, setStatsError] = useState(null);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 3500); };
 
@@ -23,6 +26,8 @@ export default function PairControls() {
     try {
       const r = await api.get("/api/pairs/controls");
       setPairs(r.data.controls || []);
+      setAsOf(r.data.as_of ? new Date(r.data.as_of) : new Date());
+      setStatsError(r.data.stats_error || null);
     } catch (e) {
       showToast("❌ " + (e.response?.data?.error || e.message));
     }
@@ -75,9 +80,20 @@ export default function PairControls() {
     await load();
   };
 
-  const haltedCount = pairs.filter(p => !p.enabled || p.auto_halted).length;
+  const isHaltedPair = p => !p.enabled || p.auto_halted;
+  const haltedCount = pairs.filter(isHaltedPair).length;
   const activeCount = pairs.length - haltedCount;
-  const totalPnl = pairs.reduce((s, p) => s + parseFloat(p.total_pnl || 0), 0);
+  const num = v => parseFloat(v) || 0;
+  const totalPnl = pairs.reduce((s, p) => s + num(p.total_pnl), 0);
+  const todayPnl = pairs.reduce((s, p) => s + num(p.today_pnl), 0);
+  const openCount = pairs.reduce((s, p) => s + (p.open_trades || 0), 0);
+  const closedCount = pairs.reduce((s, p) => s + (p.total_trades || 0), 0);
+  const winsTotal = pairs.reduce((s, p) => s + (p.wins || 0), 0);
+  const overallWr = closedCount ? (winsTotal / closedCount * 100) : null;
+  const visiblePairs = pairs.filter(p =>
+    filter === "all" ? true : filter === "halted" ? isHaltedPair(p) : !isHaltedPair(p));
+  const money = v => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toFixed(2)}`;
+  const pnlColor = v => v > 0 ? "var(--bull)" : v < 0 ? "var(--bear)" : "var(--text-muted)";
 
   return (
     <>
@@ -86,9 +102,17 @@ export default function PairControls() {
           <div className="page-title">Pair Controls</div>
           <div className="page-subtitle">HALT · RESUME · PER-PAIR RISK LIMITS · {pairs.length} PAIRS</div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
-          {loading ? "⟳" : "↻"} Refresh
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {asOf && (
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}
+              title="Figures are recalculated from your trades table on every refresh (auto every 30s)">
+              UPDATED {asOf.toLocaleTimeString()}
+            </span>
+          )}
+          <button className="btn btn-ghost btn-sm" onClick={load} disabled={loading}>
+            {loading ? "⟳" : "↻"} Refresh
+          </button>
+        </div>
       </div>
 
       {toast && (
@@ -99,24 +123,32 @@ export default function PairControls() {
 
       <div className="page-body">
 
-        {/* Stats */}
-        <div className="grid-4" style={{ marginBottom: 16, gap: 12 }}>
+        {/* Stats — an explicit responsive grid (the old "grid-4" class stacked
+            the four cards into one tall column) */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 16 }}>
           {[
-            ["Active Pairs", activeCount, "var(--bull)"],
-            ["Halted Pairs", haltedCount, haltedCount > 0 ? "var(--bear)" : "var(--text-muted)"],
-            ["Portfolio P&L", `${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`, totalPnl >= 0 ? "var(--bull)" : "var(--bear)"],
-            ["Total Pairs", pairs.length, "var(--accent)"],
-          ].map(([label, value, color]) => (
-            <div key={label} style={{ background: "var(--bg-elevated)", borderRadius: "var(--radius)", padding: "14px 16px" }}>
+            ["Active Pairs", activeCount, "var(--bull)", `of ${pairs.length}`],
+            ["Halted Pairs", haltedCount, haltedCount > 0 ? "var(--bear)" : "var(--text-muted)", haltedCount > 0 ? "not trading" : "none"],
+            ["Today P&L", money(todayPnl), pnlColor(todayPnl), "closed trades today"],
+            ["All-time P&L", money(totalPnl), pnlColor(totalPnl), `${closedCount} closed trades`],
+            ["Win Rate", overallWr === null ? "—" : `${overallWr.toFixed(0)}%`, overallWr === null ? "var(--text-muted)" : overallWr >= 50 ? "var(--bull)" : "var(--warn)", "all pairs"],
+            ["Open Now", openCount, openCount > 0 ? "var(--accent)" : "var(--text-muted)", "positions"],
+          ].map(([label, value, color, sub]) => (
+            <div key={label} style={{ background: "var(--bg-elevated)", borderRadius: "var(--radius)", padding: "14px 16px", border: "1px solid var(--border)" }}>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: 2, color: "var(--text-muted)", marginBottom: 6 }}>
                 {label.toUpperCase()}
               </div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 700, color }}>
-                {value}
-              </div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 700, color }}>{value}</div>
+              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 3 }}>{sub}</div>
             </div>
           ))}
         </div>
+
+        {statsError && (
+          <div className="alert alert-warn" style={{ marginBottom: 12, fontSize: 12 }}>
+            ⚠️ Couldn't read trade statistics ({statsError}) — P&L, win rate and today's usage may be missing.
+          </div>
+        )}
 
         {haltedCount > 0 && (() => {
           // FIX: this banner used to hardcode one pair's name and stale
@@ -140,6 +172,12 @@ export default function PairControls() {
           );
         })()}
 
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          {[["all", `All (${pairs.length})`], ["active", `Active (${activeCount})`], ["halted", `Halted (${haltedCount})`]].map(([v, l]) => (
+            <button key={v} className={`btn btn-sm ${filter === v ? "btn-primary" : "btn-ghost"}`} onClick={() => setFilter(v)}>{l}</button>
+          ))}
+        </div>
+
         <div className="card">
           <div className="table-wrap">
             <table>
@@ -147,38 +185,38 @@ export default function PairControls() {
                 <tr>
                   <th>Pair</th>
                   <th>Status</th>
+                  <th>Closed</th>
                   <th>Win Rate</th>
-                  <th>Total P&L</th>
-                  <th>Daily Loss Limit</th>
-                  <th>Max Trades/Day</th>
-                  <th>Auto-Halt Reason</th>
+                  <th>All-time P&L</th>
+                  <th>Today P&L</th>
+                  <th>Today's Limits</th>
+                  <th>Reason / Notes</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {pairs.map(p => {
-                  const isHalted = !p.enabled || p.auto_halted;
+                {visiblePairs.length === 0 && (
+                  <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--text-muted)", padding: 24 }}>No pairs in this view.</td></tr>
+                )}
+                {visiblePairs.map(p => {
+                  const isHalted = isHaltedPair(p);
                   const isEditing = editing?.symbol === p.symbol;
                   const isActing = acting === p.symbol;
-                  const pnl = parseFloat(p.total_pnl || 0);
-                  const wr = parseFloat(p.win_rate_pct || 0);
-                  // NEW: distinguish "no trades yet" from a genuine 0% win
-                  // rate - showing "0%" next to "$0.00" reads as "this pair
-                  // always loses", when it usually just means no trades have
-                  // closed yet. Prefers an actual trade-count field if the
-                  // backend provides one (checks a few likely names since
-                  // the exact schema wasn't confirmed); falls back to a
-                  // defensive heuristic (both P&L and win rate exactly
-                  // zero) otherwise - matches the real pattern seen live
-                  // (GOLD: 100%/+$16.01 = real data; every other pair
-                  // showing 0%/+$0.00 = no trades yet).
-                  const totalTrades = p.total_trades ?? p.trade_count ?? p.trades ?? null;
-                  const hasTradeData = totalTrades !== null ? totalTrades > 0 : (wr !== 0 || pnl !== 0);
+                  const pnl = num(p.total_pnl), todayP = num(p.today_pnl);
+                  const closed = p.total_trades || 0;
+                  const wr = p.win_rate_pct;
+                  const maxLoss = num(p.max_daily_loss_usd), maxTr = p.max_trades_per_day || 0;
+                  const lossUsed = Math.max(0, -todayP);
+                  const lossPct = maxLoss > 0 ? Math.min(100, lossUsed / maxLoss * 100) : 0;
+                  const trPct = maxTr > 0 ? Math.min(100, (p.today_trades || 0) / maxTr * 100) : 0;
+                  const bar = (pct, hot) => (
+                    <div style={{ width: 70, height: 4, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ width: `${pct}%`, height: "100%", background: hot ? "var(--bear)" : "var(--accent)" }} />
+                    </div>
+                  );
 
                   return (
-                    <tr key={p.symbol} style={{ opacity: isHalted ? 0.65 : 1 }}>
-
-                      {/* Pair */}
+                    <tr key={p.symbol} style={{ opacity: isHalted ? 0.7 : 1 }}>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
                           <span style={{ fontSize: 18 }}>{PAIR_FLAGS[p.symbol] || "💱"}</span>
@@ -186,69 +224,84 @@ export default function PairControls() {
                         </div>
                       </td>
 
-                      {/* Status */}
                       <td>
                         {p.auto_halted
                           ? <span className="badge bear">AUTO-HALTED</span>
                           : p.enabled
                             ? <span className="badge bull">ACTIVE</span>
-                            : <span className="badge warn">HALTED</span>
-                        }
-                      </td>
-
-                      {/* Win Rate */}
-                      <td className="mono">
-                        {hasTradeData ? (
-                          <span style={{ color: wr >= 50 ? "var(--bull)" : wr > 0 ? "var(--warn)" : "var(--text-muted)", fontWeight: 700 }}>
-                            {wr.toFixed(0)}%
-                          </span>
-                        ) : (
-                          <span style={{ color: "var(--text-muted)" }} title="No closed trades yet">—</span>
+                            : <span className="badge warn">HALTED</span>}
+                        {(p.open_trades || 0) > 0 && (
+                          <div style={{ fontSize: 10, color: "var(--accent)", marginTop: 3 }}>{p.open_trades} open</div>
                         )}
                       </td>
 
-                      {/* Total P&L */}
                       <td className="mono">
-                        <span className={pnl >= 0 ? "pnl-pos" : "pnl-neg"}>
-                          {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
-                        </span>
+                        {closed > 0
+                          ? <>{closed}<div style={{ fontSize: 10, color: "var(--text-muted)" }}>{p.wins}W / {p.losses}L</div></>
+                          : <span style={{ color: "var(--text-muted)" }} title="No closed trades yet">—</span>}
                       </td>
 
-                      {/* Daily Loss Limit */}
                       <td className="mono">
-                        {isEditing
-                          ? <input className="form-input" type="number" style={{ width: 80, padding: "4px 8px", fontSize: 12 }}
-                              value={editing.max_daily_loss_usd}
-                              onChange={e => setEditing({ ...editing, max_daily_loss_usd: parseFloat(e.target.value) })} />
-                          : `$${parseFloat(p.max_daily_loss_usd).toFixed(2)}`
-                        }
+                        {wr === null || wr === undefined
+                          ? <span style={{ color: "var(--text-muted)" }}>—</span>
+                          : <span style={{ color: wr >= 50 ? "var(--bull)" : wr > 0 ? "var(--warn)" : "var(--bear)", fontWeight: 700 }}>{wr.toFixed(0)}%</span>}
                       </td>
 
-                      {/* Max Trades */}
                       <td className="mono">
-                        {isEditing
-                          ? <input className="form-input" type="number" style={{ width: 60, padding: "4px 8px", fontSize: 12 }}
-                              value={editing.max_trades_per_day}
-                              onChange={e => setEditing({ ...editing, max_trades_per_day: parseInt(e.target.value) })} />
-                          : p.max_trades_per_day
-                        }
+                        {closed > 0
+                          ? <span className={pnl >= 0 ? "pnl-pos" : "pnl-neg"}>{money(pnl)}</span>
+                          : <span style={{ color: "var(--text-muted)" }}>—</span>}
                       </td>
 
-                      {/* Auto-Halt Reason */}
+                      <td className="mono">
+                        {(p.today_trades || 0) > 0 || todayP !== 0
+                          ? <span className={todayP >= 0 ? "pnl-pos" : "pnl-neg"}>{money(todayP)}</span>
+                          : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                      </td>
+
+                      {/* Limits: live usage against the caps the risk engine enforces */}
+                      <td className="mono" style={{ fontSize: 11 }}>
+                        {isEditing ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ width: 62, color: "var(--text-muted)" }}>Loss $</span>
+                              <input className="form-input" type="number" style={{ width: 80, padding: "4px 8px", fontSize: 12 }}
+                                value={editing.max_daily_loss_usd}
+                                onChange={e => setEditing({ ...editing, max_daily_loss_usd: parseFloat(e.target.value) })} />
+                            </label>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ width: 62, color: "var(--text-muted)" }}>Trades</span>
+                              <input className="form-input" type="number" style={{ width: 80, padding: "4px 8px", fontSize: 12 }}
+                                value={editing.max_trades_per_day}
+                                onChange={e => setEditing({ ...editing, max_trades_per_day: parseInt(e.target.value) })} />
+                            </label>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                            <div>
+                              <div>Trades {p.today_trades || 0}/{maxTr}</div>
+                              {bar(trPct, trPct >= 100)}
+                            </div>
+                            <div>
+                              <div>Loss ${lossUsed.toFixed(2)}/${maxLoss.toFixed(2)}</div>
+                              {bar(lossPct, lossPct >= 100)}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+
                       <td style={{ maxWidth: 200 }}>
-                        {p.auto_halted && p.auto_halt_reason
-                          ? <span style={{ fontSize: 11, color: "var(--bear)", fontStyle: "italic" }}>{p.auto_halt_reason}</span>
-                          : !p.enabled
-                            ? <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>Manually halted</span>
-                            : isEditing
-                              ? <input className="form-input" type="text" placeholder="Notes..." style={{ width: 160, padding: "4px 8px", fontSize: 12 }}
-                                  value={editing.notes || ""}
-                                  onChange={e => setEditing({ ...editing, notes: e.target.value })} />
-                              : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{p.notes || "—"}</span>
-                        }
+                        {isEditing
+                          ? <input className="form-input" type="text" placeholder="Notes..." style={{ width: 160, padding: "4px 8px", fontSize: 12 }}
+                              value={editing.notes || ""}
+                              onChange={e => setEditing({ ...editing, notes: e.target.value })} />
+                          : p.auto_halted && p.auto_halt_reason
+                            ? <span style={{ fontSize: 11, color: "var(--bear)", fontStyle: "italic" }}>{p.auto_halt_reason}</span>
+                            : !p.enabled
+                              ? <span style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>Manually halted{p.notes ? ` · ${p.notes}` : ""}</span>
+                              : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{p.notes || "—"}</span>}
                       </td>
 
-                      {/* Actions */}
                       <td>
                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                           {isEditing ? (
@@ -265,8 +318,7 @@ export default function PairControls() {
                                   </button>
                                 : <button className="btn btn-danger btn-xs" disabled={isActing} onClick={() => haltPair(p.symbol)}>
                                     {isActing ? "..." : "Halt"}
-                                  </button>
-                              }
+                                  </button>}
                             </>
                           )}
                         </div>
@@ -275,12 +327,31 @@ export default function PairControls() {
                   );
                 })}
               </tbody>
+              {visiblePairs.length > 0 && (() => {
+                const vClosed = visiblePairs.reduce((s, p) => s + (p.total_trades || 0), 0);
+                const vWins = visiblePairs.reduce((s, p) => s + (p.wins || 0), 0);
+                const vPnl = visiblePairs.reduce((s, p) => s + num(p.total_pnl), 0);
+                const vToday = visiblePairs.reduce((s, p) => s + num(p.today_pnl), 0);
+                return (
+                  <tfoot>
+                    <tr style={{ fontWeight: 700, borderTop: "2px solid var(--border)" }}>
+                      <td>Total ({visiblePairs.length})</td>
+                      <td />
+                      <td className="mono">{vClosed}</td>
+                      <td className="mono">{vClosed ? `${(vWins / vClosed * 100).toFixed(0)}%` : "—"}</td>
+                      <td className="mono"><span style={{ color: pnlColor(vPnl) }}>{money(vPnl)}</span></td>
+                      <td className="mono"><span style={{ color: pnlColor(vToday) }}>{money(vToday)}</span></td>
+                      <td colSpan={3} />
+                    </tr>
+                  </tfoot>
+                );
+              })()}
             </table>
           </div>
         </div>
 
         <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
-          Changes take effect immediately — no restart required. The signal engine checks pair status before every signal generation cycle.
+          Changes take effect immediately — no restart required. Figures are recalculated from your trades on every refresh; "today" uses the same day boundary the risk engine enforces limits against.
         </div>
       </div>
     </>
