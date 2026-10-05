@@ -370,7 +370,7 @@ router.get("/commands", async (req, res) => {
           const pairSettings = await supabaseAdmin
             .from("platform_settings").select("value")
             .eq("key", "max_open_per_pair").single();
-          const MAX_OPEN_PER_PAIR = parseInt(pairSettings?.data?.value) || 3;
+          const MAX_OPEN_PER_PAIR = parseInt(pairSettings?.data?.value) || 2;
           if (openForPair >= MAX_OPEN_PER_PAIR) {
             await log("info", "bridge",
               `${signal.symbol}: ${openForPair}/${MAX_OPEN_PER_PAIR} open trades — skipping`
@@ -499,9 +499,21 @@ router.get("/commands", async (req, res) => {
           });
         }
 
-        // Mark as sent — not executed yet
+        // FIX: this used to mark EVERY signal "sent" after the account loop,
+        // even when each account was blocked by a gate above (consecutive-loss
+        // pause, circuit breaker, pair limit, pyramiding gate, ...). The
+        // dashboard then showed "SENT" for signals that never reached the
+        // bridge, which looked like trades were being fired and failing. Only
+        // signals that actually produced a command are "sent"; the rest are
+        // closed out as "expired" (the gate that blocked each one is already
+        // in system_logs just above).
+        const wasQueued = commands.some(c => c.signal_id === signal.id);
+        if (!wasQueued) {
+          await log("info", "bridge",
+            `${signal.symbol} ${signal.direction}: not sent - no account passed the risk gates (reason logged above)`);
+        }
         await supabaseAdmin.from("signals")
-          .update({ status: "sent" })
+          .update({ status: wasQueued ? "sent" : "expired" })
           .eq("id", signal.id);
       }
     }

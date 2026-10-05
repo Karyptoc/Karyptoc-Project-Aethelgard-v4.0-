@@ -41,6 +41,22 @@ export default function Settings() {
     fetchTelegramStatus();
   }, [fetchSettings, fetchTelegramStatus]);
 
+  // Keep the "trading paused" banner honest: re-read settings every 30s
+  // (fetchSettings already skips while the user is mid-edit).
+  useEffect(() => {
+    const id = setInterval(fetchSettings, 30000);
+    return () => clearInterval(id);
+  }, [fetchSettings]);
+
+  // The consecutive-loss protection stores its pause as a settings row
+  // `consecutive_loss_halt_<accountId>` = {"streak":N,"cooldownUntil":ISO,...}.
+  const activePauses = Object.entries(settings)
+    .filter(([k]) => k.startsWith("consecutive_loss_halt_"))
+    .map(([, v]) => {
+      try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; }
+    })
+    .filter(h => h && h.cooldownUntil && new Date(h.cooldownUntil).getTime() > Date.now());
+
   const save = async (key, value) => {
     pendingChange.current = true;
     await api.put("/api/dashboard/settings", { key, value });
@@ -102,6 +118,19 @@ export default function Settings() {
           <div className="card">
             <div className="card-header"><span className="card-title">Trading Engine</span></div>
 
+            {activePauses.map((h, i) => {
+              const until = new Date(h.cooldownUntil);
+              const mins = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60000));
+              return (
+                <div key={i} className="alert alert-warn" style={{ fontSize: 12, marginBottom: 12 }}>
+                  <strong>Trading is paused.</strong> The account hit {h.streak || "several"} losing trades in a row,
+                  so new entries are blocked until {until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {" "}({mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`} left). Signals still appear on the
+                  Signals page but will not be sent to MT5 until the pause ends. You can change the rule under Risk Management.
+                </div>
+              );
+            })}
+
             <div className="toggle-wrap">
               <div className="toggle-info">
                 <div className="toggle-label">Auto-Trading Enabled</div>
@@ -123,7 +152,7 @@ export default function Settings() {
               </select>
             </div>
 
-            <div style={{ padding: "12px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ padding: "12px 0", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: 14 }}>Max Concurrent Trades</div>
                 <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Maximum open positions at once</div>
@@ -132,6 +161,27 @@ export default function Settings() {
                 value={settings["max_concurrent_trades"] || 5}
                 onChange={e => setSettings(s => ({ ...s, max_concurrent_trades: parseInt(e.target.value) }))}
                 onBlur={e => save("max_concurrent_trades", parseInt(e.target.value))} />
+            </div>
+
+            <div style={{ padding: "12px 0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>Max Trades Per Pair</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  1 = one position per pair. Above 1, extra trades on the same pair only open on an A-grade
+                  setup when every earlier one is already in profit with its stop at break-even.
+                </div>
+              </div>
+              <input type="number" className="form-input" style={{ width: 80 }} min={1} max={5}
+                value={settings["max_open_per_pair"] ?? 2}
+                onChange={e => {
+                  const v = parseInt(e.target.value);
+                  setSettings(s => ({ ...s, max_open_per_pair: Number.isNaN(v) ? "" : v }));
+                }}
+                onBlur={e => {
+                  const v = Math.min(5, Math.max(1, parseInt(e.target.value) || 1));
+                  setSettings(s => ({ ...s, max_open_per_pair: v }));
+                  save("max_open_per_pair", v);
+                }} />
             </div>
           </div>
 
@@ -177,6 +227,8 @@ export default function Settings() {
             {[
               { key: "default_risk_percent", label: "Default Risk Per Trade (%)", desc: "% of balance risked per trade", min: 0.1, max: 5, step: 0.1 },
               { key: "circuit_breaker_daily_loss_pct", label: "Daily Loss Circuit Breaker (%)", desc: "Halt trading if daily loss exceeds this", min: 1, max: 20, step: 0.5 },
+              { key: "max_consecutive_losses", label: "Pause After Losing Streak", desc: "Pause new entries after this many losing trades in a row (default 4)", min: 2, max: 20, step: 1 },
+              { key: "consecutive_loss_cooldown_hours", label: "Pause Length (hours)", desc: "How long entries stay paused after a losing streak (default 4)", min: 0.5, max: 24, step: 0.5 },
             ].map(({ key, label, desc, min, max, step }) => (
               <div key={key} style={{ padding: "12px 0", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
