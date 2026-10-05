@@ -18,6 +18,7 @@ const signalEngine = require("../services/signalEngine");
 const { checkCircuitBreaker, calculatePositionSize, checkCorrelation, checkCurrencyExposure, getEquityCurveMultiplier, checkConsecutiveLossProtection } = require("../services/riskEngine");
 const { sendTelegramMessage, isConfigured: isTelegramConfigured } = require("../services/telegram");
 const { updatePOIZones } = require("../services/poiZoneEngine");
+const { checkPyramiding } = require("../services/pyramiding");
 
 // NEW (Roadmap Phase 4, TP/SL-hit notifier): fire-and-forget Telegram alert
 // when a trade closes with a known reason. Mirrors the exact pattern
@@ -351,7 +352,7 @@ router.get("/commands", async (req, res) => {
           // ── Fix 3: Global max concurrent trades (platform-level) ──────────────
           // Count ALL open trades across all pairs for this account
           const { data: openTrades } = await supabaseAdmin
-            .from("trades").select("id, symbol")
+            .from("trades").select("id, symbol, direction, open_price, stop_loss, profit")
             .eq("account_id", account.id).eq("status", "open");
 
           const openCount = openTrades?.length || 0;
@@ -374,6 +375,22 @@ router.get("/commands", async (req, res) => {
             await log("info", "bridge",
               `${signal.symbol}: ${openForPair}/${MAX_OPEN_PER_PAIR} open trades — skipping`
             );
+            continue;
+          }
+
+          // ── Pyramiding gate (see services/pyramiding.js for the evidence) ─────
+          // The first trade on a pair/direction always passes. Extra ones only
+          // when A-grade, every existing one is in profit with its stop at
+          // break-even, and price has moved to a new level. Also blocks a
+          // signal re-firing while its first trade is still being filled.
+          const sameDirOpen = (openTrades || []).filter(
+            t => t.symbol === signal.symbol && t.direction === signal.direction);
+          const inflight = commands.filter(c =>
+            c.type === "EXECUTE_TRADE" && c.account_id === account.id &&
+            c.order?.symbol === signal.symbol && c.order?.direction === signal.direction).length;
+          const pyr = checkPyramiding({ signal, existingSameDir: sameDirOpen, inflightCount: inflight });
+          if (!pyr.allowed) {
+            await log("info", "bridge", `${signal.symbol}: pyramiding gate - ${pyr.reason}`);
             continue;
           }
 

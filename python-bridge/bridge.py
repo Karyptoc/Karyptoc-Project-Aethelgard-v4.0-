@@ -696,6 +696,65 @@ def sync_client_accounts():
             _relogin_master()
 
 
+# ── Broker-accurate risk cap (added Oct 2026) ───────────────────────────────
+# WHY: the backend sizes each lot from the signal's stop distance using a
+# hard-coded pip-value table, but THIS file then widens/corrects the stop
+# (validate_sl_distance) and the broker's real contract values can differ from
+# the table. The lot never got re-checked against the stop actually sent.
+# Real MT5 history (1,021 Aethelgard trades) shows the result: median loss
+# 0.63% of balance but GOLD stop-outs of 7-13%, and US30/BTC around 3-5%,
+# against a 1% target.
+# FIX: ask MT5 itself what one lot loses at the FINAL stop
+# (mt5.order_calc_profit), then shrink the lot so the loss at the stop is at
+# most MAX_RISK_PCT_PER_TRADE of equity. The volume is only ever reduced,
+# never increased. If even the broker's minimum lot would risk more than
+# MAX_RISK_PCT_HARD, the trade is skipped (not enough capital for that
+# instrument's stop distance). Both limits can be set in .env.
+MAX_RISK_PCT_PER_TRADE = float(os.getenv("MAX_RISK_PCT_PER_TRADE", "1.25"))
+MAX_RISK_PCT_HARD = float(os.getenv("MAX_RISK_PCT_HARD", "2.0"))
+
+
+def loss_at_stop_per_lot(broker_symbol, direction, price, sl):
+    """Dollar loss of ONE lot if price travels from entry to the stop, as
+    computed by the broker's own contract specification. None if unavailable."""
+    action = mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL
+    try:
+        p = mt5.order_calc_profit(action, broker_symbol, 1.0, price, sl)
+    except Exception as e:
+        log.error(f"order_calc_profit failed for {broker_symbol}: {e}")
+        return None
+    if p is None or p == 0:
+        return None
+    return abs(p)
+
+
+def cap_volume_to_risk(volume, loss_per_lot, equity, vol_min, vol_step,
+                       soft_pct=None, hard_pct=None):
+    """Pure sizing rule (no MT5 calls, unit-testable).
+
+    Returns (new_volume, risk_pct_at_new_volume, status) where status is
+      'ok'      requested volume already within the cap - unchanged
+      'reduced' shrunk to fit the cap
+      'min_lot' cap is below the broker minimum lot but the minimum lot is
+                still within the hard limit - trade at the minimum
+      'skip'    even the minimum lot risks more than the hard limit
+    """
+    soft_pct = MAX_RISK_PCT_PER_TRADE if soft_pct is None else soft_pct
+    hard_pct = MAX_RISK_PCT_HARD if hard_pct is None else hard_pct
+    budget = equity * soft_pct / 100.0
+    if volume * loss_per_lot <= budget + 1e-9:
+        return volume, volume * loss_per_lot / equity * 100.0, "ok"
+    steps = int((budget / loss_per_lot) / vol_step + 1e-9)
+    reduced = round(steps * vol_step, 8)
+    if reduced >= vol_min - 1e-12:
+        reduced = min(reduced, volume)
+        return reduced, reduced * loss_per_lot / equity * 100.0, "reduced"
+    min_risk_pct = vol_min * loss_per_lot / equity * 100.0
+    if min_risk_pct <= hard_pct + 1e-9:
+        return vol_min, min_risk_pct, "min_lot"
+    return 0.0, min_risk_pct, "skip"
+
+
 def execute_trade(account_id, order):
     acc = connected_accounts.get(account_id) or connected_accounts.get(f"env_{MT5_LOGIN}")
     if not acc:
@@ -869,6 +928,30 @@ def execute_trade(account_id, order):
                    f"(SL {sl_pips_check:.0f}p, TP {tp_pips_check:.0f}p, ceiling {max_sane}p). "
                    f"price={price:.5f} sl={sl:.5f} tp={tp:.5f}. Not sending to broker.")
         return {"success": False, "error": f"SL/TP sanity check failed ({sl_pips_check:.0f}/{tp_pips_check:.0f}p > {max_sane}p ceiling)"}
+
+    # ── Broker-accurate risk cap (see cap_volume_to_risk above) ──────────────
+    if sl and sym_info:
+        acct_now = mt5.account_info()
+        equity_now = min(acct_now.balance, acct_now.equity) if acct_now else 0
+        loss_lot = loss_at_stop_per_lot(broker_symbol, direction, price, sl)
+        if equity_now > 0 and loss_lot:
+            new_vol, risk_pct, status = cap_volume_to_risk(
+                volume, loss_lot, equity_now, sym_info.volume_min, sym_info.volume_step)
+            if status == "skip":
+                _signal_blacklist.add(signal_id)
+                log.warning(f"{symbol}: SKIPPED - even the minimum lot {sym_info.volume_min} risks "
+                            f"{risk_pct:.2f}% of equity ${equity_now:.2f} at this stop "
+                            f"(hard limit {MAX_RISK_PCT_HARD}%)")
+                return {"success": False,
+                        "error": f"Risk too high for account size ({risk_pct:.1f}% at minimum lot) - signal blacklisted"}
+            if status in ("reduced", "min_lot"):
+                log.info(f"{symbol}: lot {volume} -> {new_vol} to cap risk at "
+                         f"{MAX_RISK_PCT_PER_TRADE}% of equity (now {risk_pct:.2f}%, {status})")
+                volume = round(new_vol, 2)
+            else:
+                log.info(f"{symbol}: risk at stop {risk_pct:.2f}% of equity - within cap")
+        else:
+            log.error(f"{symbol}: could not compute loss at stop from MT5 - risk cap NOT applied this trade")
 
     # ── Select correct filling mode ───────────────────────────────────────────
     # ORDER_FILLING_IOC is only valid for MARKET orders.
