@@ -17,6 +17,7 @@ const signalEngine = require("../services/signalEngine");
 // into the same per-account gate sequence as checkCircuitBreaker, below.
 const { checkCircuitBreaker, calculatePositionSize, checkCorrelation, checkCurrencyExposure, getEquityCurveMultiplier, checkConsecutiveLossProtection } = require("../services/riskEngine");
 const { sendTelegramMessage, isConfigured: isTelegramConfigured } = require("../services/telegram");
+const { updatePOIZones } = require("../services/poiZoneEngine");
 
 // NEW (Roadmap Phase 4, TP/SL-hit notifier): fire-and-forget Telegram alert
 // when a trade closes with a known reason. Mirrors the exact pattern
@@ -246,6 +247,17 @@ router.post("/ohlcv", async (req, res) => {
     }
 
     await log("info", "bridge", `OHLCV received: ${symbol} | spread: ${spread || "N/A"}pips`);
+
+    // NEW (Roadmap Phase 4, POI notifier): runs BEFORE generateSignalFromOHLCV
+    // deliberately — that function has several early-exit gates (kill zone,
+    // session trade cap, duplicate-signal window, news blackout) that are
+    // all specific to deciding whether to open a NEW trade. None of those
+    // are a reason to stop watching whether price has touched a zone
+    // someone's already tracking, so zone detection/touch-checking runs
+    // unconditionally on every OHLCV push instead of living inside that
+    // function. Best-effort — never throws, never blocks signal generation.
+    await updatePOIZones(symbol, data);
+
     // FIX (Oct 4 audit): spread was received here and logged, then
     // discarded — generateSignalFromOHLCV never saw it, so the dynamic
     // spread check it now performs (see signalEngine.js) needs it passed
