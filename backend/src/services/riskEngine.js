@@ -447,17 +447,20 @@ async function checkConsecutiveLossProtection(accountId) {
     const { data: recentTrades } = await query;
 
     if (halt && (!recentTrades || recentTrades.length === 0)) {
-      // Cooldown's over but nothing has traded yet since the halt — clear
-      // the stale record and give the account one fresh shot rather than
-      // re-tripping on the same old data.
-      await supabaseAdmin.from("platform_settings").delete().eq("key", haltKey);
+      // Cooldown's over but nothing has closed since the halt. Give the
+      // account a fresh shot, but KEEP the halt record: its anchorCloseTime
+      // is what stops the old losing streak being counted again once the
+      // first new trade closes. (Deleting it here made the very next
+      // closed loss re-count the whole stale streak and re-pause the
+      // account straight away.)
       return { allowed: true };
     }
 
     let streak = 0;
+    let streakBroken = false; // a non-losing trade closed after the anchor
     for (const t of (recentTrades || [])) {
       if ((t.profit || 0) < 0) streak++;
-      else break;
+      else { streakBroken = true; break; }
     }
 
     if (streak >= maxLosses) {
@@ -476,8 +479,11 @@ async function checkConsecutiveLossProtection(accountId) {
       return { allowed: false, reason: `${streak} consecutive losses — account paused ${cooldownHours}h` };
     }
 
-    if (halt) {
-      // Streak since the last halt broke (or never reached threshold) — clear it.
+    if (halt && streakBroken) {
+      // A winning (or flat) trade has closed since the halt, so no future
+      // streak can reach back past it into the old losses — the anchor is
+      // no longer needed. Until that happens the record stays, so losses
+      // before the anchor are never counted twice.
       await supabaseAdmin.from("platform_settings").delete().eq("key", haltKey);
     }
     return { allowed: true };
