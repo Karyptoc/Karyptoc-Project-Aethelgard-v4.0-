@@ -601,6 +601,101 @@ def execute_copy_trade(client_lot, order, master_ticket, signal_id):
             mt5.login(int(MT5_LOGIN), password=MT5_PASSWORD, server=MT5_SERVER)
 
 
+# ── Client (copy-trading) account sync ────────────────────────────────────────
+# BUG WAS: copy trades were opened and recorded (POST /bridge/execute) but
+# nothing ever reported them CLOSING, and nothing ever refreshed a client's
+# balance/equity. Result: every client trade stayed "open" forever with no
+# P&L, client daily P&L rows were never created, performance fees never
+# accrued, and the client portal showed stale balances. This job closes that
+# loop: every minute it asks the backend which credential clients exist and
+# which of their copied positions are still open, logs into each client
+# account that needs attention, and (1) refreshes balance/equity every few
+# minutes, (2) for each open copied position that is no longer open on the
+# client's account, reads that account's own MT5 deal history for the true
+# result and HOW it closed (tp/sl/stop_out/manual), and reports it.
+# A position is only ever reported closed when a closing deal actually
+# exists, so a read error can never close a trade that is still running.
+CLIENT_BALANCE_SYNC_SECONDS = 300
+_client_last_balance_sync = {}
+
+def _relogin_master():
+    if MT5_LOGIN and MT5_PASSWORD:
+        mt5.login(int(MT5_LOGIN), password=MT5_PASSWORD, server=MT5_SERVER)
+
+def reconcile_client_trade(client_name, trade):
+    """Reports one copied trade closed if (and only if) MT5 shows it closed.
+    Must be called while logged into that client's account."""
+    try:
+        ticket = int(trade["client_ticket"])
+    except (TypeError, ValueError):
+        return
+    if mt5.positions_get(ticket=ticket):
+        return  # still open on the client's account
+    real = get_real_closed_profit(ticket)
+    if not real or real.get("close_price") is None:
+        return  # no closing deal found - leave it open, check again next cycle
+    net = round(real["profit"] + real["swap"] + real["commission"], 2)
+    try:
+        r = requests.post(f"{BACKEND_URL}/api/copy-trading/bridge/close",
+            headers=api_headers(), timeout=10,
+            json={
+                "client_ticket": ticket,
+                "close_price": real["close_price"],
+                "profit": net,
+                "close_reason": real["close_reason"],
+                "close_time": real["close_time"],
+            })
+        if r.status_code == 200:
+            log.info(f"Client {client_name}: {trade.get('symbol')} #{ticket} closed "
+                     f"[{real['close_reason']}] net {net:+.2f}")
+        else:
+            log.warning(f"Client close report #{ticket} failed: HTTP {r.status_code}")
+    except Exception as e:
+        log.warning(f"Client close report #{ticket} failed: {e}")
+
+def sync_client_accounts():
+    try:
+        r = requests.get(f"{BACKEND_URL}/api/copy-trading/bridge/client-sync-targets",
+            headers=api_headers(), timeout=15)
+        if r.status_code != 200:
+            log.warning(f"client-sync-targets fetch failed: HTTP {r.status_code}")
+            return
+        targets = r.json().get("targets", [])
+    except Exception as e:
+        log.warning(f"Cannot fetch client sync targets: {e}")
+        return
+
+    now = time.time()
+    switched = False
+    try:
+        for t in targets:
+            open_trades = t.get("open_trades") or []
+            due = now - _client_last_balance_sync.get(t["client_id"], 0) >= CLIENT_BALANCE_SYNC_SECONDS
+            if not open_trades and not due:
+                continue  # nothing to check and balance is fresh - don't switch accounts
+            name = t.get("client_name", "?")
+            try:
+                switched = True
+                if not mt5.login(int(t["mt5_login"]), password=t["mt5_password"], server=t["mt5_server"]):
+                    log.warning(f"Client sync: cannot login to {name} ({t['mt5_login']})")
+                    continue
+                if due:
+                    info = mt5.account_info()
+                    if info:
+                        requests.post(f"{BACKEND_URL}/api/copy-trading/bridge/sync",
+                            headers=api_headers(), timeout=10,
+                            json={"client_id": t["client_id"], "balance": info.balance,
+                                  "equity": info.equity, "profit": info.profit, "is_connected": True})
+                        _client_last_balance_sync[t["client_id"]] = now
+                for trade in open_trades:
+                    reconcile_client_trade(name, trade)
+            except Exception as e:
+                log.warning(f"Client sync error for {t.get('client_name', '?')}: {e}")
+    finally:
+        if switched:
+            _relogin_master()
+
+
 def execute_trade(account_id, order):
     acc = connected_accounts.get(account_id) or connected_accounts.get(f"env_{MT5_LOGIN}")
     if not acc:
@@ -1317,6 +1412,7 @@ def main():
 
     schedule.every(SYNC_INTERVAL_SECONDS).seconds.do(sync_all)
     schedule.every(30).seconds.do(manage_open_trades)
+    schedule.every(60).seconds.do(sync_client_accounts)
     schedule.every(60).seconds.do(refresh_accounts)
     schedule.every(10).seconds.do(poll_commands)
 

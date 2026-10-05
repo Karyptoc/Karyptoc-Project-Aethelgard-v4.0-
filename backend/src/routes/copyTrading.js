@@ -441,10 +441,50 @@ router.post("/bridge/execute", verifyBridgeSecret, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/copy-trading/bridge/client-sync-targets — everything the bridge
+// needs to (1) keep each credential client's balance/equity current and
+// (2) notice when a copied position has closed: login details plus that
+// client's still-open trades. A client is included if copying is on OR they
+// still have open trades (turning copying off must not strand open trades).
+router.get("/bridge/client-sync-targets", verifyBridgeSecret, async (req, res) => {
+  try {
+    const { data: openTrades, error: tErr } = await supabaseAdmin
+      .from("client_trades")
+      .select("client_id, client_ticket, symbol, direction, open_price, stop_loss, take_profit")
+      .eq("status", "open");
+    if (tErr) throw tErr;
+
+    const byClient = {};
+    (openTrades || []).forEach(t => { (byClient[t.client_id] = byClient[t.client_id] || []).push(t); });
+
+    const { data: clients, error: cErr } = await supabaseAdmin
+      .from("client_accounts")
+      .select("id, name, mt5_login, mt5_password, mt5_server, copy_enabled, connection_type, status")
+      .eq("status", "active")
+      .eq("connection_type", "credentials");
+    if (cErr) throw cErr;
+
+    const targets = (clients || [])
+      .filter(c => c.mt5_login && c.mt5_password && (c.copy_enabled || byClient[c.id]))
+      .map(c => ({
+        client_id: c.id,
+        client_name: c.name,
+        mt5_login: c.mt5_login,
+        mt5_password: decryptSecret(c.mt5_password),
+        mt5_server: c.mt5_server,
+        open_trades: byClient[c.id] || [],
+      }));
+    res.json({ targets });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/copy-trading/bridge/close — bridge reports trade close
 router.post("/bridge/close", verifyBridgeSecret, async (req, res) => {
   try {
-    const { client_ticket, close_price, profit } = req.body;
+    // close_reason ("tp" | "sl" | "stop_out" | "manual" | "unknown") and
+    // close_time come from the bridge's reading of the client account's own
+    // MT5 deal history (see reconcile_client_trades in bridge.py).
+    const { client_ticket, close_price, profit, close_reason, close_time } = req.body;
 
     const { data: trade } = await supabaseAdmin
       .from("client_trades")
@@ -456,7 +496,11 @@ router.post("/bridge/close", verifyBridgeSecret, async (req, res) => {
     if (!trade) return res.json({ ok: true, note: "Trade not found" });
 
     await supabaseAdmin.from("client_trades")
-      .update({ close_price, profit, status: "closed", close_time: new Date().toISOString() })
+      .update({
+        close_price, profit, status: "closed",
+        close_reason: close_reason || "unknown",
+        close_time: close_time || new Date().toISOString(),
+      })
       .eq("client_ticket", client_ticket);
 
     // Update daily P&L
@@ -477,6 +521,19 @@ router.post("/bridge/close", verifyBridgeSecret, async (req, res) => {
       .eq("client_id", trade.client_id)
       .eq("date", today)
       .single();
+
+    // BUG WAS: nothing ever created today's client_daily_pnl row except the
+    // /bridge/sync call, and nothing calls that for credential clients — so
+    // this UPDATE matched zero rows and every close's P&L, fee and win/loss
+    // count was silently dropped. Create the row if it isn't there.
+    if (!dayRecord) {
+      await supabaseAdmin.from("client_daily_pnl").insert({
+        client_id: trade.client_id, date: today,
+        starting_equity: client?.equity ?? 0, ending_equity: client?.equity ?? 0,
+        gross_pnl: 0, performance_fee: 0, net_pnl: 0,
+        trades_count: 0, winning_trades: 0, losing_trades: 0,
+      });
+    }
 
     await supabaseAdmin.from("client_daily_pnl").update({
       gross_pnl: (dayRecord?.gross_pnl || 0) + grossPnl,
@@ -563,7 +620,7 @@ router.get("/portal/me", verifyPortalToken, async (req, res) => {
     const thirtyDaysAgo = new Date(Date.now() - 30*24*60*60*1000).toISOString().slice(0,10);
     const { data: history } = await supabaseAdmin
       .from("client_daily_pnl")
-      .select("date, net_pnl, trades_count, winning_trades, losing_trades")
+      .select("date, gross_pnl, performance_fee, net_pnl, trades_count, winning_trades, losing_trades")
       .eq("client_id", client.id)
       .gte("date", thirtyDaysAgo)
       .order("date", { ascending: true });
@@ -591,33 +648,102 @@ router.get("/portal/me", verifyPortalToken, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /api/copy-trading/portal/trades — client sees their trades (partial view)
+// ── Portal data: what a client may see ──────────────────────────────────────
+// Everything below is scoped to the token's own client (req.client.id) or is
+// deliberately public-to-clients market output (signals, zones). Fields are
+// WHITELISTED, never spread from the row, so a column added to a table later
+// can't leak by accident. Never exposed here: the engine's reasoning/AI text,
+// regime or decision-engine tags, confluence scores, other clients, the
+// master account, pair halts or risk settings, credentials, tokens.
+
+// GET /api/copy-trading/portal/trades — the client's own trades, open and closed
 router.get("/portal/trades", verifyPortalToken, async (req, res) => {
   try {
-    const client = req.client;
     const { data, error } = await supabaseAdmin
       .from("client_trades")
-      .select("id, symbol, direction, lot_size, profit, status, open_time, close_time")
-      .eq("client_id", client.id)
+      .select("id, symbol, direction, lot_size, open_price, stop_loss, take_profit, close_price, profit, status, close_reason, open_time, close_time")
+      .eq("client_id", req.client.id)
       .order("open_time", { ascending: false })
-      .limit(50);
-
+      .limit(300);
     if (error) throw error;
 
-    // Partial view: show symbol and direction but not exact prices
-    const partialTrades = (data || []).map(t => ({
-      id: t.id,
-      symbol: t.symbol,
-      direction: t.direction,
-      lot_size: t.lot_size,
-      profit: t.profit,
-      status: t.status,
-      open_time: t.open_time,
-      close_time: t.close_time,
-      // prices hidden from client portal
-    }));
+    res.json({
+      trades: (data || []).map(t => ({
+        id: t.id, symbol: t.symbol, direction: t.direction, lot_size: t.lot_size,
+        open_price: t.open_price, stop_loss: t.stop_loss, take_profit: t.take_profit,
+        close_price: t.close_price, profit: t.profit, status: t.status,
+        close_reason: t.close_reason || null,
+        open_time: t.open_time, close_time: t.close_time,
+      }))
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-    res.json({ trades: partialTrades });
+// GET /api/copy-trading/portal/signals — recent engine signals, plus whether
+// THIS client's account took each one and how that trade ended.
+router.get("/portal/signals", verifyPortalToken, async (req, res) => {
+  try {
+    const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: sigs, error } = await supabaseAdmin
+      .from("signals")
+      .select("id, symbol, direction, entry_price, stop_loss, take_profit, order_type, regime_detail, status, created_at")
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(60);
+    if (error) throw error;
+
+    const ids = (sigs || []).map(x => x.id);
+    const mine = {};
+    if (ids.length) {
+      const { data: ct } = await supabaseAdmin
+        .from("client_trades")
+        .select("master_signal_id, status, profit, close_reason")
+        .eq("client_id", req.client.id)
+        .in("master_signal_id", ids);
+      (ct || []).forEach(t => { mine[t.master_signal_id] = t; });
+    }
+
+    res.json({
+      signals: (sigs || []).map(x => {
+        const t = mine[x.id];
+        return {
+          id: x.id, symbol: x.symbol, direction: x.direction,
+          entry_price: x.entry_price, stop_loss: x.stop_loss, take_profit: x.take_profit,
+          order_type: x.order_type || "MARKET",
+          // Grade only — the numeric score and the reasoning stay private.
+          grade: x.regime_detail?.confluence_grade || null,
+          status: x.status, created_at: x.created_at,
+          taken: !!t,
+          outcome: t ? (t.status === "open" ? "open" : (t.close_reason || "closed")) : null,
+          result_pnl: t && t.status === "closed" ? t.profit : null,
+        };
+      })
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/copy-trading/portal/zones — points of interest the engine is
+// watching (order blocks / fair value gaps), and ones price touched recently.
+router.get("/portal/zones", verifyPortalToken, async (req, res) => {
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const cols = "id, symbol, timeframe, zone_type, zone_high, zone_low, status, detected_at, touched_at";
+    const [activeQ, touchedQ] = await Promise.all([
+      supabaseAdmin.from("poi_zones").select(cols).eq("status", "active")
+        .order("detected_at", { ascending: false }).limit(60),
+      supabaseAdmin.from("poi_zones").select(cols).eq("status", "touched").gte("touched_at", since)
+        .order("touched_at", { ascending: false }).limit(40),
+    ]);
+    if (activeQ.error) throw activeQ.error;
+    if (touchedQ.error) throw touchedQ.error;
+    const data = [...(activeQ.data || []), ...(touchedQ.data || [])];
+    res.json({
+      zones: (data || []).map(z => ({
+        id: z.id, symbol: z.symbol, timeframe: z.timeframe, zone_type: z.zone_type,
+        zone_high: z.zone_high, zone_low: z.zone_low, status: z.status,
+        detected_at: z.detected_at, touched_at: z.touched_at,
+      }))
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
