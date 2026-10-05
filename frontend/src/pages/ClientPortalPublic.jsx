@@ -117,6 +117,7 @@ export default function ClientPortalPublic() {
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
   const [trades, setTrades] = useState([]);
+  const [invoices, setInvoices] = useState([]);
   const [activeTab, setActiveTab] = useState("overview");
   const [showConnect, setShowConnect] = useState(false);
 
@@ -134,6 +135,12 @@ export default function ClientPortalPublic() {
       ]);
       setData(meRes.data);
       setTrades(tradesRes.data.trades || []);
+      // Fee invoices are secondary: if this call fails the portal must still
+      // load, so it is fetched on its own and failures are swallowed.
+      try {
+        const invRes = await api(token).get("/api/copy-trading/portal/fee-invoices");
+        setInvoices(invRes.data.invoices || []);
+      } catch { setInvoices([]); }
     } catch (e) {
       setError(e.response?.data?.error || "Invalid or expired access link");
     } finally {
@@ -163,6 +170,10 @@ export default function ClientPortalPublic() {
   const { account, today, history } = data;
   const pnlColor = (v) => parseFloat(v) >= 0 ? "var(--bull)" : "var(--bear)";
   const pnlSign = (v) => parseFloat(v) >= 0 ? "+" : "";
+
+  const pendingInvoices = invoices.filter(i => i.status === "pending");
+  const paidInvoices = invoices.filter(i => i.status === "paid");
+  const fmtMoney = (cur, v) => `${cur || "USD"} ${parseFloat(v || 0).toFixed(2)}`;
 
   const totalReturn = account.total_return_pct;
   const weekPnl = history.slice(-7).reduce((s, d) => s + d.net_pnl, 0);
@@ -205,6 +216,17 @@ export default function ClientPortalPublic() {
           </div>
         )}
 
+        {/* Fee payment banner */}
+        {pendingInvoices.length > 0 && (
+          <div className="alert alert-warn" style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span>
+              💳 You have {pendingInvoices.length} performance-fee invoice{pendingInvoices.length > 1 ? "s" : ""} awaiting payment
+              ({pendingInvoices.map(i => fmtMoney(i.currency, i.amount_due)).join(" + ")}).
+            </span>
+            <button className="btn btn-primary btn-sm" onClick={() => setActiveTab("fees")}>View &amp; pay</button>
+          </div>
+        )}
+
         {/* Stats */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginBottom: 20 }}>
           <StatCard label="Account balance" value={`$${parseFloat(account.balance || 0).toFixed(2)}`} />
@@ -237,10 +259,13 @@ export default function ClientPortalPublic() {
 
         {/* Tabs */}
         <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-          {["overview","history","trades"].map(tab => (
+          {["overview","history","trades","fees"].map(tab => (
             <button key={tab} className={`btn btn-sm ${activeTab === tab ? "btn-primary" : "btn-ghost"}`}
               onClick={() => setActiveTab(tab)}>
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === "fees" && pendingInvoices.length > 0 && (
+                <span className="badge warn" style={{ marginLeft: 6, fontSize: 9 }}>{pendingInvoices.length}</span>
+              )}
             </button>
           ))}
         </div>
@@ -323,6 +348,62 @@ export default function ClientPortalPublic() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* Fees */}
+        {activeTab === "fees" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div className="card">
+              <div className="card-header"><span className="card-title">Performance fee invoices</span></div>
+              {pendingInvoices.length === 0 ? (
+                <div style={{ padding: 20, fontSize: 13, color: "var(--text-muted)" }}>
+                  Nothing to pay right now.
+                  {parseFloat(account.pending_fee || 0) > 0 && ` Your accrued performance fee is $${parseFloat(account.pending_fee).toFixed(2)}; an invoice with a payment link will appear here when it is issued.`}
+                </div>
+              ) : pendingInvoices.map(inv => (
+                <div key={inv.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "14px 0", borderBottom: "0.5px solid var(--border)" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{fmtMoney(inv.currency, inv.amount_due)}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                      {inv.notes || "Performance fee"} · issued {inv.created_at ? new Date(inv.created_at).toLocaleDateString() : "—"}
+                    </div>
+                    <div className="mono" style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{inv.invoice_number}</div>
+                  </div>
+                  {inv.payment_url ? (
+                    <a href={inv.payment_url} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">
+                      💳 Pay now (M-Pesa / Card)
+                    </a>
+                  ) : (
+                    <span className="badge muted">Payment link not ready</span>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="card">
+              <div className="card-header"><span className="card-title">Payment history</span></div>
+              {paidInvoices.length === 0 ? (
+                <div style={{ padding: 20, fontSize: 13, color: "var(--text-muted)" }}>No payments yet.</div>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Invoice</th><th>Amount</th><th>Paid</th></tr></thead>
+                    <tbody>
+                      {paidInvoices.map(inv => (
+                        <tr key={inv.id}>
+                          <td className="mono" style={{ fontSize: 11 }}>{inv.invoice_number}</td>
+                          <td style={{ fontWeight: 700 }}>{fmtMoney(inv.currency, inv.amount_due)}</td>
+                          <td className="mono" style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                            {inv.paid_at ? new Date(inv.paid_at).toLocaleDateString() : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
