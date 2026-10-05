@@ -4,6 +4,7 @@ const { supabaseAdmin } = require("../services/supabase");
 const { verifyToken } = require("../middleware/auth");
 const core = require("../services/signalCore");
 const perf = require("../services/performanceMetrics");
+const { compareEngines } = require("../services/modelEval");
 
 router.use(verifyToken);
 
@@ -156,6 +157,68 @@ router.get("/performance", async (req, res) => {
     };
 
     res.json({ trades, stats });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/dashboard/model-eval?days=90
+// Roadmap Phase 5 (model evaluation): closed trades grouped by which decision
+// engine produced the signal (regime_detail.decision_engine, tagged in
+// signalEngine.js), with per-engine stats and a bootstrap-CI comparison of
+// every pair. Trades from signals created before the tag existed land in
+// UNTAGGED rather than being guessed into an engine. Only trades that
+// are linked to a signal (signal_id) can be attributed at all.
+router.get("/model-eval", verifyToken, async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days, 10) || 90, 365);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: trades, error } = await supabaseAdmin
+      .from("trades")
+      .select("symbol, profit, open_price, stop_loss, volume, signal_id, close_time")
+      .eq("status", "closed")
+      .gte("close_time", since)
+      .order("close_time", { ascending: false })
+      .limit(2000);
+    if (error) throw error;
+
+    const linked = (trades || []).filter(t => t.signal_id);
+    const ids = [...new Set(linked.map(t => t.signal_id))];
+    const engineBySignal = {};
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data: sigs } = await supabaseAdmin
+        .from("signals").select("id, regime_detail").in("id", ids.slice(i, i + 100));
+      (sigs || []).forEach(sg => { engineBySignal[sg.id] = sg.regime_detail?.decision_engine || null; });
+    }
+
+    const pipValuePerLotFor = (symbol) =>
+      ({ GOLD: 1, BTCUSD: 1, US30Cash: 1, GER40Cash: 1 }[symbol] || 10);
+
+    const byEngine = {};
+    linked.forEach(t => {
+      const engine = engineBySignal[t.signal_id] || "UNTAGGED";
+      (byEngine[engine] = byEngine[engine] || []).push(
+        perf.normalizeTradeForMetrics(
+          { profit: t.profit, open_price: t.open_price, stop_loss: t.stop_loss, volume: t.volume },
+          core.PIP_SIZES[t.symbol] || 0.0001,
+          pipValuePerLotFor(t.symbol)
+        )
+      );
+    });
+
+    res.json({
+      days,
+      closed_trades_in_window: (trades || []).length,
+      attributable_to_a_signal: linked.length,
+      unattributable: (trades || []).length - linked.length,
+      ...compareEngines(byEngine),
+      notes: [
+        "UNTAGGED = trades whose signal predates engine tagging (or was created by a code path that doesn't set it); they are never assumed to be any particular engine.",
+        "Verdicts use a 95% bootstrap interval on the difference in average result per trade; anything short of a clear separation is reported as NO_CLEAR_DIFFERENCE or INSUFFICIENT_DATA.",
+        "Does not include Claude API cost — HYBRID_AI/AI results are gross of it.",
+      ],
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

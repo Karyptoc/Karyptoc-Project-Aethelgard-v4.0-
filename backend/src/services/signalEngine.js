@@ -748,6 +748,14 @@ async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
     // ── Trading mode selection ────────────────────────────────────────────────
     const tradingMode = await getTradingMode();
     let analysis = null;
+    // NEW (Roadmap Phase 5, model evaluation): which decision path actually
+    // produced this signal. Needed because "Pure Math vs Hybrid" can't be
+    // compared after the fact otherwise - HYBRID alone isn't enough, since
+    // it routes each setup to EITHER Claude or the pure-math fallback
+    // depending on score, and those two outcomes must be evaluated
+    // separately. Written into the signal's regime_detail (JSONB, no schema
+    // change) and read back by GET /api/dashboard/model-eval.
+    let decisionEngine = tradingMode; // PURE_MATH | SCALP | AI by default
 
     if (tradingMode === TRADING_MODES.SCALP) {
       const m5Atr = m5Bars ? atrCalc(m5Bars, 14) : null;
@@ -771,8 +779,10 @@ async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
       // Everything else decided by pure math
       if (confluence.score >= 65 || ictSequence.hasFullSequence) {
         await log("info", "signalEngine", `${symbol}: HYBRID mode — score ${confluence.score} qualifies for AI analysis`);
+        decisionEngine = "HYBRID_AI";
         analysis = await analyzeWithClaude(symbol, multiTFData, session, confluence, htfBias, perf, atrInfo, ictSequence, primaryInd?.trendState, fundamentalBias);
       } else {
+        decisionEngine = "HYBRID_MATH";
         const pureMathInd = poiStructure ? { ...primaryInd, bos: poiStructure.bos, choch: poiStructure.choch } : primaryInd;
         analysis = makePureMathDecision(confluence, htfBias, ictSequence, pureMathInd, session);
         await log("info", "signalEngine", `${symbol}: HYBRID mode — score ${confluence.score} < 65, using pure math`);
@@ -1012,6 +1022,8 @@ async function generateSignalFromOHLCV(symbol, ohlcvData, spread = null) {
         tp1: sltp.tp1, tp2: sltp.tp2, tp3: sltp.tp3,
         tp1_logic: analysis.tp1_logic,
         tp2_logic: analysis.tp2_logic,
+        decision_engine: decisionEngine,
+        trading_mode: tradingMode,
         session: session.name,
         entry_model: session.entryModel,
         sess_quality: session.sessQuality,
