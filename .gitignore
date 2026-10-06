@@ -2,3 +2,9 @@ node_modules/
 *.log
 python-bridge/*.log
 .env
+
+aethelgard_bars.zip
+python-bridge/bars/
+
+aethelgard_research_data.zip
+python-bridge/research_data/
