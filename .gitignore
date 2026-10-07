@@ -8,3 +8,12 @@ python-bridge/bars/
 
 aethelgard_research_data.zip
 python-bridge/research_data/
+aethelgard_bars.zip
+python-bridge/bars/
+aethelgard_bridge.log
+mt5_*.csv
+aethelgard_research_data.zip
+python-bridge/research_data/
+aethelgard_ticks.zip
+python-bridge/tick_data/
+python-bridge/.backfill_done
