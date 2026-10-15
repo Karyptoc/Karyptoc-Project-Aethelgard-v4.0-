@@ -205,6 +205,7 @@ def run():
     done = load_done()
     cfg, cfg_at, symbol_map = None, 0, {}
     last_minute = None
+    ticks_ok = 0
     while True:
         try:
             now = datetime.now(timezone.utc)
@@ -260,6 +261,11 @@ def run():
             resp = api("POST", "/tick", payload)
             if not resp:
                 continue
+            ticks_ok += 1
+            if minute.minute % 15 == 0:   # heartbeat so the window shows the bridge is alive
+                held = ", ".join(f"{p['symbol']} {'BUY' if p['type'] == 0 else 'SELL'} {p['volume']}" for p in positions) or "none"
+                log.info(f"alive: {ticks_ok} check-ins OK since start | equity {acc.equity:,.2f} {acc.currency} | "
+                         f"strategy positions: {held} | instruments: {', '.join(instruments) or 'none'}")
             for cid in resp.get("needHistory", []):
                 sym = symbol_map.get(cid)
                 if sym:
