@@ -28,8 +28,14 @@ const NAV_GROUPS = [
       { to: "/signals",  icon: "⚡", label: "Signals" },
       { to: "/trades",   icon: "◆", label: "Journal" },
       { to: "/analytics",icon: "📊", label: "Analytics" },
-      { to: "/pairs",    icon: "⚙", label: "Pair Controls", badge: "halted" },
+      { to: "/pairs",    icon: "⚙", label: "Pair Controls (ICT engine)", badge: "halted" },
       { to: "/backtest", icon: "📈", label: "Backtest" },
+    ],
+  },
+  {
+    label: "Strategy engine (Strategies A/B/C)",
+    items: [
+      { to: "/strategy", icon: "🎯", label: "Strategy Control" },
     ],
   },
   {
@@ -48,7 +54,6 @@ const NAV_GROUPS = [
   {
     label: "System",
     items: [
-      { to: "/strategy", icon: "🎯", label: "Strategy Control" },
       { to: "/system",   icon: "🖥", label: "System" },
       { to: "/settings", icon: "⚙", label: "Settings" },
     ],

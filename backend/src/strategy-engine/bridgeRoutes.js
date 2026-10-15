@@ -77,7 +77,10 @@ async function accountState(acc) {
   if (st.day_key !== dayKey) { st.day_key = dayKey; st.start_of_day_equity = acc.equity; }
   if (st.week_key !== weekKey) { st.week_key = weekKey; st.start_of_week_equity = acc.equity; }
   st.peak_equity = Math.max(Number(st.peak_equity), acc.equity);
-  await db.from('strategy_account_state').upsert({ ...st, updated_at: now.toISOString() });
+  const extra = { equity: acc.equity, balance: acc.balance ?? null, currency: acc.currency || null, server: acc.server || null,
+    margin: acc.margin ?? null, margin_free: acc.margin_free ?? null, trade_mode: acc.trade_mode ?? null };
+  const { error: upErr } = await db.from('strategy_account_state').upsert({ ...st, ...extra, updated_at: now.toISOString() });
+  if (upErr) await db.from('strategy_account_state').upsert({ ...st, updated_at: now.toISOString() }); // before the stage 3 migration
   return {
     login, tradeModeDemo: acc.trade_mode === 0, equity: acc.equity, marginUsed: acc.margin || 0,
     startOfDayEquity: Number(st.start_of_day_equity), startOfWeekEquity: Number(st.start_of_week_equity), peakEquity: Number(st.peak_equity),

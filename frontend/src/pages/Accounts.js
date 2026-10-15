@@ -16,10 +16,27 @@ export default function Accounts() {
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [strategyAccounts, setStrategyAccounts] = useState([]);
 
   const load = async () => {
     const r = await api.get("/api/accounts");
     setAccounts(r.data.accounts || []);
+    try {
+      const s = await api.get("/api/accounts/strategy-engine");
+      setStrategyAccounts(s.data.accounts || []);
+    } catch { setStrategyAccounts([]); }
+  };
+
+  const removeAccount = async (acc) => {
+    if (acc.is_connected) { window.alert("Disable this account and stop its bridge before removing it."); return; }
+    if (!window.confirm(`Remove "${acc.label}" (${acc.login})?\n\nIf it has no trade history it is deleted. If it has history, it is archived: hidden and switched off, with its trades kept.`)) return;
+    try {
+      const r = await api.delete(`/api/accounts/${acc.id}`);
+      if (r.data.removed === "archived") window.alert(`Archived: ${r.data.trades} trade(s) of history kept.`);
+      await load();
+    } catch (err) {
+      window.alert(err.response?.data?.error || "Failed to remove account");
+    }
   };
 
   useEffect(() => { load(); }, []);
@@ -121,12 +138,15 @@ export default function Accounts() {
                       {acc.last_sync ? new Date(acc.last_sync).toLocaleString() : "Never"}
                     </td>
                     <td>
-                      <button
-                        className={`btn btn-sm ${acc.is_active ? "btn-ghost" : "btn-primary"}`}
-                        onClick={() => toggleActive(acc.id, acc.is_active)}
-                      >
-                        {acc.is_active ? "DISABLE" : "ENABLE"}
-                      </button>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          className={`btn btn-sm ${acc.is_active ? "btn-ghost" : "btn-primary"}`}
+                          onClick={() => toggleActive(acc.id, acc.is_active)}
+                        >
+                          {acc.is_active ? "DISABLE" : "ENABLE"}
+                        </button>
+                        <button className="btn btn-sm btn-danger" onClick={() => removeAccount(acc)}>REMOVE</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -134,6 +154,47 @@ export default function Accounts() {
             </table>
           </div>
         )}
+
+        {/* Strategy engine account (Strategies A/B), reported by strategy_bridge.py */}
+        <div className="card" style={{ marginTop: 20 }}>
+          <div className="card-header">
+            <span className="card-title">Strategy engine account (Strategy Control)</span>
+            <span className="badge blue">READ-ONLY</span>
+          </div>
+          {strategyAccounts.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No strategy bridge has connected yet. Start python-bridge/start_strategy_bridge.bat.</div>
+          ) : (
+            <table>
+              <thead>
+                <tr><th>Login</th><th>Server</th><th>Type</th><th>Balance</th><th>Equity</th><th>Floating P&amp;L</th><th>Free margin</th><th>Status</th><th>Last seen</th></tr>
+              </thead>
+              <tbody>
+                {strategyAccounts.map(a => {
+                  const online = a.updated_at && (Date.now() - new Date(a.updated_at).getTime()) < 3 * 60000;
+                  const ccy = a.currency || "";
+                  const fmt = v => v == null ? "—" : `${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${ccy}`;
+                  const pnl = a.balance != null && a.equity != null ? Number(a.equity) - Number(a.balance) : null;
+                  return (
+                    <tr key={a.login}>
+                      <td className="mono">{a.login}</td>
+                      <td className="mono" style={{ fontSize: 11, color: "var(--text-muted)" }}>{a.server || "—"}</td>
+                      <td><span className={`badge ${a.trade_mode === 0 ? "blue" : "bear"}`}>{a.trade_mode === 0 ? "DEMO" : a.trade_mode == null ? "—" : "REAL"}</span></td>
+                      <td className="mono">{fmt(a.balance)}</td>
+                      <td className="mono">{fmt(a.equity)}</td>
+                      <td><span className={(pnl || 0) >= 0 ? "pnl-pos" : "pnl-neg"}>{pnl == null ? "—" : `${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}`}</span></td>
+                      <td className="mono">{fmt(a.margin_free)}</td>
+                      <td><span className={`badge ${online ? "bull" : "muted"}`}>{online ? "LIVE" : "OFFLINE"}</span></td>
+                      <td className="mono" style={{ fontSize: 10, color: "var(--text-muted)" }}>{a.updated_at ? new Date(a.updated_at).toLocaleString() : "Never"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
+            This account is set in python-bridge/.env.strategy and controlled from Strategy Control. Do not add it to the list above: that list is for the original ICT/SMC engine and its bridge.
+          </div>
+        </div>
 
         {/* Bridge instructions */}
         <div className="card" style={{ marginTop: 20, borderColor: "var(--accent-glow)" }}>
