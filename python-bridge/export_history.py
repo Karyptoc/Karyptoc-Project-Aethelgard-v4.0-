@@ -14,10 +14,15 @@ Usage (Windows, MT5 open and logged in to the broker you want to profile):
   python export_history.py --broker XM --days 730
   python export_history.py --broker HFM --days 730 --upload   # also push specs/map to Supabase
 
+With more than one MT5 installed, point at the right terminal and log in explicitly
+(the password is asked for and never shown or saved):
+  python export_history.py --broker HFM --days 730 --path "C:\\Program Files\\HFM MetaTrader 5\\terminal64.exe" --login 12345678 --server "HFMarketsGlobal-Demo"
+
 Before running: in MT5 set Tools > Options > Charts > "Max. bars in chart" to Unlimited,
 otherwise the terminal may return less history than the server has.
 """
 import argparse
+import getpass
 import json
 import os
 import sys
@@ -157,12 +162,30 @@ def main():
     ap.add_argument("--server-time", choices=["auto", "ny_close", "utc"], default="auto")
     ap.add_argument("--override", action="append", default=[], help="CANON=BrokerSymbol, e.g. NAS100=US100Cash")
     ap.add_argument("--upload", action="store_true")
+    ap.add_argument("--path", help="full path to the broker's terminal64.exe (use when several MT5s are installed)")
+    ap.add_argument("--login", type=int, help="MT5 account number (password is prompted)")
+    ap.add_argument("--server", help="MT5 server name exactly as shown in the terminal login window")
     args = ap.parse_args()
 
     if mt5 is None:
         sys.exit("MetaTrader5 package not installed (pip install MetaTrader5); this script runs on Windows with MT5 open.")
-    if not mt5.initialize():
-        sys.exit(f"MT5 initialize failed: {mt5.last_error()}")
+    init_kwargs = {}
+    if args.path:
+        if not os.path.isfile(args.path):
+            sys.exit(f"Terminal not found: {args.path}")
+        init_kwargs["path"] = args.path
+    if args.login:
+        if not args.server:
+            sys.exit("--server is required with --login")
+        init_kwargs.update(login=args.login, server=args.server,
+                           password=getpass.getpass("MT5 password (input hidden): "))
+    if not mt5.initialize(**init_kwargs):
+        err = mt5.last_error()
+        hint = ""
+        if err and err[0] == -6:
+            hint = ("\nAuthorization failed: the terminal the script reached is not logged in, or the login/server/password is wrong."
+                    "\nFix: open the broker's MT5, log in with 'Save password' ticked, or run again with --path, --login and --server.")
+        sys.exit(f"MT5 initialize failed: {err}{hint}")
 
     acc, term = mt5.account_info(), mt5.terminal_info()
     print(f"Connected: {acc.company} / {acc.server} / account {acc.login} ({'DEMO' if acc.trade_mode == 0 else 'REAL/CONTEST'})")

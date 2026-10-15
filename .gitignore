@@ -20,3 +20,7 @@ python-bridge/.backfill_done
 
 # Strategy engine history exports (regenerate with export_history.py)
 python-bridge/exports/
+
+# Strategy bridge secrets and local state
+python-bridge/.env.strategy
+python-bridge/strategy_bridge_done.json

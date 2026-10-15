@@ -25,6 +25,7 @@ const backtestRoutes = require("./routes/backtest");
 const copyTradingRoutes = require("./routes/copyTrading");
 const exportRoutes = require("./routes/export");
 const strategyAdminRoutes = require("./strategy-engine/adminRoutes"); // NEW: strategy engine admin (A/B/C)
+const strategyBridgeRoutes = require("./strategy-engine/bridgeRoutes"); // NEW: HFM strategy bridge (A/B demo trading)
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -68,6 +69,7 @@ app.use("/api/copy-trading", copyTradingRoutes);
 app.use("/api/backtest", backtestRoutes);
 app.use("/api/export", exportRoutes);
 app.use("/api/strategy-admin", strategyAdminRoutes); // NEW: strategy engine admin (A/B/C)
+app.use("/api/strategy-bridge", strategyBridgeRoutes); // NEW: HFM strategy bridge (A/B demo trading)
 
 // Health check (used by UptimeRobot)
 app.get("/health", (req, res) => {

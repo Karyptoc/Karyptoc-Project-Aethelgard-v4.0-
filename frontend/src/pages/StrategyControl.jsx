@@ -65,6 +65,12 @@ export default function StrategyControl() {
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+  useEffect(() => {
+    const iv = setInterval(async () => {
+      try { const st = await api.get("/api/strategy-admin/status"); setStatus(st.data); } catch { /* keep last view */ }
+    }, 60000);
+    return () => clearInterval(iv);
+  }, []);
 
   const get = (path) => (path in pending ? pending[path] : path.split(".").reduce((o, k) => (o == null ? o : o[k]), settings));
   const set = (path, value) => setPending((p) => ({ ...p, [path]: value }));
@@ -260,6 +266,47 @@ export default function StrategyControl() {
             <button className="btn btn-ghost" disabled={!nPending || busy} onClick={() => setPending({})}>Discard</button>
           </div>
         </div>
+
+        {status && (
+          <div className="card">
+            <div className="card-header"><div className="card-title">Live activity (strategy bridge)</div></div>
+            {(() => {
+              const b = status.bridge;
+              const ageMin = b ? (Date.now() - new Date(b.updated_at).getTime()) / 60000 : null;
+              const ok = ageMin != null && ageMin < 3;
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <span style={{ color: ok ? "var(--bull)" : "var(--bear)", fontWeight: 700 }}>{ok ? "● Bridge online" : "● Bridge offline"}</span>
+                  <span style={small}>{b ? ` · account ${b.login} · last seen ${new Date(b.updated_at).toLocaleString()}` : " · never connected"}</span>
+                </div>
+              );
+            })()}
+            <div className="card-title" style={{ marginTop: 8 }}>Recent decisions</div>
+            {status.recentEvaluations.length === 0 ? <div style={small}>None yet — decisions appear at each half-hour checkpoint during the session.</div> : (
+              <div className="table-wrap"><table style={{ width: "100%", fontSize: 12 }}>
+                <thead><tr><th align="left">Time</th><th>Strat</th><th align="left">Instrument</th><th align="left">Action</th><th>Price</th><th>Upper</th><th>Lower</th><th>VWAP</th><th align="left">Reason</th></tr></thead>
+                <tbody>{status.recentEvaluations.map((e, i) => (
+                  <tr key={i}><td>{new Date(e.eval_time).toLocaleString()}</td><td align="center">{e.strategy_id}</td><td>{e.instrument}</td>
+                    <td>{e.action}{e.mode === "shadow" ? " (shadow)" : ""}</td>
+                    {[e.price, e.ub, e.lb, e.vwap].map((v, j) => <td key={j} align="right" className="mono">{v == null ? "—" : Number(v).toFixed(2)}</td>)}
+                    <td>{e.reason}</td></tr>))}</tbody>
+              </table></div>
+            )}
+            <div className="card-title" style={{ marginTop: 16 }}>Strategy trades</div>
+            {status.recentTrades.length === 0 ? <div style={small}>No trades yet.</div> : (
+              <div className="table-wrap"><table style={{ width: "100%", fontSize: 12 }}>
+                <thead><tr><th align="left">Opened</th><th>Strat</th><th align="left">Symbol</th><th>Side</th><th>Lots</th><th>Open</th><th>Close</th><th>Exit</th><th>P&amp;L</th><th>Status</th></tr></thead>
+                <tbody>{status.recentTrades.map((t) => (
+                  <tr key={`${t.account_login}-${t.position_id}`}><td>{t.open_time ? new Date(t.open_time).toLocaleString() : "—"}</td><td align="center">{t.strategy_id}</td>
+                    <td>{t.broker_symbol}</td><td align="center">{t.side}</td><td align="right">{t.lots}</td>
+                    <td align="right" className="mono">{t.open_price ?? "—"}</td><td align="right" className="mono">{t.close_price ?? "—"}</td>
+                    <td>{t.close_reason || ""}</td>
+                    <td align="right" className="mono" style={{ color: Number(t.profit) >= 0 ? "var(--bull)" : "var(--bear)" }}>{t.profit == null ? "—" : Number(t.profit).toFixed(2)}</td>
+                    <td align="center">{t.status}</td></tr>))}</tbody>
+              </table></div>
+            )}
+          </div>
+        )}
 
         {status && (
           <div className="card">

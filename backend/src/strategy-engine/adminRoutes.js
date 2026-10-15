@@ -105,11 +105,17 @@ router.get('/audit', async (req, res) => {
 
 router.get('/status', async (req, res) => {
   try {
-    const [skips, recon] = await Promise.all([
+    const [skips, recon, evals, trades, acct] = await Promise.all([
       supabase.from('risk_decisions').select('strategy_id, symbol, skip_reason, created_at').eq('approved', false).order('created_at', { ascending: false }).limit(50),
       supabase.from('reconciliations').select('*').order('created_at', { ascending: false }).limit(1),
+      supabase.from('evaluations').select('strategy_id, instrument, eval_time, price, ub, lb, vwap, position_before, target, action, reason, mode').order('eval_time', { ascending: false }).limit(30),
+      supabase.from('strategy_trades').select('*').order('open_time', { ascending: false }).limit(30),
+      supabase.from('strategy_account_state').select('*').order('updated_at', { ascending: false }).limit(1),
     ]);
-    res.json({ recentSkips: skips.data || [], lastReconciliation: (recon.data || [])[0] || null });
+    res.json({
+      recentSkips: skips.data || [], lastReconciliation: (recon.data || [])[0] || null,
+      recentEvaluations: evals.data || [], recentTrades: trades.data || [], bridge: (acct.data || [])[0] || null,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
