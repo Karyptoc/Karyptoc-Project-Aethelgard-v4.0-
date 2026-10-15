@@ -48,6 +48,7 @@ const NAV_GROUPS = [
   {
     label: "System",
     items: [
+      { to: "/strategy", icon: "🎯", label: "Strategy Control" },
       { to: "/system",   icon: "🖥", label: "System" },
       { to: "/settings", icon: "⚙", label: "Settings" },
     ],

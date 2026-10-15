@@ -14,6 +14,7 @@ import SystemControl from "./pages/SystemControl";
 import PairControls from "./pages/PairControls";
 import Backtest from "./pages/Backtest";
 import Settings from "./pages/Settings";
+import StrategyControl from "./pages/StrategyControl";
 import ClientPortal from "./pages/ClientPortal";
 import ClientPortalPublic from "./pages/ClientPortalPublic";
 import ClientManagement from "./pages/ClientManagement";
@@ -77,6 +78,7 @@ export default function App() {
               <Route path="pairs" element={<PairControls />} />
               <Route path="backtest" element={<Backtest />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="strategy" element={<StrategyControl />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
             <Route path="/client" element={<ProtectedRoute><ClientLayout /></ProtectedRoute>}>

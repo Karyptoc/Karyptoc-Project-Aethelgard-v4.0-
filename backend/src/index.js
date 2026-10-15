@@ -24,6 +24,7 @@ const pairsRoutes = require("./routes/pairs");
 const backtestRoutes = require("./routes/backtest");
 const copyTradingRoutes = require("./routes/copyTrading");
 const exportRoutes = require("./routes/export");
+const strategyAdminRoutes = require("./strategy-engine/adminRoutes"); // NEW: strategy engine admin (A/B/C)
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -66,6 +67,7 @@ app.use("/api/pairs", pairsRoutes);
 app.use("/api/copy-trading", copyTradingRoutes);
 app.use("/api/backtest", backtestRoutes);
 app.use("/api/export", exportRoutes);
+app.use("/api/strategy-admin", strategyAdminRoutes); // NEW: strategy engine admin (A/B/C)
 
 // Health check (used by UptimeRobot)
 app.get("/health", (req, res) => {

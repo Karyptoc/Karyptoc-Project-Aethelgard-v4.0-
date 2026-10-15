@@ -17,3 +17,6 @@ python-bridge/research_data/
 aethelgard_ticks.zip
 python-bridge/tick_data/
 python-bridge/.backfill_done
+
+# Strategy engine history exports (regenerate with export_history.py)
+python-bridge/exports/
