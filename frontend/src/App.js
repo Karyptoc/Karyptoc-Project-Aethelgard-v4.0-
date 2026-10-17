@@ -15,6 +15,8 @@ import PairControls from "./pages/PairControls";
 import Backtest from "./pages/Backtest";
 import Settings from "./pages/Settings";
 import StrategyControl from "./pages/StrategyControl";
+import StrategyJournal from "./pages/StrategyJournal";
+import StrategySignals from "./pages/StrategySignals";
 import ClientPortal from "./pages/ClientPortal";
 import ClientPortalPublic from "./pages/ClientPortalPublic";
 import ClientManagement from "./pages/ClientManagement";
@@ -79,6 +81,8 @@ export default function App() {
               <Route path="backtest" element={<Backtest />} />
               <Route path="settings" element={<Settings />} />
               <Route path="strategy" element={<StrategyControl />} />
+              <Route path="strategy/signals" element={<StrategySignals />} />
+              <Route path="strategy/journal" element={<StrategyJournal />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
             <Route path="/client" element={<ProtectedRoute><ClientLayout /></ProtectedRoute>}>

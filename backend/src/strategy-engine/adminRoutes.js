@@ -9,6 +9,7 @@ const express = require('express');
 const { supabaseAdmin: supabase, log } = require('../services/supabase');
 const { verifyToken } = require('../middleware/auth');
 const { applyAdminChange, defaultSettings, CEILINGS } = require('./adminSettings');
+const journal = require('./journalStats');
 
 async function loadSettings() {
   const { data, error } = await supabase.from('strategy_admin_settings').select('settings, version').eq('id', 1).maybeSingle();
@@ -116,6 +117,109 @@ router.get('/status', async (req, res) => {
       recentSkips: skips.data || [], lastReconciliation: (recon.data || [])[0] || null,
       recentEvaluations: evals.data || [], recentTrades: trades.data || [], bridge: (acct.data || [])[0] || null,
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ------------------------------------------------------------------ journal
+// Strategy-engine trades, rebuilt by the bridge from MT5's own deal history (strategy_trades),
+// joined with the evaluation that opened each one and any operator note.
+async function loadJournal(q) {
+  let query = supabase.from('strategy_trades').select('*').order('open_time', { ascending: false }).limit(Math.min(Number(q.limit) || 2000, 5000));
+  if (q.strategy) query = query.eq('strategy_id', q.strategy);
+  if (q.status && q.status !== 'all') query = query.eq('status', q.status);
+  if (q.symbol) query = query.eq('broker_symbol', q.symbol);
+  if (q.account) query = query.eq('account_login', q.account);
+  if (q.from) query = query.gte('open_time', q.from);
+  if (q.to) query = query.lte('open_time', q.to);
+  const { data: trades, error } = await query;
+  if (error) throw error;
+  const keys = [...new Set((trades || []).map((t) => t.order_key).filter(Boolean))];
+  const evs = [];
+  for (let i = 0; i < keys.length; i += 200) {
+    const { data } = await supabase.from('evaluations').select('order_key, reason, action, price, ub, lb, vwap, checkpoint_minute').in('order_key', keys.slice(i, i + 200));
+    evs.push(...(data || []));
+  }
+  // notes table arrives with supabase_migration_strategy_journal.sql; the journal still works before it is run
+  const { data: notes } = await supabase.from('strategy_trade_notes').select('*');
+  const evByKey = new Map(evs.map((e) => [e.order_key, e]));
+  const noteByPos = new Map((notes || []).map((n) => [`${n.account_login}|${n.position_id}`, n]));
+  return (trades || []).map((t) => {
+    const ev = evByKey.get(t.order_key);
+    const n = noteByPos.get(`${t.account_login}|${t.position_id}`);
+    return { ...t, entry_reason: ev ? ev.reason : null, entry_action: ev ? ev.action : null,
+      entry_levels: ev ? { price: ev.price, ub: ev.ub, lb: ev.lb, vwap: ev.vwap, checkpoint: ev.checkpoint_minute } : null,
+      note: n ? n.note : '', tags: n ? n.tags || [] : [] };
+  });
+}
+
+router.get('/journal', async (req, res) => {
+  try {
+    const rows = await loadJournal(req.query);
+    const { data: acct } = await supabase.from('strategy_account_state').select('*').order('updated_at', { ascending: false }).limit(1);
+    const offset = Number(req.query.offset) || 0;
+    const pageSize = Math.min(Number(req.query.pageSize) || 100, 500);
+    res.json({
+      summary: journal.summarize(rows),
+      byStrategy: journal.breakdown(rows, 'strategy_id'),
+      bySymbol: journal.breakdown(rows, 'broker_symbol'),
+      trades: rows.slice(offset, offset + pageSize),
+      total: rows.length,
+      currency: acct && acct[0] ? acct[0].currency || null : null,
+      symbols: [...new Set(rows.map((r) => r.broker_symbol))].sort(),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/journal.csv', async (req, res) => {
+  try {
+    const rows = await loadJournal({ ...req.query, limit: 5000 });
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="strategy_journal_${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(journal.toCsv(rows));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/journal/note', async (req, res) => {
+  try {
+    const { account_login, position_id, note = '', tags = [] } = req.body || {};
+    if (!account_login || !position_id) return res.status(400).json({ error: 'account_login and position_id required' });
+    const cleanTags = (Array.isArray(tags) ? tags : String(tags).split(',')).map((t) => String(t).trim()).filter(Boolean).slice(0, 10);
+    const { error } = await supabase.from('strategy_trade_notes').upsert({
+      account_login: String(account_login), position_id: Number(position_id), note: String(note).slice(0, 4000), tags: cleanTags,
+      updated_by: actorOf(req), updated_at: new Date().toISOString(),
+    }, { onConflict: 'account_login,position_id' });
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ------------------------------------------------------------------ signals
+// Every checkpoint evaluation the engine made, with the risk layer's decision for it.
+router.get('/signals', async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 200, 1000);
+    let q = supabase.from('evaluations').select('*').order('eval_time', { ascending: false }).limit(limit);
+    if (req.query.strategy) q = q.eq('strategy_id', req.query.strategy);
+    if (req.query.instrument) q = q.eq('instrument', req.query.instrument);
+    if (req.query.actionable === '1') q = q.not('action', 'in', '("none","hold")');
+    if (req.query.from) q = q.gte('eval_time', req.query.from);
+    const { data: evals, error } = await q;
+    if (error) throw error;
+    const ids = (evals || []).map((e) => e.id);
+    const decisions = [];
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data } = await supabase.from('risk_decisions').select('evaluation_id, approved, shadow, skip_reason, desired_lots, final_lots, steps').in('evaluation_id', ids.slice(i, i + 200));
+      decisions.push(...(data || []));
+    }
+    const decByEval = new Map(decisions.map((d) => [d.evaluation_id, d]));
+    const signals = (evals || []).map((e) => ({ ...e, decision: decByEval.get(e.id) || null }));
+
+    // current state per market: latest evaluation in the last 24 hours
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const { data: recent } = await supabase.from('evaluations').select('*').gte('eval_time', since).order('eval_time', { ascending: false }).limit(2000);
+    const counts = {};
+    for (const e of recent || []) counts[e.action] = (counts[e.action] || 0) + 1;
+    res.json({ signals, markets: journal.latestByMarket(recent || []), last24h: counts });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
